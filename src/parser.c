@@ -859,6 +859,56 @@ static ASTNode *primary(Parser *parser) {
         return node_array(elements, count, line, column);
     }
     
+    // 辞書リテラル {...}
+    if (match(parser, TOKEN_LBRACE)) {
+        int capacity = 8;
+        int count = 0;
+        char **keys = malloc(sizeof(char *) * capacity);
+        ASTNode **values = malloc(sizeof(ASTNode *) * capacity);
+        
+        if (!check(parser, TOKEN_RBRACE)) {
+            do {
+                if (count >= capacity) {
+                    capacity *= 2;
+                    keys = realloc(keys, sizeof(char *) * capacity);
+                    values = realloc(values, sizeof(ASTNode *) * capacity);
+                }
+                
+                // キー（文字列または識別子）
+                if (check(parser, TOKEN_STRING)) {
+                    advance(parser);
+                    keys[count] = parser->previous.value.string;
+                } else if (check(parser, TOKEN_IDENTIFIER)) {
+                    advance(parser);
+                    keys[count] = copy_token_string(&parser->previous);
+                } else {
+                    error(parser, "辞書のキーは文字列または識別子でなければなりません");
+                    free(keys);
+                    free(values);
+                    return node_null(line, column);
+                }
+                
+                consume(parser, TOKEN_COLON, "':' が必要です");
+                values[count] = expression(parser);
+                count++;
+            } while (match(parser, TOKEN_COMMA));
+        }
+        
+        consume(parser, TOKEN_RBRACE, "'}' が必要です");
+        
+        if (count > 0) {
+            keys = realloc(keys, sizeof(char *) * count);
+            values = realloc(values, sizeof(ASTNode *) * count);
+        } else {
+            free(keys);
+            free(values);
+            keys = NULL;
+            values = NULL;
+        }
+        
+        return node_dict(keys, values, count, line, column);
+    }
+    
     error(parser, "式が必要です");
     return node_null(line, column);
 }

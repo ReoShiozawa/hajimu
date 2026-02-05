@@ -313,11 +313,19 @@ static void skip_whitespace(Lexer *lexer) {
             case '\r':
                 advance(lexer);
                 break;
-            case '#':  // コメント
+            case '#':  // コメント（#スタイル）
                 while (peek(lexer) != '\n' && !is_at_end(lexer)) {
                     advance(lexer);
                 }
                 break;
+            case '/':  // コメント（//スタイル）
+                if (peek_next(lexer) == '/') {
+                    while (peek(lexer) != '\n' && !is_at_end(lexer)) {
+                        advance(lexer);
+                    }
+                    break;
+                }
+                return;
             default:
                 return;
         }

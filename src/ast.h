@@ -45,6 +45,7 @@ typedef enum {
     NODE_STRING,            // 文字列リテラル
     NODE_BOOL,              // 真偽値リテラル
     NODE_ARRAY,             // 配列リテラル
+    NODE_DICT,              // 辞書リテラル
     NODE_NULL,              // null
     
     NODE_TYPE_COUNT
@@ -180,6 +181,13 @@ struct ASTNode {
             int capacity;           // 配列の容量
         } block;
         
+        // NODE_DICT
+        struct {
+            char **keys;            // キーの配列
+            ASTNode **values;       // 値の配列
+            int count;              // 要素数
+        } dict;
+        
         // NODE_EXPR_STMT
         struct {
             ASTNode *expression;    // 式
@@ -245,6 +253,11 @@ ASTNode *node_index(ASTNode *array, ASTNode *index, int line, int column);
  * 配列リテラルノードを作成
  */
 ASTNode *node_array(ASTNode **elements, int count, int line, int column);
+
+/**
+ * 辞書リテラルノードを作成
+ */
+ASTNode *node_dict(char **keys, ASTNode **values, int count, int line, int column);
 
 /**
  * 関数定義ノードを作成

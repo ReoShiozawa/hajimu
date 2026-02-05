@@ -25,6 +25,7 @@ typedef enum {
     VALUE_BOOL,         // 真偽値
     VALUE_STRING,       // 文字列
     VALUE_ARRAY,        // 配列
+    VALUE_DICT,         // 辞書（ハッシュマップ）
     VALUE_FUNCTION,     // ユーザー定義関数
     VALUE_BUILTIN,      // 組み込み関数
 } ValueType;
@@ -63,6 +64,14 @@ struct Value {
             int length;
             int capacity;
         } array;
+        
+        // 辞書（ハッシュマップ）
+        struct {
+            char **keys;
+            Value *values;
+            int length;
+            int capacity;
+        } dict;
         
         // ユーザー定義関数
         struct {
@@ -129,6 +138,16 @@ Value value_function(struct ASTNode *definition, struct Environment *closure);
  */
 Value value_builtin(BuiltinFn fn, const char *name, int min_args, int max_args);
 
+/**
+ * 空の辞書を作成
+ */
+Value value_dict(void);
+
+/**
+ * 辞書を作成（初期容量指定）
+ */
+Value value_dict_with_capacity(int capacity);
+
 // =============================================================================
 // 値の操作
 // =============================================================================
@@ -181,6 +200,45 @@ Value array_pop(Value *array);
  * 配列の長さを取得
  */
 int array_length(Value *array);
+
+// =============================================================================
+// 辞書操作
+// =============================================================================
+
+/**
+ * 辞書に要素を設定
+ */
+bool dict_set(Value *dict, const char *key, Value value);
+
+/**
+ * 辞書から要素を取得
+ */
+Value dict_get(Value *dict, const char *key);
+
+/**
+ * 辞書から要素を削除
+ */
+bool dict_delete(Value *dict, const char *key);
+
+/**
+ * 辞書にキーが存在するか
+ */
+bool dict_has(Value *dict, const char *key);
+
+/**
+ * 辞書のキー一覧を取得
+ */
+Value dict_keys(Value *dict);
+
+/**
+ * 辞書の値一覧を取得
+ */
+Value dict_values(Value *dict);
+
+/**
+ * 辞書の長さを取得
+ */
+int dict_length(Value *dict);
 
 // =============================================================================
 // 文字列操作

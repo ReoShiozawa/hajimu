@@ -102,6 +102,24 @@ Value value_builtin(BuiltinFn fn, const char *name, int min_args, int max_args) 
     return v;
 }
 
+Value value_dict(void) {
+    return value_dict_with_capacity(8);
+}
+
+Value value_dict_with_capacity(int capacity) {
+    Value v;
+    v.type = VALUE_DICT;
+    v.is_const = false;
+    v.ref_count = 1;
+    
+    v.dict.length = 0;
+    v.dict.capacity = capacity > 0 ? capacity : 8;
+    v.dict.keys = malloc(sizeof(char *) * v.dict.capacity);
+    v.dict.values = malloc(sizeof(Value) * v.dict.capacity);
+    
+    return v;
+}
+
 // =============================================================================
 // 値の操作
 // =============================================================================
@@ -120,6 +138,16 @@ Value value_copy(Value v) {
             copy.array.elements = malloc(sizeof(Value) * v.array.capacity);
             for (int i = 0; i < v.array.length; i++) {
                 copy.array.elements[i] = value_copy(v.array.elements[i]);
+            }
+            copy.ref_count = 1;
+            break;
+            
+        case VALUE_DICT:
+            copy.dict.keys = malloc(sizeof(char *) * v.dict.capacity);
+            copy.dict.values = malloc(sizeof(Value) * v.dict.capacity);
+            for (int i = 0; i < v.dict.length; i++) {
+                copy.dict.keys[i] = strdup(v.dict.keys[i]);
+                copy.dict.values[i] = value_copy(v.dict.values[i]);
             }
             copy.ref_count = 1;
             break;
@@ -157,6 +185,19 @@ void value_free(Value *v) {
             }
             break;
             
+        case VALUE_DICT:
+            if (v->dict.keys != NULL) {
+                for (int i = 0; i < v->dict.length; i++) {
+                    free(v->dict.keys[i]);
+                    value_free(&v->dict.values[i]);
+                }
+                free(v->dict.keys);
+                free(v->dict.values);
+                v->dict.keys = NULL;
+                v->dict.values = NULL;
+            }
+            break;
+            
         default:
             break;
     }
@@ -170,6 +211,7 @@ void value_retain(Value *v) {
     switch (v->type) {
         case VALUE_STRING:
         case VALUE_ARRAY:
+        case VALUE_DICT:
         case VALUE_FUNCTION:
             v->ref_count++;
             break;
@@ -184,6 +226,7 @@ void value_release(Value *v) {
     switch (v->type) {
         case VALUE_STRING:
         case VALUE_ARRAY:
+        case VALUE_DICT:
         case VALUE_FUNCTION:
             v->ref_count--;
             if (v->ref_count <= 0) {
@@ -254,6 +297,121 @@ int array_length(Value *array) {
         return 0;
     }
     return array->array.length;
+}
+
+// =============================================================================
+// 辞書操作
+// =============================================================================
+
+// 辞書内でキーのインデックスを検索
+static int dict_find_key(Value *dict, const char *key) {
+    for (int i = 0; i < dict->dict.length; i++) {
+        if (strcmp(dict->dict.keys[i], key) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool dict_set(Value *dict, const char *key, Value value) {
+    if (dict == NULL || dict->type != VALUE_DICT || key == NULL) return false;
+    
+    // 既存のキーを検索
+    int idx = dict_find_key(dict, key);
+    
+    if (idx >= 0) {
+        // 既存のキーを更新
+        value_free(&dict->dict.values[idx]);
+        dict->dict.values[idx] = value_copy(value);
+        return true;
+    }
+    
+    // 容量が足りなければ拡張
+    if (dict->dict.length >= dict->dict.capacity) {
+        dict->dict.capacity *= 2;
+        dict->dict.keys = realloc(dict->dict.keys, sizeof(char *) * dict->dict.capacity);
+        dict->dict.values = realloc(dict->dict.values, sizeof(Value) * dict->dict.capacity);
+    }
+    
+    // 新しいキーを追加
+    dict->dict.keys[dict->dict.length] = strdup(key);
+    dict->dict.values[dict->dict.length] = value_copy(value);
+    dict->dict.length++;
+    
+    return true;
+}
+
+Value dict_get(Value *dict, const char *key) {
+    if (dict == NULL || dict->type != VALUE_DICT || key == NULL) {
+        return value_null();
+    }
+    
+    int idx = dict_find_key(dict, key);
+    if (idx >= 0) {
+        return dict->dict.values[idx];
+    }
+    
+    return value_null();
+}
+
+bool dict_delete(Value *dict, const char *key) {
+    if (dict == NULL || dict->type != VALUE_DICT || key == NULL) return false;
+    
+    int idx = dict_find_key(dict, key);
+    if (idx < 0) return false;
+    
+    // キーと値を解放
+    free(dict->dict.keys[idx]);
+    value_free(&dict->dict.values[idx]);
+    
+    // 最後の要素で穴を埋める
+    if (idx < dict->dict.length - 1) {
+        dict->dict.keys[idx] = dict->dict.keys[dict->dict.length - 1];
+        dict->dict.values[idx] = dict->dict.values[dict->dict.length - 1];
+    }
+    dict->dict.length--;
+    
+    return true;
+}
+
+bool dict_has(Value *dict, const char *key) {
+    if (dict == NULL || dict->type != VALUE_DICT || key == NULL) return false;
+    return dict_find_key(dict, key) >= 0;
+}
+
+Value dict_keys(Value *dict) {
+    if (dict == NULL || dict->type != VALUE_DICT) {
+        return value_array();
+    }
+    
+    Value keys = value_array_with_capacity(dict->dict.length);
+    for (int i = 0; i < dict->dict.length; i++) {
+        Value key = value_string(dict->dict.keys[i]);
+        array_push(&keys, key);
+        value_free(&key);
+    }
+    
+    return keys;
+}
+
+Value dict_values(Value *dict) {
+    if (dict == NULL || dict->type != VALUE_DICT) {
+        return value_array();
+    }
+    
+    Value vals = value_array_with_capacity(dict->dict.length);
+    for (int i = 0; i < dict->dict.length; i++) {
+        array_push(&vals, dict->dict.values[i]);
+    }
+    
+    return vals;
+}
+
+int dict_length(Value *dict) {
+    if (dict == NULL || dict->type != VALUE_DICT) {
+        return 0;
+    }
+    return dict->dict.length;
 }
 
 // =============================================================================
@@ -359,6 +517,8 @@ bool value_is_truthy(Value v) {
             return v.string.length > 0;
         case VALUE_ARRAY:
             return v.array.length > 0;
+        case VALUE_DICT:
+            return v.dict.length > 0;
         case VALUE_FUNCTION:
         case VALUE_BUILTIN:
             return true;
@@ -373,6 +533,7 @@ const char *value_type_name(ValueType type) {
         case VALUE_BOOL:     return "真偽";
         case VALUE_STRING:   return "文字列";
         case VALUE_ARRAY:    return "配列";
+        case VALUE_DICT:     return "辞書";
         case VALUE_FUNCTION: return "関数";
         case VALUE_BUILTIN:  return "組み込み関数";
     }
@@ -401,7 +562,7 @@ char *value_to_string(Value v) {
         }
         
         case VALUE_BOOL:
-            buffer = malloc(3);
+            buffer = malloc(strlen(v.boolean ? "真" : "偽") + 1);
             strcpy(buffer, v.boolean ? "真" : "偽");
             break;
             
@@ -442,6 +603,55 @@ char *value_to_string(Value v) {
             }
             
             buffer[length++] = ']';
+            buffer[length] = '\0';
+            break;
+        }
+        
+        case VALUE_DICT: {
+            // 辞書を文字列化
+            size_t capacity = 64;
+            size_t length = 0;
+            buffer = malloc(capacity);
+            buffer[length++] = '{';
+            
+            for (int i = 0; i < v.dict.length; i++) {
+                if (i > 0) {
+                    if (length + 2 >= capacity) {
+                        capacity *= 2;
+                        buffer = realloc(buffer, capacity);
+                    }
+                    buffer[length++] = ',';
+                    buffer[length++] = ' ';
+                }
+                
+                // キー
+                size_t key_len = strlen(v.dict.keys[i]);
+                while (length + key_len + 5 >= capacity) {
+                    capacity *= 2;
+                    buffer = realloc(buffer, capacity);
+                }
+                buffer[length++] = '"';
+                memcpy(buffer + length, v.dict.keys[i], key_len);
+                length += key_len;
+                buffer[length++] = '"';
+                buffer[length++] = ':';
+                buffer[length++] = ' ';
+                
+                // 値
+                char *val_str = value_to_string(v.dict.values[i]);
+                size_t val_len = strlen(val_str);
+                
+                while (length + val_len + 2 >= capacity) {
+                    capacity *= 2;
+                    buffer = realloc(buffer, capacity);
+                }
+                
+                memcpy(buffer + length, val_str, val_len);
+                length += val_len;
+                free(val_str);
+            }
+            
+            buffer[length++] = '}';
             buffer[length] = '\0';
             break;
         }
@@ -502,6 +712,14 @@ bool value_equals(Value a, Value b) {
                 if (!value_equals(a.array.elements[i], b.array.elements[i])) {
                     return false;
                 }
+            }
+            return true;
+        case VALUE_DICT:
+            if (a.dict.length != b.dict.length) return false;
+            for (int i = 0; i < a.dict.length; i++) {
+                // キーが同じ順序で同じ値を持っているか確認
+                if (strcmp(a.dict.keys[i], b.dict.keys[i]) != 0) return false;
+                if (!value_equals(a.dict.values[i], b.dict.values[i])) return false;
             }
             return true;
         case VALUE_FUNCTION:

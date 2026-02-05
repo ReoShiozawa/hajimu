@@ -34,6 +34,7 @@ static const char *node_type_names[] = {
     [NODE_STRING] = "STRING",
     [NODE_BOOL] = "BOOL",
     [NODE_ARRAY] = "ARRAY",
+    [NODE_DICT] = "DICT",
     [NODE_NULL] = "NULL",
 };
 
@@ -113,6 +114,14 @@ ASTNode *node_array(ASTNode **elements, int count, int line, int column) {
     node->block.statements = elements;
     node->block.count = count;
     node->block.capacity = count;
+    return node;
+}
+
+ASTNode *node_dict(char **keys, ASTNode **values, int count, int line, int column) {
+    ASTNode *node = node_new(NODE_DICT, line, column);
+    node->dict.keys = keys;
+    node->dict.values = values;
+    node->dict.count = count;
     return node;
 }
 
@@ -340,6 +349,15 @@ void node_free(ASTNode *node) {
             free(node->block.statements);
             break;
             
+        case NODE_DICT:
+            for (int i = 0; i < node->dict.count; i++) {
+                free(node->dict.keys[i]);
+                node_free(node->dict.values[i]);
+            }
+            free(node->dict.keys);
+            free(node->dict.values);
+            break;
+            
         default:
             break;
     }
@@ -531,6 +549,15 @@ void ast_print(ASTNode *node, int indent) {
             printf("Array:\n");
             for (int i = 0; i < node->block.count; i++) {
                 ast_print(node->block.statements[i], indent + 1);
+            }
+            break;
+            
+        case NODE_DICT:
+            printf("Dict:\n");
+            for (int i = 0; i < node->dict.count; i++) {
+                print_indent(indent + 1);
+                printf("Key: \"%s\"\n", node->dict.keys[i]);
+                ast_print(node->dict.values[i], indent + 2);
             }
             break;
             

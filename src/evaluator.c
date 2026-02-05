@@ -48,6 +48,37 @@ static Value builtin_random(int argc, Value *argv);
 static Value builtin_max(int argc, Value *argv);
 static Value builtin_min(int argc, Value *argv);
 
+// 辞書関数
+static Value builtin_dict_keys(int argc, Value *argv);
+static Value builtin_dict_values(int argc, Value *argv);
+static Value builtin_dict_has(int argc, Value *argv);
+
+// 文字列関数
+static Value builtin_split(int argc, Value *argv);
+static Value builtin_join(int argc, Value *argv);
+static Value builtin_find(int argc, Value *argv);
+static Value builtin_replace(int argc, Value *argv);
+static Value builtin_upper(int argc, Value *argv);
+static Value builtin_lower(int argc, Value *argv);
+static Value builtin_trim(int argc, Value *argv);
+
+// 配列関数
+static Value builtin_sort(int argc, Value *argv);
+static Value builtin_reverse(int argc, Value *argv);
+static Value builtin_slice(int argc, Value *argv);
+static Value builtin_index_of(int argc, Value *argv);
+static Value builtin_contains(int argc, Value *argv);
+
+// ファイル関数
+static Value builtin_file_read(int argc, Value *argv);
+static Value builtin_file_write(int argc, Value *argv);
+static Value builtin_file_exists(int argc, Value *argv);
+
+// 日時関数
+static Value builtin_now(int argc, Value *argv);
+static Value builtin_date(int argc, Value *argv);
+static Value builtin_time(int argc, Value *argv);
+
 // =============================================================================
 // 評価器の初期化・解放
 // =============================================================================
@@ -125,6 +156,58 @@ void register_builtins(Evaluator *eval) {
                value_builtin(builtin_max, "最大", 1, -1), true);
     env_define(eval->global, "最小",
                value_builtin(builtin_min, "最小", 1, -1), true);
+    
+    // 辞書関数
+    env_define(eval->global, "キー",
+               value_builtin(builtin_dict_keys, "キー", 1, 1), true);
+    env_define(eval->global, "値一覧",
+               value_builtin(builtin_dict_values, "値一覧", 1, 1), true);
+    env_define(eval->global, "含む",
+               value_builtin(builtin_dict_has, "含む", 2, 2), true);
+    
+    // 文字列関数
+    env_define(eval->global, "分割",
+               value_builtin(builtin_split, "分割", 2, 2), true);
+    env_define(eval->global, "結合",
+               value_builtin(builtin_join, "結合", 2, 2), true);
+    env_define(eval->global, "検索",
+               value_builtin(builtin_find, "検索", 2, 2), true);
+    env_define(eval->global, "置換",
+               value_builtin(builtin_replace, "置換", 3, 3), true);
+    env_define(eval->global, "大文字",
+               value_builtin(builtin_upper, "大文字", 1, 1), true);
+    env_define(eval->global, "小文字",
+               value_builtin(builtin_lower, "小文字", 1, 1), true);
+    env_define(eval->global, "空白除去",
+               value_builtin(builtin_trim, "空白除去", 1, 1), true);
+    
+    // 配列関数
+    env_define(eval->global, "ソート",
+               value_builtin(builtin_sort, "ソート", 1, 1), true);
+    env_define(eval->global, "逆順",
+               value_builtin(builtin_reverse, "逆順", 1, 1), true);
+    env_define(eval->global, "スライス",
+               value_builtin(builtin_slice, "スライス", 2, 3), true);
+    env_define(eval->global, "位置",
+               value_builtin(builtin_index_of, "位置", 2, 2), true);
+    env_define(eval->global, "存在",
+               value_builtin(builtin_contains, "存在", 2, 2), true);
+    
+    // ファイル関数
+    env_define(eval->global, "読み込む",
+               value_builtin(builtin_file_read, "読み込む", 1, 1), true);
+    env_define(eval->global, "書き込む",
+               value_builtin(builtin_file_write, "書き込む", 2, 2), true);
+    env_define(eval->global, "ファイル存在",
+               value_builtin(builtin_file_exists, "ファイル存在", 1, 1), true);
+    
+    // 日時関数
+    env_define(eval->global, "現在時刻",
+               value_builtin(builtin_now, "現在時刻", 0, 0), true);
+    env_define(eval->global, "日付",
+               value_builtin(builtin_date, "日付", 0, 1), true);
+    env_define(eval->global, "時間",
+               value_builtin(builtin_time, "時間", 0, 1), true);
 }
 
 // =============================================================================
@@ -255,6 +338,16 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
                 Value elem = evaluate(eval, node->block.statements[i]);
                 if (eval->had_error) break;
                 array_push(&result, elem);
+            }
+            break;
+        }
+        
+        case NODE_DICT: {
+            result = value_dict_with_capacity(node->dict.count);
+            for (int i = 0; i < node->dict.count; i++) {
+                Value val = evaluate(eval, node->dict.values[i]);
+                if (eval->had_error) break;
+                dict_set(&result, node->dict.keys[i], val);
             }
             break;
         }
@@ -649,8 +742,18 @@ static Value evaluate_index(Evaluator *eval, ASTNode *node) {
         return string_substring(&array, idx, idx + 1);
     }
     
+    if (array.type == VALUE_DICT) {
+        if (index.type != VALUE_STRING) {
+            runtime_error(eval, node->location.line,
+                         "辞書のキーは文字列でなければなりません");
+            return value_null();
+        }
+        
+        return dict_get(&array, index.string.data);
+    }
+    
     runtime_error(eval, node->location.line,
-                 "インデックスアクセスは配列または文字列にのみ使用できます");
+                 "インデックスアクセスは配列、文字列、辞書にのみ使用できます");
     return value_null();
 }
 
@@ -748,30 +851,47 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
     }
     else if (node->assign.target->type == NODE_INDEX) {
         ASTNode *idx_node = node->assign.target;
-        Value *array_ptr = NULL;
+        Value *target_ptr = NULL;
         
         if (idx_node->index.array->type == NODE_IDENTIFIER) {
-            array_ptr = env_get(eval->current, idx_node->index.array->string_value);
+            target_ptr = env_get(eval->current, idx_node->index.array->string_value);
         }
         
-        if (array_ptr == NULL || array_ptr->type != VALUE_ARRAY) {
-            runtime_error(eval, node->location.line, "配列が見つかりません");
+        if (target_ptr == NULL) {
+            runtime_error(eval, node->location.line, "配列または辞書が見つかりません");
             return value_null();
         }
         
         Value index = evaluate(eval, idx_node->index.index);
         if (eval->had_error) return value_null();
         
-        if (index.type != VALUE_NUMBER) {
-            runtime_error(eval, node->location.line,
-                         "配列のインデックスは数値でなければなりません");
-            return value_null();
+        if (target_ptr->type == VALUE_ARRAY) {
+            // 配列の場合
+            if (index.type != VALUE_NUMBER) {
+                runtime_error(eval, node->location.line,
+                             "配列のインデックスは数値でなければなりません");
+                return value_null();
+            }
+            
+            int idx = (int)index.number;
+            if (!array_set(target_ptr, idx, value)) {
+                runtime_error(eval, node->location.line,
+                             "インデックスが範囲外です: %d", idx);
+                return value_null();
+            }
         }
-        
-        int idx = (int)index.number;
-        if (!array_set(array_ptr, idx, value)) {
-            runtime_error(eval, node->location.line,
-                         "インデックスが範囲外です: %d", idx);
+        else if (target_ptr->type == VALUE_DICT) {
+            // 辞書の場合
+            if (index.type != VALUE_STRING) {
+                runtime_error(eval, node->location.line,
+                             "辞書のキーは文字列でなければなりません");
+                return value_null();
+            }
+            
+            dict_set(target_ptr, index.string.data, value);
+        }
+        else {
+            runtime_error(eval, node->location.line, "配列または辞書が見つかりません");
             return value_null();
         }
     }
@@ -1046,4 +1166,365 @@ static Value builtin_min(int argc, Value *argv) {
     }
     
     return value_number(min);
+}
+// =============================================================================
+// 辞書関数
+// =============================================================================
+
+static Value builtin_dict_keys(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_DICT) return value_array();
+    return dict_keys(&argv[0]);
+}
+
+static Value builtin_dict_values(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_DICT) return value_array();
+    return dict_values(&argv[0]);
+}
+
+static Value builtin_dict_has(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_DICT || argv[1].type != VALUE_STRING) {
+        return value_bool(false);
+    }
+    return value_bool(dict_has(&argv[0], argv[1].string.data));
+}
+
+// =============================================================================
+// 文字列関数
+// =============================================================================
+
+static Value builtin_split(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING || argv[1].type != VALUE_STRING) {
+        return value_array();
+    }
+    
+    Value result = value_array();
+    char *str = strdup(argv[0].string.data);
+    char *delim = argv[1].string.data;
+    
+    char *token = strtok(str, delim);
+    while (token != NULL) {
+        Value s = value_string(token);
+        array_push(&result, s);
+        value_free(&s);
+        token = strtok(NULL, delim);
+    }
+    
+    free(str);
+    return result;
+}
+
+static Value builtin_join(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY || argv[1].type != VALUE_STRING) {
+        return value_string("");
+    }
+    
+    // 結果の長さを計算
+    size_t total_len = 0;
+    size_t delim_len = strlen(argv[1].string.data);
+    
+    for (int i = 0; i < argv[0].array.length; i++) {
+        char *s = value_to_string(argv[0].array.elements[i]);
+        total_len += strlen(s);
+        if (i > 0) total_len += delim_len;
+        free(s);
+    }
+    
+    // 結果を構築
+    char *buffer = malloc(total_len + 1);
+    buffer[0] = '\0';
+    
+    for (int i = 0; i < argv[0].array.length; i++) {
+        if (i > 0) strcat(buffer, argv[1].string.data);
+        char *s = value_to_string(argv[0].array.elements[i]);
+        strcat(buffer, s);
+        free(s);
+    }
+    
+    Value result = value_string(buffer);
+    free(buffer);
+    return result;
+}
+
+static Value builtin_find(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING || argv[1].type != VALUE_STRING) {
+        return value_number(-1);
+    }
+    
+    char *pos = strstr(argv[0].string.data, argv[1].string.data);
+    if (pos == NULL) return value_number(-1);
+    
+    return value_number(pos - argv[0].string.data);
+}
+
+static Value builtin_replace(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING || argv[1].type != VALUE_STRING || 
+        argv[2].type != VALUE_STRING) {
+        return argv[0];
+    }
+    
+    char *src = argv[0].string.data;
+    char *old = argv[1].string.data;
+    char *new = argv[2].string.data;
+    
+    size_t old_len = strlen(old);
+    size_t new_len = strlen(new);
+    
+    if (old_len == 0) return value_string(src);
+    
+    // 置換回数を数える
+    int count = 0;
+    char *p = src;
+    while ((p = strstr(p, old)) != NULL) {
+        count++;
+        p += old_len;
+    }
+    
+    // 結果バッファを確保
+    size_t result_len = strlen(src) + count * (new_len - old_len);
+    char *buffer = malloc(result_len + 1);
+    char *dst = buffer;
+    
+    p = src;
+    char *q;
+    while ((q = strstr(p, old)) != NULL) {
+        size_t len = q - p;
+        memcpy(dst, p, len);
+        dst += len;
+        memcpy(dst, new, new_len);
+        dst += new_len;
+        p = q + old_len;
+    }
+    strcpy(dst, p);
+    
+    Value result = value_string(buffer);
+    free(buffer);
+    return result;
+}
+
+static Value builtin_upper(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING) return value_string("");
+    
+    char *buffer = strdup(argv[0].string.data);
+    for (char *p = buffer; *p; p++) {
+        if (*p >= 'a' && *p <= 'z') *p -= 32;
+    }
+    
+    Value result = value_string(buffer);
+    free(buffer);
+    return result;
+}
+
+static Value builtin_lower(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING) return value_string("");
+    
+    char *buffer = strdup(argv[0].string.data);
+    for (char *p = buffer; *p; p++) {
+        if (*p >= 'A' && *p <= 'Z') *p += 32;
+    }
+    
+    Value result = value_string(buffer);
+    free(buffer);
+    return result;
+}
+
+static Value builtin_trim(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING) return value_string("");
+    
+    char *str = argv[0].string.data;
+    int len = argv[0].string.length;
+    
+    // 先頭の空白をスキップ
+    int start = 0;
+    while (start < len && (str[start] == ' ' || str[start] == '\t' || 
+                           str[start] == '\n' || str[start] == '\r')) {
+        start++;
+    }
+    
+    // 末尾の空白をスキップ
+    int end = len;
+    while (end > start && (str[end-1] == ' ' || str[end-1] == '\t' || 
+                           str[end-1] == '\n' || str[end-1] == '\r')) {
+        end--;
+    }
+    
+    return value_string_n(str + start, end - start);
+}
+
+// =============================================================================
+// 配列関数
+// =============================================================================
+
+// 比較関数（ソート用）
+static int compare_values(const void *a, const void *b) {
+    Value va = *(Value *)a;
+    Value vb = *(Value *)b;
+    return value_compare(va, vb);
+}
+
+static Value builtin_sort(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY) return value_array();
+    
+    Value result = value_copy(argv[0]);
+    qsort(result.array.elements, result.array.length, 
+          sizeof(Value), compare_values);
+    return result;
+}
+
+static Value builtin_reverse(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY) return value_array();
+    
+    Value result = value_array_with_capacity(argv[0].array.length);
+    for (int i = argv[0].array.length - 1; i >= 0; i--) {
+        array_push(&result, argv[0].array.elements[i]);
+    }
+    return result;
+}
+
+static Value builtin_slice(int argc, Value *argv) {
+    if (argv[0].type != VALUE_ARRAY || argv[1].type != VALUE_NUMBER) {
+        return value_array();
+    }
+    
+    int start = (int)argv[1].number;
+    int end = argv[0].array.length;
+    
+    if (argc >= 3 && argv[2].type == VALUE_NUMBER) {
+        end = (int)argv[2].number;
+    }
+    
+    if (start < 0) start = 0;
+    if (end > argv[0].array.length) end = argv[0].array.length;
+    if (start >= end) return value_array();
+    
+    Value result = value_array_with_capacity(end - start);
+    for (int i = start; i < end; i++) {
+        array_push(&result, argv[0].array.elements[i]);
+    }
+    return result;
+}
+
+static Value builtin_index_of(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY) return value_number(-1);
+    
+    for (int i = 0; i < argv[0].array.length; i++) {
+        if (value_equals(argv[0].array.elements[i], argv[1])) {
+            return value_number(i);
+        }
+    }
+    return value_number(-1);
+}
+
+static Value builtin_contains(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY) return value_bool(false);
+    
+    for (int i = 0; i < argv[0].array.length; i++) {
+        if (value_equals(argv[0].array.elements[i], argv[1])) {
+            return value_bool(true);
+        }
+    }
+    return value_bool(false);
+}
+
+// =============================================================================
+// ファイル関数
+// =============================================================================
+
+static Value builtin_file_read(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING) return value_null();
+    
+    FILE *file = fopen(argv[0].string.data, "rb");
+    if (file == NULL) return value_null();
+    
+    fseek(file, 0, SEEK_END);
+    long size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    
+    char *buffer = malloc(size + 1);
+    size_t read = fread(buffer, 1, size, file);
+    buffer[read] = '\0';
+    fclose(file);
+    
+    Value result = value_string(buffer);
+    free(buffer);
+    return result;
+}
+
+static Value builtin_file_write(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING || argv[1].type != VALUE_STRING) {
+        return value_bool(false);
+    }
+    
+    FILE *file = fopen(argv[0].string.data, "wb");
+    if (file == NULL) return value_bool(false);
+    
+    size_t written = fwrite(argv[1].string.data, 1, argv[1].string.length, file);
+    fclose(file);
+    
+    return value_bool(written == (size_t)argv[1].string.length);
+}
+
+static Value builtin_file_exists(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING) return value_bool(false);
+    
+    FILE *file = fopen(argv[0].string.data, "r");
+    if (file != NULL) {
+        fclose(file);
+        return value_bool(true);
+    }
+    return value_bool(false);
+}
+
+// =============================================================================
+// 日時関数
+// =============================================================================
+
+static Value builtin_now(int argc, Value *argv) {
+    (void)argc;
+    (void)argv;
+    return value_number((double)time(NULL));
+}
+
+static Value builtin_date(int argc, Value *argv) {
+    time_t t;
+    if (argc > 0 && argv[0].type == VALUE_NUMBER) {
+        t = (time_t)argv[0].number;
+    } else {
+        t = time(NULL);
+    }
+    
+    struct tm *tm = localtime(&t);
+    char buffer[32];
+    strftime(buffer, sizeof(buffer), "%Y-%m-%d", tm);
+    return value_string(buffer);
+}
+
+static Value builtin_time(int argc, Value *argv) {
+    time_t t;
+    if (argc > 0 && argv[0].type == VALUE_NUMBER) {
+        t = (time_t)argv[0].number;
+    } else {
+        t = time(NULL);
+    }
+    
+    struct tm *tm = localtime(&t);
+    char buffer[32];
+    strftime(buffer, sizeof(buffer), "%H:%M:%S", tm);
+    return value_string(buffer);
 }
