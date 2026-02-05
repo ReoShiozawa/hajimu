@@ -102,6 +102,62 @@ Value value_builtin(BuiltinFn fn, const char *name, int min_args, int max_args) 
     return v;
 }
 
+Value value_class(const char *name, struct ASTNode *definition, Value *parent) {
+    Value v;
+    v.type = VALUE_CLASS;
+    v.is_const = true;
+    v.ref_count = 1;
+    v.class_value.name = strdup(name);
+    v.class_value.definition = definition;
+    v.class_value.parent = parent;
+    return v;
+}
+
+Value value_instance(Value *class_ref) {
+    Value v;
+    v.type = VALUE_INSTANCE;
+    v.is_const = false;
+    v.ref_count = 1;
+    v.instance.class_ref = class_ref;
+    v.instance.field_names = NULL;
+    v.instance.fields = NULL;
+    v.instance.field_count = 0;
+    v.instance.field_capacity = 0;
+    return v;
+}
+
+void instance_set_field(Value *instance, const char *name, Value value) {
+    // 既存のフィールドを検索
+    for (int i = 0; i < instance->instance.field_count; i++) {
+        if (strcmp(instance->instance.field_names[i], name) == 0) {
+            value_free(&instance->instance.fields[i]);
+            instance->instance.fields[i] = value_copy(value);
+            return;
+        }
+    }
+    
+    // 新しいフィールドを追加
+    if (instance->instance.field_count >= instance->instance.field_capacity) {
+        int new_cap = instance->instance.field_capacity == 0 ? 4 : instance->instance.field_capacity * 2;
+        instance->instance.field_names = realloc(instance->instance.field_names, new_cap * sizeof(char *));
+        instance->instance.fields = realloc(instance->instance.fields, new_cap * sizeof(Value));
+        instance->instance.field_capacity = new_cap;
+    }
+    
+    int idx = instance->instance.field_count++;
+    instance->instance.field_names[idx] = strdup(name);
+    instance->instance.fields[idx] = value_copy(value);
+}
+
+Value *instance_get_field(Value *instance, const char *name) {
+    for (int i = 0; i < instance->instance.field_count; i++) {
+        if (strcmp(instance->instance.field_names[i], name) == 0) {
+            return &instance->instance.fields[i];
+        }
+    }
+    return NULL;
+}
+
 Value value_dict(void) {
     return value_dict_with_capacity(8);
 }
@@ -156,6 +212,23 @@ Value value_copy(Value v) {
             // 関数はシャロウコピー（クロージャを共有）
             copy.ref_count = 1;
             break;
+        
+        case VALUE_CLASS:
+            // クラスもシャロウコピー
+            copy.class_value.name = strdup(v.class_value.name);
+            copy.ref_count = 1;
+            break;
+        
+        case VALUE_INSTANCE:
+            // インスタンスはディープコピー
+            copy.instance.field_names = malloc(sizeof(char *) * v.instance.field_capacity);
+            copy.instance.fields = malloc(sizeof(Value) * v.instance.field_capacity);
+            for (int i = 0; i < v.instance.field_count; i++) {
+                copy.instance.field_names[i] = strdup(v.instance.field_names[i]);
+                copy.instance.fields[i] = value_copy(v.instance.fields[i]);
+            }
+            copy.ref_count = 1;
+            break;
             
         default:
             break;
@@ -195,6 +268,26 @@ void value_free(Value *v) {
                 free(v->dict.values);
                 v->dict.keys = NULL;
                 v->dict.values = NULL;
+            }
+            break;
+        
+        case VALUE_CLASS:
+            if (v->class_value.name != NULL) {
+                free(v->class_value.name);
+                v->class_value.name = NULL;
+            }
+            break;
+        
+        case VALUE_INSTANCE:
+            if (v->instance.field_names != NULL) {
+                for (int i = 0; i < v->instance.field_count; i++) {
+                    free(v->instance.field_names[i]);
+                    value_free(&v->instance.fields[i]);
+                }
+                free(v->instance.field_names);
+                free(v->instance.fields);
+                v->instance.field_names = NULL;
+                v->instance.fields = NULL;
             }
             break;
             
@@ -521,6 +614,8 @@ bool value_is_truthy(Value v) {
             return v.dict.length > 0;
         case VALUE_FUNCTION:
         case VALUE_BUILTIN:
+        case VALUE_CLASS:
+        case VALUE_INSTANCE:
             return true;
     }
     return false;
@@ -536,6 +631,8 @@ const char *value_type_name(ValueType type) {
         case VALUE_DICT:     return "辞書";
         case VALUE_FUNCTION: return "関数";
         case VALUE_BUILTIN:  return "組み込み関数";
+        case VALUE_CLASS:    return "クラス";
+        case VALUE_INSTANCE: return "インスタンス";
     }
     return "不明";
 }
@@ -665,6 +762,19 @@ char *value_to_string(Value v) {
             buffer = malloc(64);
             snprintf(buffer, 64, "<組み込み関数: %s>", v.builtin.name);
             break;
+        
+        case VALUE_CLASS:
+            buffer = malloc(64);
+            snprintf(buffer, 64, "<クラス: %s>", v.class_value.name);
+            break;
+        
+        case VALUE_INSTANCE: {
+            const char *class_name = v.instance.class_ref ? 
+                v.instance.class_ref->class_value.name : "不明";
+            buffer = malloc(64);
+            snprintf(buffer, 64, "<%sのインスタンス>", class_name);
+            break;
+        }
             
         default:
             buffer = malloc(16);
@@ -726,6 +836,11 @@ bool value_equals(Value a, Value b) {
             return a.function.definition == b.function.definition;
         case VALUE_BUILTIN:
             return a.builtin.fn == b.builtin.fn;
+        case VALUE_CLASS:
+            return a.class_value.definition == b.class_value.definition;
+        case VALUE_INSTANCE:
+            // インスタンスは同一性で比較
+            return &a == &b;
     }
     return false;
 }

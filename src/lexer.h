@@ -52,6 +52,20 @@ typedef enum {
     // キーワード - 制御
     TOKEN_BREAK,            // 抜ける
     TOKEN_CONTINUE,         // 続ける
+    TOKEN_IMPORT,           // 取り込む
+    
+    // キーワード - クラス/OOP
+    TOKEN_CLASS,            // 型
+    TOKEN_NEW,              // 新規
+    TOKEN_EXTENDS,          // 継承
+    TOKEN_SELF,             // 自分
+    TOKEN_INIT,             // 初期化
+    
+    // キーワード - 例外処理
+    TOKEN_TRY,              // 試行
+    TOKEN_CATCH,            // 捕獲
+    TOKEN_FINALLY,          // 最終
+    TOKEN_THROW,            // 投げる
     
     // キーワード - 真偽値
     TOKEN_TRUE,             // 真

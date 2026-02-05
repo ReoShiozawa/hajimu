@@ -28,6 +28,8 @@ typedef enum {
     VALUE_DICT,         // 辞書（ハッシュマップ）
     VALUE_FUNCTION,     // ユーザー定義関数
     VALUE_BUILTIN,      // 組み込み関数
+    VALUE_CLASS,        // クラス定義
+    VALUE_INSTANCE,     // クラスインスタンス
 } ValueType;
 
 // =============================================================================
@@ -86,6 +88,22 @@ struct Value {
             int min_args;
             int max_args;  // -1 = 可変長
         } builtin;
+        
+        // クラス定義
+        struct {
+            char *name;                     // クラス名
+            struct ASTNode *definition;     // クラス定義AST
+            struct Value *parent;           // 親クラス（NULLなら継承なし）
+        } class_value;
+        
+        // クラスインスタンス
+        struct {
+            struct Value *class_ref;        // クラスへの参照
+            char **field_names;             // フィールド名
+            Value *fields;                  // フィールド値
+            int field_count;                // フィールド数
+            int field_capacity;             // 容量
+        } instance;
     };
 };
 
@@ -137,6 +155,26 @@ Value value_function(struct ASTNode *definition, struct Environment *closure);
  * 組み込み関数を作成
  */
 Value value_builtin(BuiltinFn fn, const char *name, int min_args, int max_args);
+
+/**
+ * クラス値を作成
+ */
+Value value_class(const char *name, struct ASTNode *definition, Value *parent);
+
+/**
+ * インスタンス値を作成
+ */
+Value value_instance(Value *class_ref);
+
+/**
+ * インスタンスにフィールドを設定
+ */
+void instance_set_field(Value *instance, const char *name, Value value);
+
+/**
+ * インスタンスからフィールドを取得
+ */
+Value *instance_get_field(Value *instance, const char *name);
 
 /**
  * 空の辞書を作成

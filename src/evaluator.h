@@ -19,6 +19,15 @@
 #define MAX_RECURSION_DEPTH 1000
 
 // =============================================================================
+// インポートされたモジュール
+// =============================================================================
+
+typedef struct {
+    char *source;       // ソースコード
+    ASTNode *ast;       // AST
+} ImportedModule;
+
+// =============================================================================
 // 評価器構造体
 // =============================================================================
 
@@ -32,6 +41,18 @@ typedef struct {
     bool continuing;            // continue中
     Value return_value;         // return値
     
+    // 例外処理
+    bool throwing;              // 例外発生中
+    Value exception_value;      // 例外値
+    
+    // OOP
+    Value *current_instance;    // 現在のインスタンス（自分）
+    
+    // デバッグ
+    bool debug_mode;            // デバッグモード
+    bool step_mode;             // ステップ実行モード
+    int last_line;              // 最後に実行した行
+    
     // エラー情報
     bool had_error;
     char error_message[512];
@@ -40,6 +61,11 @@ typedef struct {
     
     // 再帰深度
     int recursion_depth;
+    
+    // インポートされたモジュール
+    ImportedModule *imported_modules;
+    int imported_count;
+    int imported_capacity;
 } Evaluator;
 
 // =============================================================================
@@ -111,6 +137,13 @@ const char *evaluator_error_message(Evaluator *eval);
  * @param eval 評価器
  */
 void evaluator_clear_error(Evaluator *eval);
+
+/**
+ * デバッグモードを設定
+ * @param eval 評価器
+ * @param enabled 有効/無効
+ */
+void evaluator_set_debug_mode(Evaluator *eval, bool enabled);
 
 /**
  * 実行時エラーを報告

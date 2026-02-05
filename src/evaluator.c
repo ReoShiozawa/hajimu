@@ -3,6 +3,7 @@
  */
 
 #include "evaluator.h"
+#include "parser.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +19,7 @@ static Value evaluate_binary(Evaluator *eval, ASTNode *node);
 static Value evaluate_unary(Evaluator *eval, ASTNode *node);
 static Value evaluate_call(Evaluator *eval, ASTNode *node);
 static Value evaluate_index(Evaluator *eval, ASTNode *node);
+static Value evaluate_member(Evaluator *eval, ASTNode *node);
 static Value evaluate_function_def(Evaluator *eval, ASTNode *node);
 static Value evaluate_var_decl(Evaluator *eval, ASTNode *node);
 static Value evaluate_assign(Evaluator *eval, ASTNode *node);
@@ -26,6 +28,11 @@ static Value evaluate_while(Evaluator *eval, ASTNode *node);
 static Value evaluate_for(Evaluator *eval, ASTNode *node);
 static Value evaluate_return(Evaluator *eval, ASTNode *node);
 static Value evaluate_block(Evaluator *eval, ASTNode *node);
+static Value evaluate_import(Evaluator *eval, ASTNode *node);
+static Value evaluate_class_def(Evaluator *eval, ASTNode *node);
+static Value evaluate_new(Evaluator *eval, ASTNode *node);
+static Value evaluate_try(Evaluator *eval, ASTNode *node);
+static Value evaluate_throw(Evaluator *eval, ASTNode *node);
 
 // =============================================================================
 // 組み込み関数のプロトタイプ
@@ -91,10 +98,21 @@ Evaluator *evaluator_new(void) {
     eval->breaking = false;
     eval->continuing = false;
     eval->return_value = value_null();
+    eval->throwing = false;
+    eval->exception_value = value_null();
+    eval->current_instance = NULL;
+    eval->debug_mode = false;
+    eval->step_mode = false;
+    eval->last_line = 0;
     eval->had_error = false;
     eval->error_message[0] = '\0';
     eval->error_line = 0;
     eval->recursion_depth = 0;
+    
+    // インポートモジュールの初期化
+    eval->imported_modules = NULL;
+    eval->imported_count = 0;
+    eval->imported_capacity = 0;
     
     // 乱数初期化
     srand((unsigned int)time(NULL));
@@ -107,6 +125,13 @@ Evaluator *evaluator_new(void) {
 
 void evaluator_free(Evaluator *eval) {
     if (eval == NULL) return;
+    
+    // インポートされたモジュールを解放
+    for (int i = 0; i < eval->imported_count; i++) {
+        free(eval->imported_modules[i].source);
+        node_free(eval->imported_modules[i].ast);
+    }
+    free(eval->imported_modules);
     
     env_free(eval->global);
     free(eval);
@@ -245,6 +270,41 @@ void evaluator_clear_error(Evaluator *eval) {
     eval->error_message[0] = '\0';
 }
 
+void evaluator_set_debug_mode(Evaluator *eval, bool enabled) {
+    eval->debug_mode = enabled;
+    eval->step_mode = enabled;  // デバッグモードではステップモードも有効
+}
+
+// デバッグ: 行トレース
+static void debug_trace(Evaluator *eval, ASTNode *node) {
+    if (!eval->debug_mode) return;
+    if (node == NULL) return;
+    
+    int line = node->location.line;
+    
+    // 同じ行は2回表示しない
+    if (line == eval->last_line) return;
+    eval->last_line = line;
+    
+    printf("[デバッグ] 行 %d: %s\n", line, node_type_name(node->type));
+    
+    if (eval->step_mode) {
+        printf("  続行するにはEnterを押してください（'v'で変数表示, 'c'で継続実行）> ");
+        fflush(stdout);
+        
+        char input[64];
+        if (fgets(input, sizeof(input), stdin) != NULL) {
+            if (input[0] == 'v' || input[0] == 'V') {
+                // 現在のスコープの変数を表示
+                printf("  [変数一覧]\n");
+                env_print(eval->current);
+            } else if (input[0] == 'c' || input[0] == 'C') {
+                eval->step_mode = false;  // 継続実行
+            }
+        }
+    }
+}
+
 // =============================================================================
 // 評価関数
 // =============================================================================
@@ -292,6 +352,15 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
     // 制御フローのチェック
     if (eval->returning || eval->breaking || eval->continuing) {
         return value_null();
+    }
+    
+    // デバッグトレース（文レベルのノードのみ）
+    if (node->type == NODE_VAR_DECL || node->type == NODE_ASSIGN ||
+        node->type == NODE_IF || node->type == NODE_WHILE ||
+        node->type == NODE_FOR || node->type == NODE_RETURN ||
+        node->type == NODE_EXPR_STMT || node->type == NODE_TRY ||
+        node->type == NODE_THROW || node->type == NODE_FUNCTION_DEF) {
+        debug_trace(eval, node);
     }
     
     // 再帰深度チェック
@@ -408,6 +477,40 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
         case NODE_CONTINUE:
             eval->continuing = true;
             break;
+        
+        case NODE_IMPORT:
+            result = evaluate_import(eval, node);
+            break;
+        
+        case NODE_CLASS_DEF:
+            result = evaluate_class_def(eval, node);
+            break;
+        
+        case NODE_TRY:
+            result = evaluate_try(eval, node);
+            break;
+        
+        case NODE_THROW:
+            result = evaluate_throw(eval, node);
+            break;
+        
+        case NODE_NEW:
+            result = evaluate_new(eval, node);
+            break;
+        
+        case NODE_MEMBER:
+            result = evaluate_member(eval, node);
+            break;
+        
+        case NODE_SELF:
+            if (eval->current_instance == NULL) {
+                runtime_error(eval, node->location.line,
+                             "'自分' はメソッド内でのみ使用できます");
+                result = value_null();
+            } else {
+                result = value_copy(*eval->current_instance);
+            }
+            break;
             
         case NODE_EXPR_STMT:
             result = evaluate(eval, node->expr_stmt.expression);
@@ -418,7 +521,7 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
             for (int i = 0; i < node->block.count; i++) {
                 result = evaluate(eval, node->block.statements[i]);
                 if (eval->had_error || eval->returning || 
-                    eval->breaking || eval->continuing) {
+                    eval->breaking || eval->continuing || eval->throwing) {
                     break;
                 }
             }
@@ -565,6 +668,18 @@ static Value evaluate_unary(Evaluator *eval, ASTNode *node) {
 }
 
 static Value evaluate_call(Evaluator *eval, ASTNode *node) {
+    // メソッド呼び出しの場合、インスタンスを保存
+    Value instance = value_null();
+    bool is_method_call = false;
+    
+    if (node->call.callee->type == NODE_MEMBER) {
+        instance = evaluate(eval, node->call.callee->member.object);
+        if (eval->had_error) return value_null();
+        if (instance.type == VALUE_INSTANCE) {
+            is_method_call = true;
+        }
+    }
+    
     Value callee = evaluate(eval, node->call.callee);
     if (eval->had_error) return value_null();
     
@@ -674,7 +789,22 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
             Environment *prev = eval->current;
             eval->current = local;
             
+            // メソッド呼び出しの場合、current_instanceを設定
+            Value *prev_instance = eval->current_instance;
+            Value *instance_ptr = NULL;
+            if (is_method_call) {
+                instance_ptr = malloc(sizeof(Value));
+                *instance_ptr = instance;
+                eval->current_instance = instance_ptr;
+            }
+            
             evaluate(eval, def->function.body);
+            
+            // current_instanceを復元
+            eval->current_instance = prev_instance;
+            if (instance_ptr != NULL) {
+                free(instance_ptr);
+            }
             
             if (eval->returning) {
                 result = eval->return_value;
@@ -895,6 +1025,29 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
             return value_null();
         }
     }
+    else if (node->assign.target->type == NODE_MEMBER) {
+        // メンバーへの代入（インスタンスフィールド）
+        ASTNode *member_node = node->assign.target;
+        Value object = evaluate(eval, member_node->member.object);
+        if (eval->had_error) return value_null();
+        
+        if (object.type == VALUE_INSTANCE) {
+            instance_set_field(&object, member_node->member.member_name, value);
+            // 元の変数を更新する必要がある
+            if (member_node->member.object->type == NODE_IDENTIFIER) {
+                const char *var_name = member_node->member.object->string_value;
+                env_set(eval->current, var_name, object);
+            } else if (member_node->member.object->type == NODE_SELF) {
+                // 自分の場合、current_instanceを更新
+                if (eval->current_instance != NULL) {
+                    instance_set_field(eval->current_instance, member_node->member.member_name, value);
+                }
+            }
+        } else {
+            runtime_error(eval, node->location.line, "メンバー代入はインスタンスにのみ使用できます");
+            return value_null();
+        }
+    }
     else {
         runtime_error(eval, node->location.line, "不正な代入先");
         return value_null();
@@ -996,6 +1149,304 @@ static Value evaluate_for(Evaluator *eval, ASTNode *node) {
     }
     
     return result;
+}
+
+static Value evaluate_import(Evaluator *eval, ASTNode *node) {
+    const char *module_path = node->import_stmt.module_path;
+    
+    // 現在のファイルディレクトリを基準にパスを解決
+    char resolved_path[1024];
+    
+    // 絶対パスの場合はそのまま使用
+    if (module_path[0] == '/') {
+        snprintf(resolved_path, sizeof(resolved_path), "%s", module_path);
+    } else {
+        // 相対パスの場合、.jp拡張子を追加
+        if (strstr(module_path, ".jp") == NULL) {
+            snprintf(resolved_path, sizeof(resolved_path), "%s.jp", module_path);
+        } else {
+            snprintf(resolved_path, sizeof(resolved_path), "%s", module_path);
+        }
+    }
+    
+    // ファイルを読み込む
+    FILE *file = fopen(resolved_path, "rb");
+    if (file == NULL) {
+        runtime_error(eval, node->location.line,
+                     "モジュール '%s' を読み込めません", resolved_path);
+        return value_null();
+    }
+    
+    fseek(file, 0, SEEK_END);
+    long size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    
+    char *source = malloc(size + 1);
+    size_t read = fread(source, 1, size, file);
+    source[read] = '\0';
+    fclose(file);
+    
+    // パースと実行
+    Parser parser;
+    parser_init(&parser, source, resolved_path);
+    
+    ASTNode *program = parse_program(&parser);
+    
+    if (parser.had_error) {
+        node_free(program);
+        free(source);
+        runtime_error(eval, node->location.line,
+                     "モジュール '%s' のパースに失敗しました", resolved_path);
+        return value_null();
+    }
+    
+    // モジュールを保存（ASTと ソースを解放しないように）
+    if (eval->imported_count >= eval->imported_capacity) {
+        eval->imported_capacity = eval->imported_capacity == 0 ? 4 : eval->imported_capacity * 2;
+        eval->imported_modules = realloc(eval->imported_modules, 
+                                         eval->imported_capacity * sizeof(ImportedModule));
+    }
+    eval->imported_modules[eval->imported_count].source = source;
+    eval->imported_modules[eval->imported_count].ast = program;
+    eval->imported_count++;
+    
+    // インポートしたモジュールを現在の環境で評価
+    Value result = value_null();
+    for (int i = 0; i < program->block.count; i++) {
+        result = evaluate(eval, program->block.statements[i]);
+        if (eval->had_error) break;
+    }
+    
+    // ソースとASTは保持しておく（関数定義で参照されるため）
+    return result;
+}
+
+static Value evaluate_class_def(Evaluator *eval, ASTNode *node) {
+    // 親クラスを取得（あれば）
+    Value *parent = NULL;
+    if (node->class_def.parent_name != NULL) {
+        Value *parent_ptr = env_get(eval->current, node->class_def.parent_name);
+        if (parent_ptr == NULL || parent_ptr->type != VALUE_CLASS) {
+            runtime_error(eval, node->location.line,
+                         "'%s' はクラスではありません", node->class_def.parent_name);
+            return value_null();
+        }
+        // 親クラスを保存
+        parent = malloc(sizeof(Value));
+        *parent = value_copy(*parent_ptr);
+    }
+    
+    // クラス値を作成
+    Value class_val = value_class(node->class_def.name, node, parent);
+    
+    // グローバル環境に登録
+    env_define(eval->current, node->class_def.name, class_val, true);
+    
+    return class_val;
+}
+
+static Value evaluate_new(Evaluator *eval, ASTNode *node) {
+    // クラスを取得
+    Value *class_ptr = env_get(eval->current, node->new_expr.class_name);
+    if (class_ptr == NULL || class_ptr->type != VALUE_CLASS) {
+        runtime_error(eval, node->location.line,
+                     "'%s' はクラスではありません", node->new_expr.class_name);
+        return value_null();
+    }
+    Value class_val = *class_ptr;
+    
+    // クラス値をヒープに格納
+    Value *class_heap = malloc(sizeof(Value));
+    *class_heap = value_copy(class_val);
+    
+    // インスタンスを作成
+    Value instance = value_instance(class_heap);
+    
+    // 初期化メソッドを呼び出す
+    ASTNode *class_def = class_val.class_value.definition;
+    if (class_def->class_def.init_method != NULL) {
+        ASTNode *init = class_def->class_def.init_method;
+        
+        // 引数の数をチェック
+        if (node->new_expr.arg_count != init->method.param_count) {
+            runtime_error(eval, node->location.line,
+                         "初期化メソッドは %d 個の引数が必要です（%d 個渡されました）",
+                         init->method.param_count, node->new_expr.arg_count);
+            return value_null();
+        }
+        
+        // 新しい環境を作成
+        Environment *method_env = env_new(eval->current);
+        Environment *saved_env = eval->current;
+        eval->current = method_env;
+        
+        // 引数をバインド
+        for (int i = 0; i < init->method.param_count; i++) {
+            Value arg = evaluate(eval, node->new_expr.arguments[i]);
+            if (eval->had_error) {
+                eval->current = saved_env;
+                env_free(method_env);
+                return value_null();
+            }
+            env_define(method_env, init->method.params[i].name, arg, false);
+        }
+        
+        // インスタンスをヒープに確保して保持
+        Value *instance_ptr = malloc(sizeof(Value));
+        *instance_ptr = instance;
+        
+        // 現在のインスタンスを設定
+        Value *saved_instance = eval->current_instance;
+        eval->current_instance = instance_ptr;
+        
+        // 初期化メソッドを実行
+        evaluate(eval, init->method.body);
+        
+        // インスタンスを取り戻す
+        instance = *eval->current_instance;
+        
+        // 環境とインスタンスを復元
+        eval->current_instance = saved_instance;
+        eval->current = saved_env;
+        
+        eval->returning = false;
+        eval->return_value = value_null();
+        
+        // クリーンアップ
+        free(instance_ptr);
+        env_free(method_env);
+    }
+    
+    return instance;
+}
+
+static Value evaluate_member(Evaluator *eval, ASTNode *node) {
+    Value object = evaluate(eval, node->member.object);
+    if (eval->had_error) return value_null();
+    
+    const char *member_name = node->member.member_name;
+    
+    // インスタンスのフィールドアクセス
+    if (object.type == VALUE_INSTANCE) {
+        Value *field = instance_get_field(&object, member_name);
+        if (field != NULL) {
+            return value_copy(*field);
+        }
+        
+        // メソッドを探す（親クラスも含む）
+        Value *class_ref = object.instance.class_ref;
+        while (class_ref != NULL && class_ref->type == VALUE_CLASS) {
+            ASTNode *class_def = class_ref->class_value.definition;
+            for (int i = 0; i < class_def->class_def.method_count; i++) {
+                ASTNode *method = class_def->class_def.methods[i];
+                if (strcmp(method->method.name, member_name) == 0) {
+                    // バインドされたメソッドを返す（関数として）
+                    return value_function(method, eval->current);
+                }
+            }
+            // 親クラスを探す
+            if (class_def->class_def.parent_name != NULL) {
+                Value *parent = env_get(eval->current, class_def->class_def.parent_name);
+                if (parent != NULL && parent->type == VALUE_CLASS) {
+                    class_ref = parent;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        
+        runtime_error(eval, node->location.line,
+                     "インスタンスに '%s' というフィールドまたはメソッドがありません",
+                     member_name);
+        return value_null();
+    }
+    
+    // 辞書のメンバーアクセス
+    if (object.type == VALUE_DICT) {
+        Value val = dict_get(&object, member_name);
+        if (val.type != VALUE_NULL) {
+            return value_copy(val);
+        }
+        runtime_error(eval, node->location.line,
+                     "辞書に '%s' というキーがありません", member_name);
+        return value_null();
+    }
+    
+    runtime_error(eval, node->location.line,
+                 "メンバーアクセスはインスタンスまたは辞書に対してのみ使用できます");
+    return value_null();
+}
+
+// =============================================================================
+// 例外処理の評価
+// =============================================================================
+
+static Value evaluate_try(Evaluator *eval, ASTNode *node) {
+    Value result = value_null();
+    
+    // 試行ブロックを実行
+    evaluate(eval, node->try_stmt.try_block);
+    
+    // 例外が発生した場合
+    if (eval->throwing && node->try_stmt.catch_block != NULL) {
+        // 例外をキャッチ
+        eval->throwing = false;
+        
+        // 新しいスコープを作成して例外変数をバインド
+        Environment *catch_scope = env_new(eval->current);
+        if (node->try_stmt.catch_var != NULL) {
+            env_define(catch_scope, node->try_stmt.catch_var, 
+                      value_copy(eval->exception_value), false);
+        }
+        
+        // 捕獲ブロックを実行
+        Environment *prev = eval->current;
+        eval->current = catch_scope;
+        
+        evaluate(eval, node->try_stmt.catch_block);
+        
+        eval->current = prev;
+        env_free(catch_scope);
+    }
+    
+    // 最終ブロックがあれば必ず実行
+    if (node->try_stmt.finally_block != NULL) {
+        // 例外状態を保存
+        bool was_throwing = eval->throwing;
+        Value saved_exception = eval->exception_value;
+        bool was_returning = eval->returning;
+        Value saved_return = eval->return_value;
+        
+        // 例外・戻り値状態を一時的にクリア
+        eval->throwing = false;
+        eval->returning = false;
+        
+        evaluate(eval, node->try_stmt.finally_block);
+        
+        // finally中に新しい例外や戻り値がなければ元に戻す
+        if (!eval->throwing && was_throwing) {
+            eval->throwing = true;
+            eval->exception_value = saved_exception;
+        }
+        if (!eval->returning && was_returning) {
+            eval->returning = true;
+            eval->return_value = saved_return;
+        }
+    }
+    
+    return result;
+}
+
+static Value evaluate_throw(Evaluator *eval, ASTNode *node) {
+    Value exception = evaluate(eval, node->throw_stmt.expression);
+    if (eval->had_error) return value_null();
+    
+    eval->throwing = true;
+    eval->exception_value = exception;
+    
+    return value_null();
 }
 
 // =============================================================================

@@ -23,12 +23,19 @@ static const char *node_type_names[] = {
     [NODE_RETURN] = "RETURN",
     [NODE_BREAK] = "BREAK",
     [NODE_CONTINUE] = "CONTINUE",
+    [NODE_IMPORT] = "IMPORT",
+    [NODE_CLASS_DEF] = "CLASS_DEF",
+    [NODE_METHOD_DEF] = "METHOD_DEF",
+    [NODE_TRY] = "TRY",
+    [NODE_THROW] = "THROW",
     [NODE_EXPR_STMT] = "EXPR_STMT",
     [NODE_BINARY] = "BINARY",
     [NODE_UNARY] = "UNARY",
     [NODE_CALL] = "CALL",
     [NODE_INDEX] = "INDEX",
     [NODE_MEMBER] = "MEMBER",
+    [NODE_NEW] = "NEW",
+    [NODE_SELF] = "SELF",
     [NODE_IDENTIFIER] = "IDENTIFIER",
     [NODE_NUMBER] = "NUMBER",
     [NODE_STRING] = "STRING",
@@ -106,6 +113,13 @@ ASTNode *node_index(ASTNode *array, ASTNode *index, int line, int column) {
     ASTNode *node = node_new(NODE_INDEX, line, column);
     node->index.array = array;
     node->index.index = index;
+    return node;
+}
+
+ASTNode *node_member(ASTNode *object, const char *member_name, int line, int column) {
+    ASTNode *node = node_new(NODE_MEMBER, line, column);
+    node->member.object = object;
+    node->member.member_name = strdup(member_name);
     return node;
 }
 
@@ -196,6 +210,77 @@ ASTNode *node_continue(int line, int column) {
     return node_new(NODE_CONTINUE, line, column);
 }
 
+ASTNode *node_import(const char *module_path, int line, int column) {
+    ASTNode *node = node_new(NODE_IMPORT, line, column);
+    node->import_stmt.module_path = strdup(module_path);
+    return node;
+}
+
+ASTNode *node_class_def(const char *name, const char *parent_name, int line, int column) {
+    ASTNode *node = node_new(NODE_CLASS_DEF, line, column);
+    node->class_def.name = strdup(name);
+    node->class_def.parent_name = parent_name ? strdup(parent_name) : NULL;
+    node->class_def.methods = NULL;
+    node->class_def.method_count = 0;
+    node->class_def.init_method = NULL;
+    return node;
+}
+
+ASTNode *node_method_def(const char *name, int line, int column) {
+    ASTNode *node = node_new(NODE_METHOD_DEF, line, column);
+    node->method.name = strdup(name);
+    node->method.params = NULL;
+    node->method.param_count = 0;
+    node->method.return_type = VALUE_NULL;
+    node->method.has_return_type = false;
+    node->method.body = NULL;
+    return node;
+}
+
+void method_add_param(ASTNode *method, const char *name, ValueType type, bool has_type) {
+    int count = method->method.param_count;
+    method->method.params = realloc(method->method.params, (count + 1) * sizeof(Parameter));
+    method->method.params[count].name = strdup(name);
+    method->method.params[count].type = type;
+    method->method.params[count].has_type = has_type;
+    method->method.param_count++;
+}
+
+void class_add_method(ASTNode *class_node, ASTNode *method) {
+    int count = class_node->class_def.method_count;
+    class_node->class_def.methods = realloc(class_node->class_def.methods, 
+                                            (count + 1) * sizeof(ASTNode*));
+    class_node->class_def.methods[count] = method;
+    class_node->class_def.method_count++;
+}
+
+ASTNode *node_new_expr(const char *class_name, int line, int column) {
+    ASTNode *node = node_new(NODE_NEW, line, column);
+    node->new_expr.class_name = strdup(class_name);
+    node->new_expr.arguments = NULL;
+    node->new_expr.arg_count = 0;
+    return node;
+}
+
+ASTNode *node_self(int line, int column) {
+    return node_new(NODE_SELF, line, column);
+}
+
+ASTNode *node_try(ASTNode *try_block, const char *catch_var, ASTNode *catch_block, ASTNode *finally_block, int line, int column) {
+    ASTNode *node = node_new(NODE_TRY, line, column);
+    node->try_stmt.try_block = try_block;
+    node->try_stmt.catch_var = catch_var ? strdup(catch_var) : NULL;
+    node->try_stmt.catch_block = catch_block;
+    node->try_stmt.finally_block = finally_block;
+    return node;
+}
+
+ASTNode *node_throw(ASTNode *expression, int line, int column) {
+    ASTNode *node = node_new(NODE_THROW, line, column);
+    node->throw_stmt.expression = expression;
+    return node;
+}
+
 ASTNode *node_expr_stmt(ASTNode *expression, int line, int column) {
     ASTNode *node = node_new(NODE_EXPR_STMT, line, column);
     node->expr_stmt.expression = expression;
@@ -262,6 +347,41 @@ void node_free(ASTNode *node) {
         case NODE_NULL:
         case NODE_BREAK:
         case NODE_CONTINUE:
+            // 子ノードなし
+            break;
+        
+        case NODE_IMPORT:
+            free(node->import_stmt.module_path);
+            break;
+        
+        case NODE_CLASS_DEF:
+            free(node->class_def.name);
+            free(node->class_def.parent_name);
+            for (int i = 0; i < node->class_def.method_count; i++) {
+                node_free(node->class_def.methods[i]);
+            }
+            free(node->class_def.methods);
+            node_free(node->class_def.init_method);
+            break;
+        
+        case NODE_METHOD_DEF:
+            free(node->method.name);
+            for (int i = 0; i < node->method.param_count; i++) {
+                free(node->method.params[i].name);
+            }
+            free(node->method.params);
+            node_free(node->method.body);
+            break;
+        
+        case NODE_NEW:
+            free(node->new_expr.class_name);
+            for (int i = 0; i < node->new_expr.arg_count; i++) {
+                node_free(node->new_expr.arguments[i]);
+            }
+            free(node->new_expr.arguments);
+            break;
+        
+        case NODE_SELF:
             // 子ノードなし
             break;
             

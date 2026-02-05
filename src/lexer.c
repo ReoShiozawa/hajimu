@@ -44,6 +44,20 @@ static const KeywordEntry keywords[] = {
     // 制御
     {"抜ける", TOKEN_BREAK},
     {"続ける", TOKEN_CONTINUE},
+    {"取り込む", TOKEN_IMPORT},
+    
+    // クラス/OOP
+    {"型", TOKEN_CLASS},
+    {"新規", TOKEN_NEW},
+    {"継承", TOKEN_EXTENDS},
+    {"自分", TOKEN_SELF},
+    {"初期化", TOKEN_INIT},
+    
+    // 例外処理
+    {"試行", TOKEN_TRY},
+    {"捕獲", TOKEN_CATCH},
+    {"最終", TOKEN_FINALLY},
+    {"投げる", TOKEN_THROW},
     
     // 真偽値
     {"真", TOKEN_TRUE},

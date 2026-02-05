@@ -64,7 +64,7 @@ static char *read_file(const char *path) {
 // ファイル実行
 // =============================================================================
 
-static int run_file(const char *path) {
+static int run_file(const char *path, bool debug_mode) {
     char *source = read_file(path);
     if (source == NULL) {
         return 1;
@@ -92,6 +92,14 @@ static int run_file(const char *path) {
     
     // 実行
     Evaluator *eval = evaluator_new();
+    
+    // デバッグモードを設定
+    if (debug_mode) {
+        evaluator_set_debug_mode(eval, true);
+        printf("=== デバッグモード ===\n");
+        printf("Enter: 次のステップ / 'v': 変数表示 / 'c': 継続実行\n\n");
+    }
+    
     Value result = evaluator_run(eval, program);
     (void)result;  // 結果は使用しない
     
@@ -348,7 +356,7 @@ int main(int argc, char *argv[]) {
         free(source);
         
         // 実行
-        return run_file(filename);
+        return run_file(filename, debug_mode);
     }
     
     // REPLモード

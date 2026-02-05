@@ -25,6 +25,7 @@ static void synchronize(Parser *parser);
 // 文のパース
 static ASTNode *declaration(Parser *parser);
 static ASTNode *function_definition(Parser *parser);
+static ASTNode *class_definition(Parser *parser);
 static ASTNode *statement(Parser *parser);
 static ASTNode *var_declaration(Parser *parser, bool is_const);
 static ASTNode *if_statement(Parser *parser);
@@ -33,6 +34,9 @@ static ASTNode *for_statement(Parser *parser);
 static ASTNode *return_statement(Parser *parser);
 static ASTNode *break_statement(Parser *parser);
 static ASTNode *continue_statement(Parser *parser);
+static ASTNode *import_statement(Parser *parser);
+static ASTNode *try_statement(Parser *parser);
+static ASTNode *throw_statement(Parser *parser);
 static ASTNode *expression_statement(Parser *parser);
 static ASTNode *block(Parser *parser);
 
@@ -358,6 +362,18 @@ static ASTNode *statement(Parser *parser) {
     if (match(parser, TOKEN_CONTINUE)) {
         return continue_statement(parser);
     }
+    if (match(parser, TOKEN_IMPORT)) {
+        return import_statement(parser);
+    }
+    if (match(parser, TOKEN_CLASS)) {
+        return class_definition(parser);
+    }
+    if (match(parser, TOKEN_TRY)) {
+        return try_statement(parser);
+    }
+    if (match(parser, TOKEN_THROW)) {
+        return throw_statement(parser);
+    }
     
     // for文のチェック（識別子 を ... から ... 繰り返す）
     if (check(parser, TOKEN_IDENTIFIER)) {
@@ -526,6 +542,221 @@ static ASTNode *continue_statement(Parser *parser) {
     return node_continue(line, column);
 }
 
+static ASTNode *import_statement(Parser *parser) {
+    int line = parser->previous.line;
+    int column = parser->previous.column;
+    
+    // ファイルパス（文字列）
+    consume(parser, TOKEN_STRING, "取り込むファイルパスが必要です");
+    char *module_path = parser->previous.value.string;
+    
+    if (!check(parser, TOKEN_EOF) && !check(parser, TOKEN_DEDENT)) {
+        match(parser, TOKEN_NEWLINE);
+    }
+    
+    return node_import(module_path, line, column);
+}
+
+// 試行文（try-catch-finally）のパース
+static ASTNode *try_statement(Parser *parser) {
+    int line = parser->previous.line;
+    int column = parser->previous.column;
+    
+    // 試行: の後にコロン
+    consume(parser, TOKEN_COLON, "':' が必要です");
+    
+    // 試行ブロック
+    ASTNode *try_block = block(parser);
+    
+    char *catch_var = NULL;
+    ASTNode *catch_block = NULL;
+    ASTNode *finally_block = NULL;
+    
+    // 捕獲句（オプション）
+    if (match(parser, TOKEN_CATCH)) {
+        // 捕獲 変数名:
+        consume(parser, TOKEN_IDENTIFIER, "エラー変数名が必要です");
+        catch_var = copy_token_string(&parser->previous);
+        consume(parser, TOKEN_COLON, "':' が必要です");
+        
+        catch_block = block(parser);
+    }
+    
+    // 最終句（オプション）
+    if (match(parser, TOKEN_FINALLY)) {
+        consume(parser, TOKEN_COLON, "':' が必要です");
+        
+        finally_block = block(parser);
+    }
+    
+    // 試行-捕獲-最終のいずれか終了後に"終わり"
+    consume(parser, TOKEN_END, "'終わり' が必要です");
+    
+    // 少なくとも捕獲か最終のどちらかが必要
+    if (catch_block == NULL && finally_block == NULL) {
+        error(parser, "試行文には '捕獲' または '最終' が必要です");
+    }
+    
+    return node_try(try_block, catch_var, catch_block, finally_block, line, column);
+}
+
+// 投げる文のパース
+static ASTNode *throw_statement(Parser *parser) {
+    int line = parser->previous.line;
+    int column = parser->previous.column;
+    
+    // 投げる 式
+    ASTNode *expr = expression(parser);
+    
+    if (!check(parser, TOKEN_EOF) && !check(parser, TOKEN_DEDENT) &&
+        !check(parser, TOKEN_END) && !check(parser, TOKEN_CATCH) &&
+        !check(parser, TOKEN_FINALLY)) {
+        consume(parser, TOKEN_NEWLINE, "改行が必要です");
+    }
+    
+    return node_throw(expr, line, column);
+}
+
+// メソッド定義のパース（クラス内で使用）
+static ASTNode *method_definition(Parser *parser, bool is_init) {
+    int line = parser->previous.line;
+    int column = parser->previous.column;
+    
+    // メソッド名を取得（初期化の場合は"初期化"、関数の場合は識別子）
+    char *name;
+    if (is_init) {
+        name = strdup("初期化");
+    } else {
+        consume(parser, TOKEN_IDENTIFIER, "メソッド名が必要です");
+        name = copy_token_string(&parser->previous);
+    }
+    
+    ASTNode *method = node_method_def(name, line, column);
+    free(name);
+    
+    // パラメータリスト
+    consume(parser, TOKEN_LPAREN, "'(' が必要です");
+    
+    if (!check(parser, TOKEN_RPAREN)) {
+        do {
+            consume(parser, TOKEN_IDENTIFIER, "パラメータ名が必要です");
+            char *param_name = copy_token_string(&parser->previous);
+            
+            ValueType param_type = VALUE_NULL;
+            bool has_type = false;
+            
+            if (match(parser, TOKEN_TYPE_IS)) {
+                has_type = true;
+                if (match(parser, TOKEN_TYPE_NUMBER)) {
+                    param_type = VALUE_NUMBER;
+                } else if (match(parser, TOKEN_TYPE_STRING_T)) {
+                    param_type = VALUE_STRING;
+                } else if (match(parser, TOKEN_TYPE_BOOL)) {
+                    param_type = VALUE_BOOL;
+                } else if (match(parser, TOKEN_TYPE_ARRAY)) {
+                    param_type = VALUE_ARRAY;
+                } else {
+                    error(parser, "型が必要です");
+                }
+            }
+            
+            method_add_param(method, param_name, param_type, has_type);
+            free(param_name);
+        } while (match(parser, TOKEN_COMMA));
+    }
+    
+    consume(parser, TOKEN_RPAREN, "')' が必要です");
+    
+    // 戻り値の型（オプション）
+    if (match(parser, TOKEN_TYPE_IS)) {
+        method->method.has_return_type = true;
+        if (match(parser, TOKEN_TYPE_NUMBER)) {
+            method->method.return_type = VALUE_NUMBER;
+        } else if (match(parser, TOKEN_TYPE_STRING_T)) {
+            method->method.return_type = VALUE_STRING;
+        } else if (match(parser, TOKEN_TYPE_BOOL)) {
+            method->method.return_type = VALUE_BOOL;
+        } else if (match(parser, TOKEN_TYPE_ARRAY)) {
+            method->method.return_type = VALUE_ARRAY;
+        } else {
+            error(parser, "戻り値の型が必要です");
+        }
+    }
+    
+    // コロン
+    consume(parser, TOKEN_COLON, "':' が必要です");
+    
+    // メソッド本体
+    method->method.body = block(parser);
+    
+    // 終わり
+    consume(parser, TOKEN_END, "'終わり' が必要です");
+    match(parser, TOKEN_NEWLINE);
+    
+    return method;
+}
+
+static ASTNode *class_definition(Parser *parser) {
+    int line = parser->previous.line;
+    int column = parser->previous.column;
+    
+    // クラス名
+    consume(parser, TOKEN_IDENTIFIER, "クラス名が必要です");
+    char *class_name = copy_token_string(&parser->previous);
+    
+    // 継承（オプション）
+    char *parent_name = NULL;
+    if (match(parser, TOKEN_EXTENDS)) {
+        consume(parser, TOKEN_IDENTIFIER, "親クラス名が必要です");
+        parent_name = copy_token_string(&parser->previous);
+    }
+    
+    ASTNode *class_node = node_class_def(class_name, parent_name, line, column);
+    free(class_name);
+    if (parent_name) free(parent_name);
+    
+    // コロン
+    consume(parser, TOKEN_COLON, "':' が必要です");
+    match(parser, TOKEN_NEWLINE);
+    
+    // インデント
+    consume(parser, TOKEN_INDENT, "クラス本体のインデントが必要です");
+    
+    // クラス本体（メソッド定義）
+    while (!check(parser, TOKEN_END) && !check(parser, TOKEN_EOF) && !check(parser, TOKEN_DEDENT)) {
+        if (match(parser, TOKEN_INIT)) {
+            // 初期化メソッド
+            ASTNode *init = method_definition(parser, true);
+            class_node->class_def.init_method = init;
+        } else if (match(parser, TOKEN_FUNCTION)) {
+            // 通常のメソッド
+            ASTNode *method = method_definition(parser, false);
+            class_add_method(class_node, method);
+        } else if (match(parser, TOKEN_NEWLINE)) {
+            // 空行をスキップ
+            continue;
+        } else {
+            error(parser, "クラス内では 関数 または 初期化 のみ定義できます");
+            advance(parser);
+        }
+    }
+    
+    // デデントとクラス終了の処理
+    if (match(parser, TOKEN_DEDENT)) {
+        // DEDENTの後に 終わり があればそれも消費
+        match(parser, TOKEN_END);
+    } else {
+        // インデントなしで 終わり で終わる場合
+        consume(parser, TOKEN_END, "'終わり' が必要です");
+    }
+    
+    if (!check(parser, TOKEN_EOF) && !check(parser, TOKEN_DEDENT)) {
+        match(parser, TOKEN_NEWLINE);
+    }
+    
+    return class_node;
+}
+
 static ASTNode *expression_statement(Parser *parser) {
     int line = parser->current.line;
     int column = parser->current.column;
@@ -581,12 +812,14 @@ static ASTNode *block(Parser *parser) {
     
     // 文を読み込む
     while (!check(parser, TOKEN_DEDENT) && !check(parser, TOKEN_EOF) &&
-           !check(parser, TOKEN_END) && !check(parser, TOKEN_ELSE)) {
+           !check(parser, TOKEN_END) && !check(parser, TOKEN_ELSE) &&
+           !check(parser, TOKEN_CATCH) && !check(parser, TOKEN_FINALLY)) {
         
         skip_newlines(parser);
         
         if (check(parser, TOKEN_DEDENT) || check(parser, TOKEN_EOF) ||
-            check(parser, TOKEN_END) || check(parser, TOKEN_ELSE)) {
+            check(parser, TOKEN_END) || check(parser, TOKEN_ELSE) ||
+            check(parser, TOKEN_CATCH) || check(parser, TOKEN_FINALLY)) {
             break;
         }
         
@@ -752,6 +985,13 @@ static ASTNode *call(Parser *parser) {
             ASTNode *index = expression(parser);
             consume(parser, TOKEN_RBRACKET, "']' が必要です");
             expr = node_index(expr, index, line, column);
+        } else if (match(parser, TOKEN_DOT)) {
+            // メンバーアクセス
+            int line = parser->previous.line;
+            int column = parser->previous.column;
+            consume(parser, TOKEN_IDENTIFIER, "メンバー名が必要です");
+            char *member_name = copy_token_string(&parser->previous);
+            expr = node_member(expr, member_name, line, column);
         } else {
             break;
         }
@@ -907,6 +1147,44 @@ static ASTNode *primary(Parser *parser) {
         }
         
         return node_dict(keys, values, count, line, column);
+    }
+    
+    // 新規 クラス名(引数)
+    if (match(parser, TOKEN_NEW)) {
+        consume(parser, TOKEN_IDENTIFIER, "クラス名が必要です");
+        char *class_name = copy_token_string(&parser->previous);
+        
+        ASTNode *new_node = node_new_expr(class_name, line, column);
+        free(class_name);
+        
+        // 引数リスト
+        consume(parser, TOKEN_LPAREN, "'(' が必要です");
+        
+        int capacity = 8;
+        int count = 0;
+        ASTNode **args = malloc(sizeof(ASTNode *) * capacity);
+        
+        if (!check(parser, TOKEN_RPAREN)) {
+            do {
+                if (count >= capacity) {
+                    capacity *= 2;
+                    args = realloc(args, sizeof(ASTNode *) * capacity);
+                }
+                args[count++] = expression(parser);
+            } while (match(parser, TOKEN_COMMA));
+        }
+        
+        consume(parser, TOKEN_RPAREN, "')' が必要です");
+        
+        new_node->new_expr.arguments = args;
+        new_node->new_expr.arg_count = count;
+        
+        return new_node;
+    }
+    
+    // 自分
+    if (match(parser, TOKEN_SELF)) {
+        return node_self(line, column);
     }
     
     error(parser, "式が必要です");

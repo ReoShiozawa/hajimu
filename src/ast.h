@@ -31,13 +31,20 @@ typedef enum {
     NODE_BREAK,             // break文
     NODE_CONTINUE,          // continue文
     NODE_EXPR_STMT,         // 式文
+    NODE_IMPORT,            // 取り込み文
+    NODE_CLASS_DEF,         // クラス定義
+    NODE_METHOD_DEF,        // メソッド定義
+    NODE_TRY,               // 試行文（try-catch-finally）
+    NODE_THROW,             // 投げる文（throw）
     
     // 式
     NODE_BINARY,            // 二項演算
     NODE_UNARY,             // 単項演算
     NODE_CALL,              // 関数呼び出し
     NODE_INDEX,             // 配列インデックス
-    NODE_MEMBER,            // メンバーアクセス（将来用）
+    NODE_MEMBER,            // メンバーアクセス
+    NODE_NEW,               // インスタンス生成
+    NODE_SELF,              // 自分参照
     
     // リテラル・識別子
     NODE_IDENTIFIER,        // 識別子
@@ -188,6 +195,50 @@ struct ASTNode {
             int count;              // 要素数
         } dict;
         
+        // NODE_IMPORT
+        struct {
+            char *module_path;      // インポートするファイルパス
+        } import_stmt;
+        
+        // NODE_CLASS_DEF
+        struct {
+            char *name;             // クラス名
+            char *parent_name;      // 親クラス名（NULLなら継承なし）
+            ASTNode **methods;      // メソッドの配列
+            int method_count;       // メソッド数
+            ASTNode *init_method;   // 初期化メソッド（NULLの場合あり）
+        } class_def;
+        
+        // NODE_METHOD_DEF（関数と同じ構造だが自分を受け取る）
+        struct {
+            char *name;             // メソッド名
+            Parameter *params;      // パラメータ配列
+            int param_count;        // パラメータ数
+            ValueType return_type;  // 戻り値の型
+            bool has_return_type;   // 戻り値の型注釈があるか
+            ASTNode *body;          // メソッド本体（ブロック）
+        } method;
+        
+        // NODE_NEW
+        struct {
+            char *class_name;       // クラス名
+            ASTNode **arguments;    // 引数の配列
+            int arg_count;          // 引数の数
+        } new_expr;
+        
+        // NODE_TRY（試行-捕獲-最終）
+        struct {
+            ASTNode *try_block;     // 試行ブロック
+            char *catch_var;        // 捕獲する変数名（エラー）
+            ASTNode *catch_block;   // 捕獲ブロック（NULLの場合あり）
+            ASTNode *finally_block; // 最終ブロック（NULLの場合あり）
+        } try_stmt;
+        
+        // NODE_THROW（投げる）
+        struct {
+            ASTNode *expression;    // 投げる値
+        } throw_stmt;
+        
         // NODE_EXPR_STMT
         struct {
             ASTNode *expression;    // 式
@@ -250,6 +301,11 @@ ASTNode *node_call(ASTNode *callee, ASTNode **args, int arg_count, int line, int
 ASTNode *node_index(ASTNode *array, ASTNode *index, int line, int column);
 
 /**
+ * メンバーアクセスノードを作成
+ */
+ASTNode *node_member(ASTNode *object, const char *member_name, int line, int column);
+
+/**
  * 配列リテラルノードを作成
  */
 ASTNode *node_array(ASTNode **elements, int count, int line, int column);
@@ -308,6 +364,51 @@ ASTNode *node_break(int line, int column);
  * continue文ノードを作成
  */
 ASTNode *node_continue(int line, int column);
+
+/**
+ * import文ノードを作成
+ */
+ASTNode *node_import(const char *module_path, int line, int column);
+
+/**
+ * クラス定義ノードを作成
+ */
+ASTNode *node_class_def(const char *name, const char *parent_name, int line, int column);
+
+/**
+ * メソッド定義ノードを作成
+ */
+ASTNode *node_method_def(const char *name, int line, int column);
+
+/**
+ * メソッドにパラメータを追加
+ */
+void method_add_param(ASTNode *method, const char *name, ValueType type, bool has_type);
+
+/**
+ * クラスにメソッドを追加
+ */
+void class_add_method(ASTNode *class_node, ASTNode *method);
+
+/**
+ * new式ノードを作成
+ */
+ASTNode *node_new_expr(const char *class_name, int line, int column);
+
+/**
+ * self参照ノードを作成
+ */
+ASTNode *node_self(int line, int column);
+
+/**
+ * 試行文ノードを作成
+ */
+ASTNode *node_try(ASTNode *try_block, const char *catch_var, ASTNode *catch_block, ASTNode *finally_block, int line, int column);
+
+/**
+ * 投げる文ノードを作成
+ */
+ASTNode *node_throw(ASTNode *expression, int line, int column);
 
 /**
  * 式文ノードを作成
