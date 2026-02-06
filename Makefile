@@ -2,7 +2,7 @@
 
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c11 -g -O2
-LDFLAGS = -lm
+LDFLAGS = -lm -lcurl
 
 # ディレクトリ
 SRC_DIR = src
@@ -16,7 +16,8 @@ SOURCES = $(SRC_DIR)/main.c \
           $(SRC_DIR)/parser.c \
           $(SRC_DIR)/value.c \
           $(SRC_DIR)/environment.c \
-          $(SRC_DIR)/evaluator.c
+          $(SRC_DIR)/evaluator.c \
+          $(SRC_DIR)/http.c
 
 # オブジェクトファイル
 OBJECTS = $(SOURCES:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
@@ -47,7 +48,8 @@ $(BUILD_DIR)/ast.o: $(SRC_DIR)/ast.c $(SRC_DIR)/ast.h $(SRC_DIR)/value.h
 $(BUILD_DIR)/parser.o: $(SRC_DIR)/parser.c $(SRC_DIR)/parser.h $(SRC_DIR)/lexer.h $(SRC_DIR)/ast.h
 $(BUILD_DIR)/value.o: $(SRC_DIR)/value.c $(SRC_DIR)/value.h
 $(BUILD_DIR)/environment.o: $(SRC_DIR)/environment.c $(SRC_DIR)/environment.h $(SRC_DIR)/value.h
-$(BUILD_DIR)/evaluator.o: $(SRC_DIR)/evaluator.c $(SRC_DIR)/evaluator.h $(SRC_DIR)/ast.h $(SRC_DIR)/environment.h
+$(BUILD_DIR)/evaluator.o: $(SRC_DIR)/evaluator.c $(SRC_DIR)/evaluator.h $(SRC_DIR)/ast.h $(SRC_DIR)/environment.h $(SRC_DIR)/http.h
+$(BUILD_DIR)/http.o: $(SRC_DIR)/http.c $(SRC_DIR)/http.h $(SRC_DIR)/value.h
 
 # 実行
 run: $(TARGET)

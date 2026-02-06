@@ -4,6 +4,7 @@
 
 #include "evaluator.h"
 #include "parser.h"
+#include "http.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -233,6 +234,36 @@ void register_builtins(Evaluator *eval) {
                value_builtin(builtin_date, "日付", 0, 1), true);
     env_define(eval->global, "時間",
                value_builtin(builtin_time, "時間", 0, 1), true);
+    
+    // JSON関数
+    env_define(eval->global, "JSON化",
+               value_builtin(builtin_json_encode, "JSON化", 1, 1), true);
+    env_define(eval->global, "JSON解析",
+               value_builtin(builtin_json_decode, "JSON解析", 1, 1), true);
+    
+    // HTTPクライアント関数
+    env_define(eval->global, "HTTP取得",
+               value_builtin(builtin_http_get, "HTTP取得", 1, 2), true);
+    env_define(eval->global, "HTTP送信",
+               value_builtin(builtin_http_post, "HTTP送信", 1, 3), true);
+    env_define(eval->global, "HTTP更新",
+               value_builtin(builtin_http_put, "HTTP更新", 1, 3), true);
+    env_define(eval->global, "HTTP削除",
+               value_builtin(builtin_http_delete, "HTTP削除", 1, 2), true);
+    env_define(eval->global, "HTTPリクエスト",
+               value_builtin(builtin_http_request, "HTTPリクエスト", 2, 4), true);
+    
+    // HTTPサーバー/Webhook関数
+    env_define(eval->global, "サーバー起動",
+               value_builtin(builtin_http_serve, "サーバー起動", 1, 2), true);
+    env_define(eval->global, "サーバー停止",
+               value_builtin(builtin_http_stop, "サーバー停止", 0, 0), true);
+    
+    // URLエンコード/デコード
+    env_define(eval->global, "URLエンコード",
+               value_builtin(builtin_url_encode, "URLエンコード", 1, 1), true);
+    env_define(eval->global, "URLデコード",
+               value_builtin(builtin_url_decode, "URLデコード", 1, 1), true);
 }
 
 // =============================================================================
