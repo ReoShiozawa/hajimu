@@ -44,6 +44,7 @@ static ASTNode *block(Parser *parser);
 
 // 式のパース（優先順位低い順）
 static ASTNode *expression(Parser *parser);
+static ASTNode *pipe_expr(Parser *parser);
 static ASTNode *or_expr(Parser *parser);
 static ASTNode *and_expr(Parser *parser);
 static ASTNode *not_expr(Parser *parser);
@@ -238,11 +239,17 @@ static Parameter *parse_parameters(Parser *parser, int *count) {
         params[*count].name = copy_token_string(&parser->previous);
         params[*count].has_type = false;
         params[*count].type = VALUE_NULL;
+        params[*count].default_value = NULL;
         
         // 型注釈（オプション）
         if (match(parser, TOKEN_TYPE_IS)) {
             params[*count].has_type = true;
             params[*count].type = parse_type(parser);
+        }
+        
+        // デフォルト値（オプション）
+        if (match(parser, TOKEN_ASSIGN)) {
+            params[*count].default_value = expression(parser);
         }
         
         (*count)++;
@@ -276,6 +283,15 @@ ASTNode *parse_program(Parser *parser) {
     skip_newlines(parser);
     
     while (!check(parser, TOKEN_EOF)) {
+        // トップレベルで '終わり' が出現した場合はスキップ
+        if (check(parser, TOKEN_END)) {
+            error(parser, "対応する開始文のない '終わり' です");
+            advance(parser);
+            parser->panic_mode = false;
+            skip_newlines(parser);
+            continue;
+        }
+        
         ASTNode *decl = declaration(parser);
         if (decl != NULL) {
             block_add_statement(program, decl);
@@ -462,7 +478,12 @@ static ASTNode *if_statement(Parser *parser) {
     
     // else節（オプション）
     ASTNode *else_branch = NULL;
-    if (match(parser, TOKEN_ELSE)) {
+    if (match(parser, TOKEN_ELSE_IF)) {
+        // else if（それ以外もし）: 再帰的にif文をパース
+        else_branch = if_statement(parser);
+        // else if チェーンの場合、終わりは最後のifで消費される
+        return node_if(condition, then_branch, else_branch, line, column);
+    } else if (match(parser, TOKEN_ELSE)) {
         else_branch = block(parser);
     }
     
@@ -922,6 +943,7 @@ static ASTNode *block(Parser *parser) {
     // 文を読み込む
     while (!check(parser, TOKEN_DEDENT) && !check(parser, TOKEN_EOF) &&
            !check(parser, TOKEN_END) && !check(parser, TOKEN_ELSE) &&
+           !check(parser, TOKEN_ELSE_IF) &&
            !check(parser, TOKEN_CATCH) && !check(parser, TOKEN_FINALLY) &&
            !check(parser, TOKEN_CASE) && !check(parser, TOKEN_DEFAULT)) {
         
@@ -929,6 +951,7 @@ static ASTNode *block(Parser *parser) {
         
         if (check(parser, TOKEN_DEDENT) || check(parser, TOKEN_EOF) ||
             check(parser, TOKEN_END) || check(parser, TOKEN_ELSE) ||
+            check(parser, TOKEN_ELSE_IF) ||
             check(parser, TOKEN_CATCH) || check(parser, TOKEN_FINALLY) ||
             check(parser, TOKEN_CASE) || check(parser, TOKEN_DEFAULT)) {
             break;
@@ -959,7 +982,25 @@ ASTNode *parse_expression(Parser *parser) {
 }
 
 static ASTNode *expression(Parser *parser) {
-    return or_expr(parser);
+    return pipe_expr(parser);
+}
+
+// パイプ演算子: 式 |> 関数
+static ASTNode *pipe_expr(Parser *parser) {
+    ASTNode *left = or_expr(parser);
+    
+    while (match(parser, TOKEN_PIPE)) {
+        int line = parser->previous.line;
+        int column = parser->previous.column;
+        // 右辺は関数（呼び出し対象）
+        ASTNode *func = or_expr(parser);
+        // left |> func → func(left) に変換
+        ASTNode **args = malloc(sizeof(ASTNode*));
+        args[0] = left;
+        left = node_call(func, args, 1, line, column);
+    }
+    
+    return left;
 }
 
 // または
@@ -1170,6 +1211,11 @@ static ASTNode *primary(Parser *parser) {
         return node_bool(false, line, column);
     }
     
+    // 無（null）
+    if (match(parser, TOKEN_NULL_LITERAL)) {
+        return node_null(line, column);
+    }
+    
     // 識別子
     if (match(parser, TOKEN_IDENTIFIER)) {
         return node_identifier(copy_token_string(&parser->previous), line, column);
@@ -1319,6 +1365,7 @@ static ASTNode *primary(Parser *parser) {
     }
     
     error(parser, "式が必要です");
+    advance(parser);  // エラー回復: トークンを進めて無限ループを防止
     return node_null(line, column);
 }
 

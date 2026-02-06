@@ -31,6 +31,7 @@ static const KeywordEntry keywords[] = {
     
     // 条件分岐
     {"もし", TOKEN_IF},
+    {"それ以外もし", TOKEN_ELSE_IF},
     {"それ以外", TOKEN_ELSE},
     {"なら", TOKEN_THEN},
     
@@ -71,6 +72,7 @@ static const KeywordEntry keywords[] = {
     // 真偽値
     {"真", TOKEN_TRUE},
     {"偽", TOKEN_FALSE},
+    {"無", TOKEN_NULL_LITERAL},
     
     // 論理演算
     {"かつ", TOKEN_AND},
@@ -112,6 +114,7 @@ static const char *token_names[] = {
     
     [TOKEN_IF] = "もし",
     [TOKEN_ELSE] = "それ以外",
+    [TOKEN_ELSE_IF] = "それ以外もし",
     [TOKEN_THEN] = "なら",
     
     [TOKEN_WHILE_COND] = "条件",
@@ -125,6 +128,7 @@ static const char *token_names[] = {
     
     [TOKEN_TRUE] = "真",
     [TOKEN_FALSE] = "偽",
+    [TOKEN_NULL_LITERAL] = "無",
     
     [TOKEN_AND] = "かつ",
     [TOKEN_OR] = "または",
@@ -165,6 +169,7 @@ static const char *token_names[] = {
     [TOKEN_COMMA] = ",",
     [TOKEN_COLON] = ":",
     [TOKEN_DOT] = ".",
+    [TOKEN_PIPE] = "|>",
 };
 
 // =============================================================================
@@ -440,6 +445,79 @@ static Token scan_number(Lexer *lexer) {
     return token;
 }
 
+// 複数行文字列をスキャン（"""..."""）
+static Token scan_multiline_string(Lexer *lexer) {
+    // 開始の """ は既に消費済み
+    
+    size_t capacity = 256;
+    size_t length = 0;
+    char *buffer = malloc(capacity);
+    bool closed = false;
+    
+    while (!is_at_end(lexer)) {
+        char c = peek(lexer);
+        
+        // """ の終端チェック: c == peek == current[0]
+        if (c == '"') {
+            size_t remaining = (lexer->source + strlen(lexer->source)) - lexer->current;
+            if (remaining >= 3 && 
+                lexer->current[1] == '"' && 
+                lexer->current[2] == '"') {
+                // 3つの " を消費して終了
+                advance(lexer);  // 1つ目の "
+                advance(lexer);  // 2つ目の "
+                advance(lexer);  // 3つ目の "
+                closed = true;
+                break;
+            }
+        }
+        
+        c = advance(lexer);
+        if (c == '\n') {
+            lexer->line++;
+            lexer->column = 1;
+        }
+        
+        // エスケープシーケンス処理
+        if (c == '\\' && !is_at_end(lexer)) {
+            char next = advance(lexer);
+            switch (next) {
+                case 'n': c = '\n'; break;
+                case 't': c = '\t'; break;
+                case 'r': c = '\r'; break;
+                case '\\': c = '\\'; break;
+                case '"': c = '"'; break;
+                case '0': c = '\0'; break;
+                default:
+                    if (length + 1 >= capacity) {
+                        capacity *= 2;
+                        buffer = realloc(buffer, capacity);
+                    }
+                    buffer[length++] = '\\';
+                    c = next;
+            }
+        }
+        
+        if (length + 1 >= capacity) {
+            capacity *= 2;
+            buffer = realloc(buffer, capacity);
+        }
+        buffer[length++] = c;
+    }
+    
+    if (!closed) {
+        free(buffer);
+        return error_token(lexer, "複数行文字列が閉じられていません");
+    }
+    
+    buffer[length] = '\0';
+    
+    Token token = make_token(lexer, TOKEN_STRING);
+    token.value.string = buffer;
+    
+    return token;
+}
+
 // 文字列をスキャン
 static Token scan_string(Lexer *lexer) {
     // 開始の " は既に消費済み
@@ -651,6 +729,13 @@ Token lexer_next(Lexer *lexer) {
         
         // 文字列
         case '"':
+            // 複数行文字列 """...""" のチェック
+            if (peek(lexer) == '"' && lexer->current + 1 < lexer->source + strlen(lexer->source) && *(lexer->current + 1) == '"') {
+                // 2つの " を消費
+                advance(lexer);
+                advance(lexer);
+                return scan_multiline_string(lexer);
+            }
             return scan_string(lexer);
         
         // 単一文字トークン
@@ -688,6 +773,11 @@ Token lexer_next(Lexer *lexer) {
             return make_token(lexer, match(lexer, '=') ? TOKEN_LE : TOKEN_LT);
         case '>':
             return make_token(lexer, match(lexer, '=') ? TOKEN_GE : TOKEN_GT);
+        case '|':
+            if (match(lexer, '>')) {
+                return make_token(lexer, TOKEN_PIPE);
+            }
+            return error_token(lexer, "予期しない文字 '|'");
     }
     
     return error_token(lexer, "予期しない文字です");

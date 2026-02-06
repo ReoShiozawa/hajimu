@@ -79,6 +79,7 @@ typedef struct {
     char *name;             // パラメータ名
     ValueType type;         // 型（オプション）
     bool has_type;          // 型注釈があるか
+    struct ASTNode *default_value;  // デフォルト値（NULLなら必須）
 } Parameter;
 
 // =============================================================================

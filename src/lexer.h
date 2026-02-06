@@ -40,6 +40,7 @@ typedef enum {
     // キーワード - 条件分岐
     TOKEN_IF,               // もし
     TOKEN_ELSE,             // それ以外
+    TOKEN_ELSE_IF,          // それ以外もし
     TOKEN_THEN,             // なら
     
     // キーワード - 繰り返し
@@ -79,6 +80,7 @@ typedef enum {
     // キーワード - 真偽値
     TOKEN_TRUE,             // 真
     TOKEN_FALSE,            // 偽
+    TOKEN_NULL_LITERAL,     // 無
     
     // キーワード - 論理演算
     TOKEN_AND,              // かつ
@@ -125,6 +127,7 @@ typedef enum {
     TOKEN_COMMA,            // ,
     TOKEN_COLON,            // :
     TOKEN_DOT,              // .
+    TOKEN_PIPE,             // |>
     
     TOKEN_COUNT             // トークン種別の数
 } TokenType;

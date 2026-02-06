@@ -42,6 +42,7 @@ static Value evaluate_throw(Evaluator *eval, ASTNode *node);
 static Value evaluate_lambda(Evaluator *eval, ASTNode *node);
 static Value evaluate_switch(Evaluator *eval, ASTNode *node);
 static Value evaluate_foreach(Evaluator *eval, ASTNode *node);
+static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int line);
 
 // =============================================================================
 // 組み込み関数のプロトタイプ
@@ -105,6 +106,26 @@ static Value builtin_foreach(int argc, Value *argv);
 static Value builtin_regex_match(int argc, Value *argv);
 static Value builtin_regex_search(int argc, Value *argv);
 static Value builtin_regex_replace(int argc, Value *argv);
+
+// 型チェック関数
+static Value builtin_is_number(int argc, Value *argv);
+static Value builtin_is_string(int argc, Value *argv);
+static Value builtin_is_bool(int argc, Value *argv);
+static Value builtin_is_array(int argc, Value *argv);
+static Value builtin_is_dict(int argc, Value *argv);
+static Value builtin_is_function(int argc, Value *argv);
+static Value builtin_is_null(int argc, Value *argv);
+
+// 範囲関数
+static Value builtin_range(int argc, Value *argv);
+
+// ビット演算関数
+static Value builtin_bit_and(int argc, Value *argv);
+static Value builtin_bit_or(int argc, Value *argv);
+static Value builtin_bit_xor(int argc, Value *argv);
+static Value builtin_bit_not(int argc, Value *argv);
+static Value builtin_bit_lshift(int argc, Value *argv);
+static Value builtin_bit_rshift(int argc, Value *argv);
 
 // システムユーティリティ
 static Value builtin_sleep(int argc, Value *argv);
@@ -190,6 +211,40 @@ void register_builtins(Evaluator *eval) {
                value_builtin(builtin_to_number, "数値化", 1, 1), true);
     env_define(eval->global, "文字列化",
                value_builtin(builtin_to_string, "文字列化", 1, 1), true);
+    
+    // 型チェック関数
+    env_define(eval->global, "数値か",
+               value_builtin(builtin_is_number, "数値か", 1, 1), true);
+    env_define(eval->global, "文字列か",
+               value_builtin(builtin_is_string, "文字列か", 1, 1), true);
+    env_define(eval->global, "真偽か",
+               value_builtin(builtin_is_bool, "真偽か", 1, 1), true);
+    env_define(eval->global, "配列か",
+               value_builtin(builtin_is_array, "配列か", 1, 1), true);
+    env_define(eval->global, "辞書か",
+               value_builtin(builtin_is_dict, "辞書か", 1, 1), true);
+    env_define(eval->global, "関数か",
+               value_builtin(builtin_is_function, "関数か", 1, 1), true);
+    env_define(eval->global, "無か",
+               value_builtin(builtin_is_null, "無か", 1, 1), true);
+    
+    // 範囲関数
+    env_define(eval->global, "範囲",
+               value_builtin(builtin_range, "範囲", 1, 3), true);
+    
+    // ビット演算関数
+    env_define(eval->global, "ビット積",
+               value_builtin(builtin_bit_and, "ビット積", 2, 2), true);
+    env_define(eval->global, "ビット和",
+               value_builtin(builtin_bit_or, "ビット和", 2, 2), true);
+    env_define(eval->global, "ビット排他",
+               value_builtin(builtin_bit_xor, "ビット排他", 2, 2), true);
+    env_define(eval->global, "ビット否定",
+               value_builtin(builtin_bit_not, "ビット否定", 1, 1), true);
+    env_define(eval->global, "左シフト",
+               value_builtin(builtin_bit_lshift, "左シフト", 2, 2), true);
+    env_define(eval->global, "右シフト",
+               value_builtin(builtin_bit_rshift, "右シフト", 2, 2), true);
     
     // 数学関数
     env_define(eval->global, "絶対値",
@@ -468,7 +523,7 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
             break;
             
         case NODE_STRING:
-            result = value_string(node->string_value);
+            result = evaluate_string_interpolation(eval, node->string_value, node->location.line);
             break;
             
         case NODE_BOOL:
@@ -888,20 +943,44 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
             func_name = def->function.name;
         }
         
-        // 引数の数をチェック
-        if (node->call.arg_count != expected_count) {
-            runtime_error(eval, node->location.line,
-                         "%sには%d個の引数が必要です（%d個渡されました）",
-                         func_name,
-                         expected_count,
-                         node->call.arg_count);
+        // 必須引数の数をカウント（デフォルト値なしのパラメータ）
+        int min_required = 0;
+        for (int i = 0; i < expected_count; i++) {
+            if (params[i].default_value == NULL) {
+                min_required++;
+            }
+        }
+        
+        // 引数の数をチェック（デフォルト引数対応）
+        if (node->call.arg_count < min_required || node->call.arg_count > expected_count) {
+            if (min_required == expected_count) {
+                runtime_error(eval, node->location.line,
+                             "%sには%d個の引数が必要です（%d個渡されました）",
+                             func_name,
+                             expected_count,
+                             node->call.arg_count);
+            } else {
+                runtime_error(eval, node->location.line,
+                             "%sには%d〜%d個の引数が必要です（%d個渡されました）",
+                             func_name,
+                             min_required,
+                             expected_count,
+                             node->call.arg_count);
+            }
         } else {
             // 新しいスコープを作成
             Environment *local = env_new(callee.function.closure);
             
-            // 引数をバインド（コピーを作成）
+            // 引数をバインド（渡された引数 + デフォルト値）
             for (int i = 0; i < expected_count; i++) {
-                env_define(local, params[i].name, value_copy(args[i]), false);
+                if (i < node->call.arg_count) {
+                    // 渡された引数を使用
+                    env_define(local, params[i].name, value_copy(args[i]), false);
+                } else if (params[i].default_value != NULL) {
+                    // デフォルト値を評価して使用
+                    Value def_val = evaluate(eval, params[i].default_value);
+                    env_define(local, params[i].name, value_copy(def_val), false);
+                }
             }
             
             // 関数本体を実行
@@ -1568,6 +1647,99 @@ static Value evaluate_throw(Evaluator *eval, ASTNode *node) {
     return value_null();
 }
 
+// 文字列補間: "こんにちは{名前}さん" → 式を評価して埋め込む
+static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int line) {
+    // {を含まない場合はそのまま返す
+    if (strchr(str, '{') == NULL) {
+        return value_string(str);
+    }
+    
+    int capacity = 256;
+    int length = 0;
+    char *result = malloc(capacity);
+    result[0] = '\0';
+    
+    const char *p = str;
+    while (*p) {
+        if (*p == '\\' && *(p + 1) == '{') {
+            // エスケープされた{はそのまま
+            if (length + 1 >= capacity) {
+                capacity *= 2;
+                result = realloc(result, capacity);
+            }
+            result[length++] = '{';
+            p += 2;
+        } else if (*p == '{') {
+            p++;  // { をスキップ
+            
+            // } までの式を取得
+            const char *expr_start = p;
+            int brace_depth = 1;
+            while (*p && brace_depth > 0) {
+                if (*p == '{') brace_depth++;
+                else if (*p == '}') brace_depth--;
+                if (brace_depth > 0) p++;
+            }
+            
+            if (brace_depth != 0) {
+                runtime_error(eval, line, "文字列補間の '}' が閉じられていません");
+                free(result);
+                return value_null();
+            }
+            
+            // 式を抽出
+            int expr_len = (int)(p - expr_start);
+            char *expr_str = malloc(expr_len + 1);
+            memcpy(expr_str, expr_start, expr_len);
+            expr_str[expr_len] = '\0';
+            
+            p++;  // } をスキップ
+            
+            // 式をパースして評価
+            Parser expr_parser;
+            parser_init(&expr_parser, expr_str, "<interpolation>");
+            ASTNode *expr = parse_expression(&expr_parser);
+            
+            if (!parser_had_error(&expr_parser)) {
+                Value val = evaluate(eval, expr);
+                if (!eval->had_error) {
+                    char *val_str = value_to_string(val);
+                    int val_len = strlen(val_str);
+                    while (length + val_len + 1 >= capacity) {
+                        capacity *= 2;
+                        result = realloc(result, capacity);
+                    }
+                    memcpy(result + length, val_str, val_len);
+                    length += val_len;
+                    free(val_str);
+                }
+            } else {
+                runtime_error(eval, line, "文字列補間の式が不正です: %s", expr_str);
+            }
+            
+            node_free(expr);
+            parser_free(&expr_parser);
+            free(expr_str);
+        } else {
+            // UTF-8マルチバイト文字を正しくコピー
+            int char_len = utf8_char_length((unsigned char)*p);
+            if (char_len == 0) char_len = 1;
+            while (length + char_len + 1 >= capacity) {
+                capacity *= 2;
+                result = realloc(result, capacity);
+            }
+            memcpy(result + length, p, char_len);
+            length += char_len;
+            p += char_len;
+        }
+    }
+    
+    result[length] = '\0';
+    Value ret = value_string(result);
+    free(result);
+    return ret;
+}
+
 static Value evaluate_lambda(Evaluator *eval, ASTNode *node) {
     // ラムダノードをそのまま関数値として包む
     return value_function(node, eval->current);
@@ -1762,6 +1934,126 @@ static Value builtin_remove(int argc, Value *argv) {
 static Value builtin_type(int argc, Value *argv) {
     (void)argc;
     return value_string(value_type_name(argv[0].type));
+}
+
+// 型チェック関数
+static Value builtin_is_number(int argc, Value *argv) {
+    (void)argc;
+    return value_bool(argv[0].type == VALUE_NUMBER);
+}
+
+static Value builtin_is_string(int argc, Value *argv) {
+    (void)argc;
+    return value_bool(argv[0].type == VALUE_STRING);
+}
+
+static Value builtin_is_bool(int argc, Value *argv) {
+    (void)argc;
+    return value_bool(argv[0].type == VALUE_BOOL);
+}
+
+static Value builtin_is_array(int argc, Value *argv) {
+    (void)argc;
+    return value_bool(argv[0].type == VALUE_ARRAY);
+}
+
+static Value builtin_is_dict(int argc, Value *argv) {
+    (void)argc;
+    return value_bool(argv[0].type == VALUE_DICT);
+}
+
+static Value builtin_is_function(int argc, Value *argv) {
+    (void)argc;
+    return value_bool(argv[0].type == VALUE_FUNCTION || argv[0].type == VALUE_BUILTIN);
+}
+
+static Value builtin_is_null(int argc, Value *argv) {
+    (void)argc;
+    return value_bool(argv[0].type == VALUE_NULL);
+}
+
+// 範囲関数: 範囲(終了) / 範囲(開始, 終了) / 範囲(開始, 終了, ステップ)
+static Value builtin_range(int argc, Value *argv) {
+    double start, end, step;
+    
+    if (argc == 1) {
+        if (argv[0].type != VALUE_NUMBER) return value_null();
+        start = 0;
+        end = argv[0].number;
+        step = 1;
+    } else if (argc == 2) {
+        if (argv[0].type != VALUE_NUMBER || argv[1].type != VALUE_NUMBER) return value_null();
+        start = argv[0].number;
+        end = argv[1].number;
+        step = (start <= end) ? 1 : -1;
+    } else {
+        if (argv[0].type != VALUE_NUMBER || argv[1].type != VALUE_NUMBER || argv[2].type != VALUE_NUMBER) return value_null();
+        start = argv[0].number;
+        end = argv[1].number;
+        step = argv[2].number;
+        if (step == 0) return value_null();
+    }
+    
+    // 要素数を計算
+    int count = 0;
+    if (step > 0) {
+        for (double i = start; i < end; i += step) count++;
+    } else {
+        for (double i = start; i > end; i += step) count++;
+    }
+    
+    if (count <= 0) return value_array();
+    if (count > 1000000) return value_null(); // 安全制限
+    
+    Value result = value_array_with_capacity(count);
+    if (step > 0) {
+        for (double i = start; i < end; i += step) {
+            array_push(&result, value_number(i));
+        }
+    } else {
+        for (double i = start; i > end; i += step) {
+            array_push(&result, value_number(i));
+        }
+    }
+    
+    return result;
+}
+
+// ビット演算関数
+static Value builtin_bit_and(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMBER || argv[1].type != VALUE_NUMBER) return value_null();
+    return value_number((double)((long long)argv[0].number & (long long)argv[1].number));
+}
+
+static Value builtin_bit_or(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMBER || argv[1].type != VALUE_NUMBER) return value_null();
+    return value_number((double)((long long)argv[0].number | (long long)argv[1].number));
+}
+
+static Value builtin_bit_xor(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMBER || argv[1].type != VALUE_NUMBER) return value_null();
+    return value_number((double)((long long)argv[0].number ^ (long long)argv[1].number));
+}
+
+static Value builtin_bit_not(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMBER) return value_null();
+    return value_number((double)(~(long long)argv[0].number));
+}
+
+static Value builtin_bit_lshift(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMBER || argv[1].type != VALUE_NUMBER) return value_null();
+    return value_number((double)((long long)argv[0].number << (int)argv[1].number));
+}
+
+static Value builtin_bit_rshift(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMBER || argv[1].type != VALUE_NUMBER) return value_null();
+    return value_number((double)((long long)argv[0].number >> (int)argv[1].number));
 }
 
 static Value builtin_to_number(int argc, Value *argv) {
