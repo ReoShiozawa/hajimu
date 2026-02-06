@@ -48,6 +48,10 @@ typedef struct {
     // OOP
     Value *current_instance;    // 現在のインスタンス（自分）
     
+    // ジェネレータ
+    bool in_generator;          // ジェネレータ関数実行中
+    Value *generator_target;    // yield値の蓄積先
+    
     // デバッグ
     bool debug_mode;            // デバッグモード
     bool step_mode;             // ステップ実行モード
@@ -61,6 +65,13 @@ typedef struct {
     
     // 再帰深度
     int recursion_depth;
+    
+    // コールスタック（スタックトレース用）
+    struct {
+        const char *func_name;
+        int line;
+    } call_stack[128];
+    int call_stack_depth;
     
     // インポートされたモジュール
     ImportedModule *imported_modules;

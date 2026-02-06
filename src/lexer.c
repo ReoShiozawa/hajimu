@@ -53,12 +53,17 @@ static const KeywordEntry keywords[] = {
     {"継承", TOKEN_EXTENDS},
     {"自分", TOKEN_SELF},
     {"初期化", TOKEN_INIT},
+    {"親", TOKEN_SUPER},
     
     // 例外処理
     {"試行", TOKEN_TRY},
     {"捕獲", TOKEN_CATCH},
     {"最終", TOKEN_FINALLY},
     {"投げる", TOKEN_THROW},
+    {"列挙", TOKEN_ENUM},
+    {"照合", TOKEN_MATCH},
+    {"譲渡", TOKEN_YIELD},
+    {"生成関数", TOKEN_GENERATOR_FUNC},
     
     // 選択文
     {"選択", TOKEN_SWITCH},
@@ -140,6 +145,12 @@ static const char *token_names[] = {
     [TOKEN_TYPE_BOOL] = "真偽型",
     [TOKEN_TYPE_ARRAY] = "配列型",
     
+    [TOKEN_ENUM] = "列挙",
+    [TOKEN_MATCH] = "照合",
+    [TOKEN_ARROW] = "=>",
+    [TOKEN_YIELD] = "譲渡",
+    [TOKEN_GENERATOR_FUNC] = "生成関数",
+    
     [TOKEN_PLUS] = "+",
     [TOKEN_MINUS] = "-",
     [TOKEN_STAR] = "*",
@@ -169,7 +180,10 @@ static const char *token_names[] = {
     [TOKEN_COMMA] = ",",
     [TOKEN_COLON] = ":",
     [TOKEN_DOT] = ".",
+    [TOKEN_SPREAD] = "...",
     [TOKEN_PIPE] = "|>",
+    [TOKEN_QUESTION] = "?",
+    [TOKEN_NULL_COALESCE] = "??",
 };
 
 // =============================================================================
@@ -747,7 +761,13 @@ Token lexer_next(Lexer *lexer) {
         case '}': return make_token(lexer, TOKEN_RBRACE);
         case ',': return make_token(lexer, TOKEN_COMMA);
         case ':': return make_token(lexer, TOKEN_COLON);
-        case '.': return make_token(lexer, TOKEN_DOT);
+        case '.':
+            if (peek(lexer) == '.' && peek_next(lexer) == '.') {
+                advance(lexer);
+                advance(lexer);
+                return make_token(lexer, TOKEN_SPREAD);
+            }
+            return make_token(lexer, TOKEN_DOT);
         case '%': return make_token(lexer, TOKEN_PERCENT);
         
         // 複合トークン
@@ -763,7 +783,9 @@ Token lexer_next(Lexer *lexer) {
         case '/':
             return make_token(lexer, match(lexer, '=') ? TOKEN_SLASH_ASSIGN : TOKEN_SLASH);
         case '=':
-            return make_token(lexer, match(lexer, '=') ? TOKEN_EQ : TOKEN_ASSIGN);
+            if (match(lexer, '=')) return make_token(lexer, TOKEN_EQ);
+            if (match(lexer, '>')) return make_token(lexer, TOKEN_ARROW);
+            return make_token(lexer, TOKEN_ASSIGN);
         case '!':
             if (match(lexer, '=')) {
                 return make_token(lexer, TOKEN_NE);
@@ -778,6 +800,12 @@ Token lexer_next(Lexer *lexer) {
                 return make_token(lexer, TOKEN_PIPE);
             }
             return error_token(lexer, "予期しない文字 '|'");
+        
+        case '?':
+            if (match(lexer, '?')) {
+                return make_token(lexer, TOKEN_NULL_COALESCE);
+            }
+            return make_token(lexer, TOKEN_QUESTION);
     }
     
     return error_token(lexer, "予期しない文字です");

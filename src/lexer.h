@@ -61,12 +61,24 @@ typedef enum {
     TOKEN_EXTENDS,          // 継承
     TOKEN_SELF,             // 自分
     TOKEN_INIT,             // 初期化
+    TOKEN_SUPER,            // 親
     
     // キーワード - 例外処理
     TOKEN_TRY,              // 試行
     TOKEN_CATCH,            // 捕獲
     TOKEN_FINALLY,          // 最終
     TOKEN_THROW,            // 投げる
+    
+    // キーワード - ジェネレータ
+    TOKEN_GENERATOR_FUNC,   // 生成関数
+    TOKEN_YIELD,            // 譲渡
+    
+    // キーワード - 列挙型
+    TOKEN_ENUM,             // 列挙
+    
+    // キーワード - パターンマッチ
+    TOKEN_MATCH,            // 照合
+    TOKEN_ARROW,            // =>
     
     // キーワード - 選択文
     TOKEN_SWITCH,           // 選択
@@ -127,7 +139,10 @@ typedef enum {
     TOKEN_COMMA,            // ,
     TOKEN_COLON,            // :
     TOKEN_DOT,              // .
+    TOKEN_SPREAD,           // ...
     TOKEN_PIPE,             // |>
+    TOKEN_QUESTION,         // ?
+    TOKEN_NULL_COALESCE,    // ??
     
     TOKEN_COUNT             // トークン種別の数
 } TokenType;

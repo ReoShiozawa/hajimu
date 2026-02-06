@@ -39,6 +39,7 @@ typedef enum {
     NODE_LAMBDA,            // 無名関数
     NODE_SWITCH,            // 選択文
     NODE_FOREACH,           // foreach文
+    NODE_YIELD,             // 譲渡文（ジェネレータ）
     
     // 式
     NODE_BINARY,            // 二項演算
@@ -79,6 +80,7 @@ typedef struct {
     char *name;             // パラメータ名
     ValueType type;         // 型（オプション）
     bool has_type;          // 型注釈があるか
+    bool is_variadic;       // 可変長引数か（*引数名）
     struct ASTNode *default_value;  // デフォルト値（NULLなら必須）
 } Parameter;
 
@@ -141,6 +143,7 @@ struct ASTNode {
             int param_count;        // パラメータ数
             ValueType return_type;  // 戻り値の型
             bool has_return_type;   // 戻り値の型注釈があるか
+            bool is_generator;      // 生成関数かどうか
             ASTNode *body;          // 関数本体（ブロック）
         } function;
         
@@ -184,6 +187,11 @@ struct ASTNode {
         struct {
             ASTNode *value;         // 戻り値（NULLの場合あり）
         } return_stmt;
+        
+        // NODE_YIELD
+        struct {
+            ASTNode *value;         // 譲渡する値
+        } yield_stmt;
         
         // NODE_BLOCK, NODE_PROGRAM, NODE_ARRAY
         struct {

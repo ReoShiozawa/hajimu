@@ -1,0 +1,15 @@
+# Build outputs
+build/*.o
+nihongo
+nihongo_asan
+nihongo_asan.dSYM/
+
+# OS files
+.DS_Store
+
+# Test outputs
+test_output.txt
+test_append.txt
+
+# Editor
+.vscode/

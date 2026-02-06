@@ -31,6 +31,7 @@ static const char *node_type_names[] = {
     [NODE_LAMBDA] = "LAMBDA",
     [NODE_SWITCH] = "SWITCH",
     [NODE_FOREACH] = "FOREACH",
+    [NODE_YIELD] = "YIELD",
     [NODE_EXPR_STMT] = "EXPR_STMT",
     [NODE_BINARY] = "BINARY",
     [NODE_UNARY] = "UNARY",
@@ -549,6 +550,10 @@ void node_free(ASTNode *node) {
             free(node->foreach_stmt.var_name);
             node_free(node->foreach_stmt.iterable);
             node_free(node->foreach_stmt.body);
+            break;
+        
+        case NODE_YIELD:
+            node_free(node->yield_stmt.value);
             break;
             
         default:

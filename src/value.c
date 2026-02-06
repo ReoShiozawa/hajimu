@@ -126,6 +126,35 @@ Value value_instance(Value *class_ref) {
     return v;
 }
 
+Value value_generator(void) {
+    Value v;
+    v.type = VALUE_GENERATOR;
+    v.is_const = false;
+    v.ref_count = 1;
+    
+    GeneratorState *state = calloc(1, sizeof(GeneratorState));
+    state->values = NULL;
+    state->length = 0;
+    state->capacity = 0;
+    state->index = 0;
+    state->done = false;
+    state->ref_count = 1;
+    v.generator.state = state;
+    
+    return v;
+}
+
+void generator_add_value(Value *gen, Value val) {
+    if (gen->type != VALUE_GENERATOR || gen->generator.state == NULL) return;
+    GeneratorState *s = gen->generator.state;
+    if (s->length >= s->capacity) {
+        int new_cap = s->capacity == 0 ? 8 : s->capacity * 2;
+        s->values = realloc(s->values, sizeof(Value) * new_cap);
+        s->capacity = new_cap;
+    }
+    s->values[s->length++] = value_copy(val);
+}
+
 void instance_set_field(Value *instance, const char *name, Value value) {
     // 既存のフィールドを検索
     for (int i = 0; i < instance->instance.field_count; i++) {
@@ -229,6 +258,14 @@ Value value_copy(Value v) {
             }
             copy.ref_count = 1;
             break;
+        
+        case VALUE_GENERATOR:
+            // ジェネレータはシャロウコピー（状態を共有）
+            if (v.generator.state != NULL) {
+                v.generator.state->ref_count++;
+            }
+            copy.ref_count = 1;
+            break;
             
         default:
             break;
@@ -288,6 +325,20 @@ void value_free(Value *v) {
                 free(v->instance.fields);
                 v->instance.field_names = NULL;
                 v->instance.fields = NULL;
+            }
+            break;
+        
+        case VALUE_GENERATOR:
+            if (v->generator.state != NULL) {
+                v->generator.state->ref_count--;
+                if (v->generator.state->ref_count <= 0) {
+                    for (int i = 0; i < v->generator.state->length; i++) {
+                        value_free(&v->generator.state->values[i]);
+                    }
+                    free(v->generator.state->values);
+                    free(v->generator.state);
+                }
+                v->generator.state = NULL;
             }
             break;
             
@@ -616,6 +667,7 @@ bool value_is_truthy(Value v) {
         case VALUE_BUILTIN:
         case VALUE_CLASS:
         case VALUE_INSTANCE:
+        case VALUE_GENERATOR:
             return true;
     }
     return false;
@@ -633,6 +685,7 @@ const char *value_type_name(ValueType type) {
         case VALUE_BUILTIN:  return "組み込み関数";
         case VALUE_CLASS:    return "クラス";
         case VALUE_INSTANCE: return "インスタンス";
+        case VALUE_GENERATOR: return "ジェネレータ";
     }
     return "不明";
 }
@@ -775,6 +828,15 @@ char *value_to_string(Value v) {
             snprintf(buffer, 64, "<%sのインスタンス>", class_name);
             break;
         }
+        
+        case VALUE_GENERATOR:
+            buffer = malloc(64);
+            if (v.generator.state != NULL) {
+                snprintf(buffer, 64, "<ジェネレータ: %d/%d>", v.generator.state->index, v.generator.state->length);
+            } else {
+                snprintf(buffer, 64, "<ジェネレータ: 無効>");
+            }
+            break;
             
         default:
             buffer = malloc(16);

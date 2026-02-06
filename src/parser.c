@@ -24,7 +24,7 @@ static void synchronize(Parser *parser);
 
 // 文のパース
 static ASTNode *declaration(Parser *parser);
-static ASTNode *function_definition(Parser *parser);
+static ASTNode *function_definition(Parser *parser, bool is_generator);
 static ASTNode *class_definition(Parser *parser);
 static ASTNode *statement(Parser *parser);
 static ASTNode *var_declaration(Parser *parser, bool is_const);
@@ -39,12 +39,16 @@ static ASTNode *try_statement(Parser *parser);
 static ASTNode *throw_statement(Parser *parser);
 static ASTNode *switch_statement(Parser *parser);
 static ASTNode *foreach_statement(Parser *parser);
+static ASTNode *enum_definition(Parser *parser);
+static ASTNode *match_statement(Parser *parser);
 static ASTNode *expression_statement(Parser *parser);
 static ASTNode *block(Parser *parser);
 
 // 式のパース（優先順位低い順）
 static ASTNode *expression(Parser *parser);
 static ASTNode *pipe_expr(Parser *parser);
+static ASTNode *ternary_expr(Parser *parser);
+static ASTNode *null_coalesce_expr(Parser *parser);
 static ASTNode *or_expr(Parser *parser);
 static ASTNode *and_expr(Parser *parser);
 static ASTNode *not_expr(Parser *parser);
@@ -234,12 +238,24 @@ static Parameter *parse_parameters(Parser *parser, int *count) {
             params = realloc(params, sizeof(Parameter) * capacity);
         }
         
-        // パラメータ名
-        consume(parser, TOKEN_IDENTIFIER, "パラメータ名が必要です");
+        // 可変長引数（*引数名）
+        bool is_variadic = false;
+        if (match(parser, TOKEN_STAR)) {
+            is_variadic = true;
+        }
+        
+        // パラメータ名（キーワードも許可 - 「数値」「文字列」等が変数名として使われる場合）
+        if (check(parser, TOKEN_IDENTIFIER) || check(parser, TOKEN_TYPE_NUMBER) ||
+            check(parser, TOKEN_TYPE_STRING_T) || check(parser, TOKEN_TYPE_BOOL)) {
+            advance(parser);
+        } else {
+            consume(parser, TOKEN_IDENTIFIER, "パラメータ名が必要です");
+        }
         params[*count].name = copy_token_string(&parser->previous);
         params[*count].has_type = false;
         params[*count].type = VALUE_NULL;
         params[*count].default_value = NULL;
+        params[*count].is_variadic = is_variadic;
         
         // 型注釈（オプション）
         if (match(parser, TOKEN_TYPE_IS)) {
@@ -253,6 +269,11 @@ static Parameter *parse_parameters(Parser *parser, int *count) {
         }
         
         (*count)++;
+        
+        // 可変長引数は最後でなければならない
+        if (is_variadic && check(parser, TOKEN_COMMA)) {
+            error(parser, "可変長引数は最後のパラメータでなければなりません");
+        }
     } while (match(parser, TOKEN_COMMA));
     
     return params;
@@ -312,6 +333,15 @@ ASTNode *parse_program(Parser *parser) {
 // =============================================================================
 
 static ASTNode *declaration(Parser *parser) {
+    // 生成関数チェック
+    if (check(parser, TOKEN_GENERATOR_FUNC)) {
+        advance(parser); // TOKEN_GENERATOR_FUNC を消費
+        if (check(parser, TOKEN_IDENTIFIER)) {
+            return function_definition(parser, true);
+        }
+        error(parser, "生成関数の後に関数名が必要です");
+    }
+    
     if (check(parser, TOKEN_FUNCTION)) {
         // 関数定義 vs ラムダ式の判定
         // 関数 名前(...) は関数定義、関数(...) はラムダ式
@@ -323,7 +353,7 @@ static ASTNode *declaration(Parser *parser) {
         
         if (check(parser, TOKEN_IDENTIFIER)) {
             // 関数定義
-            return function_definition(parser);
+            return function_definition(parser, false);
         }
         
         // ラムダ式 → パーサー状態を戻して式文として処理
@@ -335,7 +365,7 @@ static ASTNode *declaration(Parser *parser) {
     return statement(parser);
 }
 
-static ASTNode *function_definition(Parser *parser) {
+static ASTNode *function_definition(Parser *parser, bool is_generator) {
     int line = parser->previous.line;
     int column = parser->previous.column;
     
@@ -366,8 +396,10 @@ static ASTNode *function_definition(Parser *parser) {
     // 終わり
     consume(parser, TOKEN_END, "'終わり' が必要です");
     
-    return node_function_def(name, params, param_count, return_type, has_return_type,
+    ASTNode *func_node = node_function_def(name, params, param_count, return_type, has_return_type,
                             body, line, column);
+    func_node->function.is_generator = is_generator;
+    return func_node;
 }
 
 // =============================================================================
@@ -414,6 +446,20 @@ static ASTNode *statement(Parser *parser) {
     if (match(parser, TOKEN_EACH)) {
         return foreach_statement(parser);
     }
+    if (match(parser, TOKEN_ENUM)) {
+        return enum_definition(parser);
+    }
+    if (match(parser, TOKEN_MATCH)) {
+        return match_statement(parser);
+    }
+    if (match(parser, TOKEN_YIELD)) {
+        int line = parser->previous.line;
+        int column = parser->previous.column;
+        ASTNode *value = expression(parser);
+        ASTNode *node = node_new(NODE_YIELD, line, column);
+        node->yield_stmt.value = value;
+        return node;
+    }
     
     // for文のチェック（識別子 を ... から ... 繰り返す）
     if (check(parser, TOKEN_IDENTIFIER)) {
@@ -446,7 +492,56 @@ static ASTNode *var_declaration(Parser *parser, bool is_const) {
     int line = parser->previous.line;
     int column = parser->previous.column;
     
-    // 変数名
+    // 分割代入: 変数 [a, b, c] = [1, 2, 3]
+    if (match(parser, TOKEN_LBRACKET)) {
+        // 変数名リストを収集
+        int name_count = 0;
+        int name_capacity = 8;
+        char **names = malloc(sizeof(char*) * name_capacity);
+        
+        if (!check(parser, TOKEN_RBRACKET)) {
+            do {
+                consume(parser, TOKEN_IDENTIFIER, "変数名が必要です");
+                if (name_count >= name_capacity) {
+                    name_capacity *= 2;
+                    names = realloc(names, sizeof(char*) * name_capacity);
+                }
+                names[name_count++] = copy_token_string(&parser->previous);
+            } while (match(parser, TOKEN_COMMA));
+        }
+        consume(parser, TOKEN_RBRACKET, "']' が必要です");
+        
+        consume(parser, TOKEN_ASSIGN, "'=' が必要です");
+        ASTNode *initializer = expression(parser);
+        
+        if (!check(parser, TOKEN_EOF) && !check(parser, TOKEN_DEDENT) && 
+            !check(parser, TOKEN_END)) {
+            consume(parser, TOKEN_NEWLINE, "改行が必要です");
+        }
+        
+        // ブロックノードに展開: 各変数にインデックスアクセスで代入
+        // まず一時変数に初期化式を代入
+        char tmp_name[64];
+        snprintf(tmp_name, sizeof(tmp_name), "__分割_%d", line);
+        ASTNode *tmp_decl = node_var_decl(tmp_name, initializer, false, line, column);
+        
+        ASTNode *result_block = node_block(line, column);
+        block_add_statement(result_block, tmp_decl);
+        
+        for (int i = 0; i < name_count; i++) {
+            ASTNode *idx = node_number(i, line, column);
+            ASTNode *tmp_id = node_identifier(tmp_name, line, column);
+            ASTNode *access = node_index(tmp_id, idx, line, column);
+            ASTNode *decl = node_var_decl(names[i], access, is_const, line, column);
+            block_add_statement(result_block, decl);
+            free(names[i]);
+        }
+        free(names);
+        
+        return result_block;
+    }
+    
+    // 通常の変数宣言
     consume(parser, TOKEN_IDENTIFIER, "変数名が必要です");
     char *name = copy_token_string(&parser->previous);
     
@@ -714,7 +809,199 @@ static ASTNode *switch_statement(Parser *parser) {
     return node;
 }
 
+// パターンマッチ文
+// 照合 値:
+//   場合 パターン => 処理
+//   場合 パターン1, パターン2 => 処理
+//   既定 => 処理
+// 終わり
+static ASTNode *match_statement(Parser *parser) {
+    int line = parser->previous.line;
+    int column = parser->previous.column;
+    
+    // 照合対象の式
+    ASTNode *target = expression(parser);
+    
+    // コロン
+    consume(parser, TOKEN_COLON, "':' が必要です");
+    
+    ASTNode *node = node_switch(target, line, column);
+    
+    // 改行とインデント
+    skip_newlines(parser);
+    match(parser, TOKEN_INDENT);
+    
+    // パターン句を読み込む
+    while (match(parser, TOKEN_CASE)) {
+        // パターン値を収集（カンマ区切りで複数可）
+        int value_count = 0;
+        int value_capacity = 4;
+        ASTNode **case_values = malloc(sizeof(ASTNode *) * value_capacity);
+        
+        case_values[value_count++] = expression(parser);
+        while (match(parser, TOKEN_COMMA)) {
+            if (value_count >= value_capacity) {
+                value_capacity *= 2;
+                case_values = realloc(case_values, sizeof(ASTNode *) * value_capacity);
+            }
+            case_values[value_count++] = expression(parser);
+        }
+        
+        // =>
+        consume(parser, TOKEN_ARROW, "'=>' が必要です");
+        
+        // 本体（=> の後の1行文、またはブロック）
+        ASTNode *case_body;
+        if (check(parser, TOKEN_NEWLINE)) {
+            case_body = block(parser);
+        } else {
+            case_body = statement(parser);
+        }
+        
+        // 各パターン値を登録
+        // bodyのオーナーシップ: 1つのbodyは1箇所のみが所有する
+        // 複数パターンの場合、最後のケースだけがbodyを保持し、
+        // それ以前のケースはNULL（evaluatorでフォールスルー）
+        bool body_owned_by_default = false;
+        
+        // ワイルドカードの有無を先にチェック
+        for (int i = 0; i < value_count; i++) {
+            if (case_values[i]->type == NODE_IDENTIFIER && 
+                strcmp(case_values[i]->string_value, "_") == 0) {
+                body_owned_by_default = true;
+                break;
+            }
+        }
+        
+        for (int i = 0; i < value_count; i++) {
+            if (case_values[i]->type == NODE_IDENTIFIER && 
+                strcmp(case_values[i]->string_value, "_") == 0) {
+                // ワイルドカード _ はデフォルトとして扱う（bodyの所有権はここ）
+                node->switch_stmt.default_body = case_body;
+                node_free(case_values[i]); // _ ノードは不要
+            } else {
+                // ワイルドカードがない場合: 最後の非ワイルドカードパターンがbodyを所有
+                // ワイルドカードがある場合: default_bodyが所有するので全てNULL
+                bool is_last_non_wildcard = true;
+                if (!body_owned_by_default) {
+                    // この後にまだ非ワイルドカードパターンがあるかチェック
+                    for (int j = i + 1; j < value_count; j++) {
+                        if (!(case_values[j]->type == NODE_IDENTIFIER && 
+                              strcmp(case_values[j]->string_value, "_") == 0)) {
+                            is_last_non_wildcard = false;
+                            break;
+                        }
+                    }
+                }
+                
+                ASTNode *body_for_case = NULL;
+                if (!body_owned_by_default && is_last_non_wildcard) {
+                    body_for_case = case_body;
+                }
+                switch_add_case(node, case_values[i], body_for_case);
+            }
+        }
+        
+        // ワイルドカードがなく、通常ケースだけの場合は最後のケースがbodyを所有
+        // ワイルドカードがある場合はdefault_bodyがbodyを所有（上で設定済み）
+        
+        free(case_values);
+        
+        // 改行をスキップ
+        while (match(parser, TOKEN_NEWLINE) || match(parser, TOKEN_INDENT) || match(parser, TOKEN_DEDENT)) {}
+    }
+    
+    // 既定句（オプション）
+    if (match(parser, TOKEN_DEFAULT)) {
+        consume(parser, TOKEN_ARROW, "'=>' が必要です");
+        if (check(parser, TOKEN_NEWLINE)) {
+            node->switch_stmt.default_body = block(parser);
+        } else {
+            node->switch_stmt.default_body = statement(parser);
+        }
+        while (match(parser, TOKEN_NEWLINE) || match(parser, TOKEN_INDENT) || match(parser, TOKEN_DEDENT)) {}
+    }
+    
+    // デデントと終わり
+    match(parser, TOKEN_DEDENT);
+    consume(parser, TOKEN_END, "'終わり' が必要です");
+    
+    return node;
+}
+
 // 各要素ループ（foreach）のパース
+// 列挙 名前:
+//   値1
+//   値2 = 式
+//   ...
+// 終わり
+// → 定数 名前 = {"値1": 0, "値2": 式, ...} として変換
+static ASTNode *enum_definition(Parser *parser) {
+    int line = parser->previous.line;
+    int column = parser->previous.column;
+    
+    // 列挙名
+    consume(parser, TOKEN_IDENTIFIER, "列挙名が必要です");
+    char *name = copy_token_string(&parser->previous);
+    
+    // コロン
+    consume(parser, TOKEN_COLON, "':' が必要です");
+    
+    // 改行をスキップ
+    while (match(parser, TOKEN_NEWLINE)) {}
+    
+    // メンバーを収集
+    int capacity = 8;
+    int count = 0;
+    char **keys = malloc(sizeof(char *) * capacity);
+    ASTNode **values = malloc(sizeof(ASTNode *) * capacity);
+    int auto_value = 0;
+    
+    while (!check(parser, TOKEN_END) && !check(parser, TOKEN_EOF)) {
+        // 空白・改行・インデントをスキップ
+        if (match(parser, TOKEN_NEWLINE) || match(parser, TOKEN_INDENT) || 
+            match(parser, TOKEN_DEDENT) || match(parser, TOKEN_COMMA)) {
+            continue;
+        }
+        
+        if (check(parser, TOKEN_END)) break;
+        
+        if (count >= capacity) {
+            capacity *= 2;
+            keys = realloc(keys, sizeof(char *) * capacity);
+            values = realloc(values, sizeof(ASTNode *) * capacity);
+        }
+        
+        // メンバー名
+        consume(parser, TOKEN_IDENTIFIER, "列挙メンバー名が必要です");
+        char *member_name = copy_token_string(&parser->previous);
+        keys[count] = member_name;
+        
+        // = 値（オプション）
+        if (match(parser, TOKEN_ASSIGN)) {
+            values[count] = expression(parser);
+            // 値が数値リテラルの場合、auto_valueを更新
+            if (values[count]->type == NODE_NUMBER) {
+                auto_value = (int)values[count]->number_value + 1;
+            }
+        } else {
+            values[count] = node_number(auto_value, line, column);
+            auto_value++;
+        }
+        
+        count++;
+        
+        // 改行・カンマをスキップ
+        while (match(parser, TOKEN_NEWLINE) || match(parser, TOKEN_COMMA)) {}
+    }
+    
+    consume(parser, TOKEN_END, "'終わり' が必要です");
+    
+    // 辞書リテラルとして定数宣言に変換
+    ASTNode *dict = node_dict(keys, values, count, line, column);
+    return node_var_decl(name, dict, true, line, column);
+}
+
 // 各 変数名 を 配列式 の中:
 //   文...
 // 終わり
@@ -987,17 +1274,52 @@ static ASTNode *expression(Parser *parser) {
 
 // パイプ演算子: 式 |> 関数
 static ASTNode *pipe_expr(Parser *parser) {
-    ASTNode *left = or_expr(parser);
+    ASTNode *left = ternary_expr(parser);
     
     while (match(parser, TOKEN_PIPE)) {
         int line = parser->previous.line;
         int column = parser->previous.column;
         // 右辺は関数（呼び出し対象）
-        ASTNode *func = or_expr(parser);
+        ASTNode *func = ternary_expr(parser);
         // left |> func → func(left) に変換
         ASTNode **args = malloc(sizeof(ASTNode*));
         args[0] = left;
         left = node_call(func, args, 1, line, column);
+    }
+    
+    return left;
+}
+
+// 三項演算子: 条件 ? 真値 : 偽値
+static ASTNode *ternary_expr(Parser *parser) {
+    ASTNode *condition = null_coalesce_expr(parser);
+    
+    if (match(parser, TOKEN_QUESTION)) {
+        int line = parser->previous.line;
+        int column = parser->previous.column;
+        ASTNode *then_expr = expression(parser);
+        consume(parser, TOKEN_COLON, "三項演算子に ':' が必要です");
+        ASTNode *else_expr = expression(parser);
+        // if文ノードを再利用
+        ASTNode *node = node_if(condition, then_expr, else_expr, line, column);
+        return node;
+    }
+    
+    return condition;
+}
+
+// null合体演算子: 式 ?? デフォルト値
+static ASTNode *null_coalesce_expr(Parser *parser) {
+    ASTNode *left = or_expr(parser);
+    
+    while (match(parser, TOKEN_NULL_COALESCE)) {
+        int line = parser->previous.line;
+        int column = parser->previous.column;
+        ASTNode *right = or_expr(parser);
+        // null合体: left が null なら right を返す
+        // if (left == null) right else left として実装
+        // NODE_BINARY + TOKEN_NULL_COALESCE として評価器で処理
+        left = node_binary(TOKEN_NULL_COALESCE, left, right, line, column);
     }
     
     return left;
@@ -1141,8 +1463,20 @@ static ASTNode *call(Parser *parser) {
             // メンバーアクセス
             int line = parser->previous.line;
             int column = parser->previous.column;
-            consume(parser, TOKEN_IDENTIFIER, "メンバー名が必要です");
-            char *member_name = copy_token_string(&parser->previous);
+            // ドットの後はメンバー名（キーワードも許可）
+            char *member_name = NULL;
+            if (match(parser, TOKEN_IDENTIFIER)) {
+                member_name = copy_token_string(&parser->previous);
+            } else if (match(parser, TOKEN_INIT)) {
+                member_name = strdup("初期化");
+            } else if (match(parser, TOKEN_FUNCTION)) {
+                member_name = strdup("関数");
+            } else {
+                // その他のキーワードトークンも識別子として使えるようにする
+                // 現在のトークンのテキストをメンバー名として使用
+                advance(parser);
+                member_name = copy_token_string(&parser->previous);
+            }
             expr = node_member(expr, member_name, line, column);
         } else {
             break;
@@ -1167,7 +1501,13 @@ static ASTNode *finish_call(Parser *parser, ASTNode *callee) {
                 capacity *= 2;
                 args = realloc(args, sizeof(ASTNode *) * capacity);
             }
-            args[arg_count++] = expression(parser);
+            // スプレッド演算子 ...配列
+            if (match(parser, TOKEN_SPREAD)) {
+                ASTNode *operand = expression(parser);
+                args[arg_count++] = node_unary(TOKEN_SPREAD, operand, operand->location.line, operand->location.column);
+            } else {
+                args[arg_count++] = expression(parser);
+            }
         } while (match(parser, TOKEN_COMMA));
     }
     
@@ -1362,6 +1702,11 @@ static ASTNode *primary(Parser *parser) {
         consume(parser, TOKEN_END, "'終わり' が必要です");
         
         return node_lambda(params, param_count, body, line, column);
+    }
+    
+    // 親.メソッド名(引数) - super呼び出し
+    if (match(parser, TOKEN_SUPER)) {
+        return node_identifier("親", line, column);
     }
     
     error(parser, "式が必要です");

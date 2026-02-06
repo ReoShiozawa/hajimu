@@ -5,6 +5,7 @@
 #include "evaluator.h"
 #include "parser.h"
 #include "http.h"
+#include "async.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,9 +14,15 @@
 #include <time.h>
 #include <unistd.h>
 #include <regex.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <dirent.h>
 
 // 高階関数用のグローバル評価器ポインタ
 static Evaluator *g_eval = NULL;
+
+// 非同期モジュール用のグローバル評価器ポインタ
+Evaluator *g_eval_for_async = NULL;
 
 // =============================================================================
 // 前方宣言
@@ -43,6 +50,7 @@ static Value evaluate_lambda(Evaluator *eval, ASTNode *node);
 static Value evaluate_switch(Evaluator *eval, ASTNode *node);
 static Value evaluate_foreach(Evaluator *eval, ASTNode *node);
 static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int line);
+static Value call_function_value(Value *func, Value *args, int argc);
 
 // =============================================================================
 // 組み込み関数のプロトタイプ
@@ -127,12 +135,53 @@ static Value builtin_bit_not(int argc, Value *argv);
 static Value builtin_bit_lshift(int argc, Value *argv);
 static Value builtin_bit_rshift(int argc, Value *argv);
 
+// 追加文字列関数
+static Value builtin_substring(int argc, Value *argv);
+static Value builtin_starts_with(int argc, Value *argv);
+static Value builtin_ends_with(int argc, Value *argv);
+static Value builtin_char_code(int argc, Value *argv);
+static Value builtin_from_char_code(int argc, Value *argv);
+static Value builtin_string_repeat(int argc, Value *argv);
+
+// 追加配列関数
+static Value builtin_pop(int argc, Value *argv);
+static Value builtin_find_item(int argc, Value *argv);
+static Value builtin_every(int argc, Value *argv);
+static Value builtin_some(int argc, Value *argv);
+static Value builtin_unique(int argc, Value *argv);
+static Value builtin_zip(int argc, Value *argv);
+static Value builtin_flat(int argc, Value *argv);
+static Value builtin_insert(int argc, Value *argv);
+static Value builtin_sort_by(int argc, Value *argv);
+
+// 数学関数
+static Value builtin_sin(int argc, Value *argv);
+static Value builtin_cos(int argc, Value *argv);
+static Value builtin_tan(int argc, Value *argv);
+static Value builtin_log(int argc, Value *argv);
+static Value builtin_log10_fn(int argc, Value *argv);
+static Value builtin_random_int(int argc, Value *argv);
+
+// ファイル追記・ディレクトリ
+static Value builtin_file_append(int argc, Value *argv);
+static Value builtin_dir_list(int argc, Value *argv);
+static Value builtin_dir_create(int argc, Value *argv);
+
+// その他ユーティリティ
+static Value builtin_assert(int argc, Value *argv);
+static Value builtin_typeof_check(int argc, Value *argv);
+
 // システムユーティリティ
 static Value builtin_sleep(int argc, Value *argv);
 static Value builtin_exec(int argc, Value *argv);
 static Value builtin_env_get(int argc, Value *argv);
 static Value builtin_env_set(int argc, Value *argv);
 static Value builtin_exit_program(int argc, Value *argv);
+
+// ジェネレータ関数
+static Value builtin_generator_next(int argc, Value *argv);
+static Value builtin_generator_done(int argc, Value *argv);
+static Value builtin_generator_collect(int argc, Value *argv);
 
 // =============================================================================
 // 評価器の初期化・解放
@@ -149,6 +198,8 @@ Evaluator *evaluator_new(void) {
     eval->throwing = false;
     eval->exception_value = value_null();
     eval->current_instance = NULL;
+    eval->in_generator = false;
+    eval->generator_target = NULL;
     eval->debug_mode = false;
     eval->step_mode = false;
     eval->last_line = 0;
@@ -156,6 +207,7 @@ Evaluator *evaluator_new(void) {
     eval->error_message[0] = '\0';
     eval->error_line = 0;
     eval->recursion_depth = 0;
+    eval->call_stack_depth = 0;
     
     // インポートモジュールの初期化
     eval->imported_modules = NULL;
@@ -173,6 +225,12 @@ Evaluator *evaluator_new(void) {
 
 void evaluator_free(Evaluator *eval) {
     if (eval == NULL) return;
+    
+    // 非同期ランタイムをクリーンアップ
+    if (eval == g_eval_for_async) {
+        async_runtime_cleanup();
+        g_eval_for_async = NULL;
+    }
     
     // インポートされたモジュールを解放
     for (int i = 0; i < eval->imported_count; i++) {
@@ -245,6 +303,72 @@ void register_builtins(Evaluator *eval) {
                value_builtin(builtin_bit_lshift, "左シフト", 2, 2), true);
     env_define(eval->global, "右シフト",
                value_builtin(builtin_bit_rshift, "右シフト", 2, 2), true);
+    
+    // 追加文字列関数
+    env_define(eval->global, "部分文字列",
+               value_builtin(builtin_substring, "部分文字列", 2, 3), true);
+    env_define(eval->global, "始まる",
+               value_builtin(builtin_starts_with, "始まる", 2, 2), true);
+    env_define(eval->global, "終わる",
+               value_builtin(builtin_ends_with, "終わる", 2, 2), true);
+    env_define(eval->global, "文字コード",
+               value_builtin(builtin_char_code, "文字コード", 1, 2), true);
+    env_define(eval->global, "コード文字",
+               value_builtin(builtin_from_char_code, "コード文字", 1, 1), true);
+    env_define(eval->global, "繰り返し",
+               value_builtin(builtin_string_repeat, "繰り返し", 2, 2), true);
+    
+    // 追加配列関数
+    env_define(eval->global, "末尾削除",
+               value_builtin(builtin_pop, "末尾削除", 1, 1), true);
+    env_define(eval->global, "探す",
+               value_builtin(builtin_find_item, "探す", 2, 2), true);
+    env_define(eval->global, "全て",
+               value_builtin(builtin_every, "全て", 2, 2), true);
+    env_define(eval->global, "一つでも",
+               value_builtin(builtin_some, "一つでも", 2, 2), true);
+    env_define(eval->global, "一意",
+               value_builtin(builtin_unique, "一意", 1, 1), true);
+    env_define(eval->global, "圧縮",
+               value_builtin(builtin_zip, "圧縮", 2, 2), true);
+    env_define(eval->global, "平坦化",
+               value_builtin(builtin_flat, "平坦化", 1, 1), true);
+    env_define(eval->global, "挿入",
+               value_builtin(builtin_insert, "挿入", 3, 3), true);
+    env_define(eval->global, "比較ソート",
+               value_builtin(builtin_sort_by, "比較ソート", 2, 2), true);
+    
+    // 数学関数（拡張）
+    env_define(eval->global, "正弦",
+               value_builtin(builtin_sin, "正弦", 1, 1), true);
+    env_define(eval->global, "余弦",
+               value_builtin(builtin_cos, "余弦", 1, 1), true);
+    env_define(eval->global, "正接",
+               value_builtin(builtin_tan, "正接", 1, 1), true);
+    env_define(eval->global, "対数",
+               value_builtin(builtin_log, "対数", 1, 1), true);
+    env_define(eval->global, "常用対数",
+               value_builtin(builtin_log10_fn, "常用対数", 1, 1), true);
+    env_define(eval->global, "乱数整数",
+               value_builtin(builtin_random_int, "乱数整数", 2, 2), true);
+    
+    // 数学定数
+    env_define(eval->global, "円周率", value_number(3.14159265358979323846), true);
+    env_define(eval->global, "自然対数の底", value_number(2.71828182845904523536), true);
+    
+    // ファイル・ディレクトリ
+    env_define(eval->global, "追記",
+               value_builtin(builtin_file_append, "追記", 2, 2), true);
+    env_define(eval->global, "ディレクトリ一覧",
+               value_builtin(builtin_dir_list, "ディレクトリ一覧", 1, 1), true);
+    env_define(eval->global, "ディレクトリ作成",
+               value_builtin(builtin_dir_create, "ディレクトリ作成", 1, 1), true);
+    
+    // ユーティリティ
+    env_define(eval->global, "表明",
+               value_builtin(builtin_assert, "表明", 1, 2), true);
+    env_define(eval->global, "型判定",
+               value_builtin(builtin_typeof_check, "型判定", 2, 2), true);
     
     // 数学関数
     env_define(eval->global, "絶対値",
@@ -375,6 +499,67 @@ void register_builtins(Evaluator *eval) {
                value_builtin(builtin_env_set, "環境変数設定", 2, 2), true);
     env_define(eval->global, "終了",
                value_builtin(builtin_exit_program, "終了", 0, 1), true);
+    
+    // 非同期処理
+    env_define(eval->global, "非同期実行",
+               value_builtin(builtin_async_run, "非同期実行", 1, -1), true);
+    env_define(eval->global, "待機",
+               value_builtin(builtin_async_await, "待機", 1, 1), true);
+    env_define(eval->global, "全待機",
+               value_builtin(builtin_async_await_all, "全待機", 1, 1), true);
+    env_define(eval->global, "タスク状態",
+               value_builtin(builtin_task_status, "タスク状態", 1, 1), true);
+    
+    // 並列処理
+    env_define(eval->global, "並列実行",
+               value_builtin(builtin_parallel_run, "並列実行", 1, 1), true);
+    env_define(eval->global, "排他作成",
+               value_builtin(builtin_mutex_create, "排他作成", 0, 0), true);
+    env_define(eval->global, "排他実行",
+               value_builtin(builtin_mutex_exec, "排他実行", 2, 2), true);
+    
+    // チャネル（スレッド間通信）
+    env_define(eval->global, "チャネル作成",
+               value_builtin(builtin_channel_create, "チャネル作成", 0, 1), true);
+    env_define(eval->global, "チャネル送信",
+               value_builtin(builtin_channel_send, "チャネル送信", 2, 2), true);
+    env_define(eval->global, "チャネル受信",
+               value_builtin(builtin_channel_receive, "チャネル受信", 1, 1), true);
+    env_define(eval->global, "チャネル閉じる",
+               value_builtin(builtin_channel_close, "チャネル閉じる", 1, 1), true);
+    
+    // スケジューラ
+    env_define(eval->global, "定期実行",
+               value_builtin(builtin_schedule_interval, "定期実行", 2, 2), true);
+    env_define(eval->global, "遅延実行",
+               value_builtin(builtin_schedule_delay, "遅延実行", 2, 2), true);
+    env_define(eval->global, "スケジュール停止",
+               value_builtin(builtin_schedule_stop, "スケジュール停止", 1, 1), true);
+    env_define(eval->global, "全スケジュール停止",
+               value_builtin(builtin_schedule_stop_all, "全スケジュール停止", 0, 0), true);
+    
+    // WebSocket
+    env_define(eval->global, "WS接続",
+               value_builtin(builtin_ws_connect, "WS接続", 1, 1), true);
+    env_define(eval->global, "WS送信",
+               value_builtin(builtin_ws_send, "WS送信", 2, 2), true);
+    env_define(eval->global, "WS受信",
+               value_builtin(builtin_ws_receive, "WS受信", 1, 2), true);
+    env_define(eval->global, "WS切断",
+               value_builtin(builtin_ws_close, "WS切断", 1, 1), true);
+    env_define(eval->global, "WS状態",
+               value_builtin(builtin_ws_status, "WS状態", 1, 1), true);
+    
+    // ジェネレータ関数
+    env_define(eval->global, "次",
+               value_builtin(builtin_generator_next, "次", 1, 1), true);
+    env_define(eval->global, "完了",
+               value_builtin(builtin_generator_done, "完了", 1, 1), true);
+    env_define(eval->global, "全値",
+               value_builtin(builtin_generator_collect, "全値", 1, 1), true);
+    
+    // 非同期ランタイムの初期化
+    async_runtime_init();
 }
 
 // =============================================================================
@@ -397,6 +582,16 @@ void runtime_error(Evaluator *eval, int line, const char *format, ...) {
              "[%d行目] 実行時エラー: %s", line, message);
     
     fprintf(stderr, "%s\n", eval->error_message);
+    
+    // スタックトレースを出力
+    if (eval->call_stack_depth > 0) {
+        fprintf(stderr, "スタックトレース:\n");
+        for (int i = eval->call_stack_depth - 1; i >= 0; i--) {
+            fprintf(stderr, "  %s() (%d行目)\n", 
+                    eval->call_stack[i].func_name,
+                    eval->call_stack[i].line);
+        }
+    }
 }
 
 bool evaluator_had_error(Evaluator *eval) {
@@ -457,6 +652,7 @@ Value evaluator_run(Evaluator *eval, ASTNode *program) {
     }
     
     g_eval = eval;
+    g_eval_for_async = eval;
     
     Value result = value_null();
     
@@ -607,7 +803,7 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
             
         case NODE_RETURN:
             if (node->return_stmt.value != NULL) {
-                eval->return_value = evaluate(eval, node->return_stmt.value);
+                eval->return_value = value_copy(evaluate(eval, node->return_stmt.value));
             } else {
                 eval->return_value = value_null();
             }
@@ -620,6 +816,18 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
             
         case NODE_CONTINUE:
             eval->continuing = true;
+            break;
+        
+        case NODE_YIELD:
+            if (eval->in_generator && eval->generator_target != NULL) {
+                Value yield_val = evaluate(eval, node->yield_stmt.value);
+                if (!eval->had_error) {
+                    generator_add_value(eval->generator_target, yield_val);
+                }
+            } else {
+                runtime_error(eval, node->location.line,
+                             "'譲渡' は生成関数内でのみ使用できます");
+            }
             break;
         
         case NODE_IMPORT:
@@ -711,6 +919,14 @@ static Value evaluate_binary(Evaluator *eval, ASTNode *node) {
         Value left = evaluate(eval, node->binary.left);
         if (eval->had_error) return value_null();
         if (value_is_truthy(left)) return left;
+        return evaluate(eval, node->binary.right);
+    }
+    
+    // null合体演算子: 左辺がnullなら右辺を返す
+    if (node->binary.operator == TOKEN_NULL_COALESCE) {
+        Value left = evaluate(eval, node->binary.left);
+        if (eval->had_error) return value_null();
+        if (left.type != VALUE_NULL) return left;
         return evaluate(eval, node->binary.right);
     }
     
@@ -827,12 +1043,24 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
     // メソッド呼び出しの場合、インスタンスを保存
     Value instance = value_null();
     bool is_method_call = false;
+    bool is_super_call = false;
     
     if (node->call.callee->type == NODE_MEMBER) {
-        instance = evaluate(eval, node->call.callee->member.object);
-        if (eval->had_error) return value_null();
-        if (instance.type == VALUE_INSTANCE) {
-            is_method_call = true;
+        // 親クラスのメソッド呼び出しかチェック
+        if (node->call.callee->member.object->type == NODE_IDENTIFIER &&
+            strcmp(node->call.callee->member.object->string_value, "親") == 0) {
+            is_super_call = true;
+            // superの場合、instanceは現在のインスタンス
+            if (eval->current_instance != NULL) {
+                instance = value_copy(*eval->current_instance);
+                is_method_call = true;
+            }
+        } else {
+            instance = evaluate(eval, node->call.callee->member.object);
+            if (eval->had_error) return value_null();
+            if (instance.type == VALUE_INSTANCE) {
+                is_method_call = true;
+            }
         }
     }
     
@@ -888,18 +1116,53 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
         }
     }
     
-    // 引数を評価
+    // 引数を評価（スプレッド演算子対応）
     Value *args = NULL;
+    int actual_arg_count = 0;
+    int args_capacity = node->call.arg_count > 0 ? node->call.arg_count * 2 : 4;
     if (node->call.arg_count > 0) {
-        args = malloc(sizeof(Value) * node->call.arg_count);
+        args = malloc(sizeof(Value) * args_capacity);
         for (int i = 0; i < node->call.arg_count; i++) {
-            args[i] = evaluate(eval, node->call.arguments[i]);
-            if (eval->had_error) {
-                free(args);
-                return value_null();
+            ASTNode *arg_node = node->call.arguments[i];
+            // スプレッド演算子: ...配列 → 配列の各要素を展開
+            if (arg_node->type == NODE_UNARY && arg_node->unary.operator == TOKEN_SPREAD) {
+                Value spread_val = evaluate(eval, arg_node->unary.operand);
+                if (eval->had_error) {
+                    free(args);
+                    return value_null();
+                }
+                if (spread_val.type != VALUE_ARRAY) {
+                    runtime_error(eval, arg_node->location.line, "スプレッド演算子は配列にのみ使用できます");
+                    free(args);
+                    return value_null();
+                }
+                // 配列の各要素を引数に追加
+                for (int j = 0; j < spread_val.array.length; j++) {
+                    if (actual_arg_count >= args_capacity) {
+                        args_capacity *= 2;
+                        args = realloc(args, sizeof(Value) * args_capacity);
+                    }
+                    args[actual_arg_count++] = value_copy(spread_val.array.elements[j]);
+                }
+            } else {
+                if (actual_arg_count >= args_capacity) {
+                    args_capacity *= 2;
+                    args = realloc(args, sizeof(Value) * args_capacity);
+                }
+                args[actual_arg_count] = evaluate(eval, arg_node);
+                if (eval->had_error) {
+                    free(args);
+                    return value_null();
+                }
+                actual_arg_count++;
             }
         }
     }
+    // スプレッド展開後の実際の引数数を使う
+    int original_arg_count = node->call.arg_count;
+    // 一時的にarg_countを実引数数に更新（後で戻す）
+    // NOTE: node自体を変更せず、ローカル変数で管理
+    int effective_arg_count = actual_arg_count;
     
     Value result = value_null();
     
@@ -909,16 +1172,16 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
         int min = callee.builtin.min_args;
         int max = callee.builtin.max_args;
         
-        if (node->call.arg_count < min) {
+        if (effective_arg_count < min) {
             runtime_error(eval, node->location.line,
                          "%sには少なくとも%d個の引数が必要です",
                          callee.builtin.name, min);
-        } else if (max >= 0 && node->call.arg_count > max) {
+        } else if (max >= 0 && effective_arg_count > max) {
             runtime_error(eval, node->location.line,
                          "%sの引数は最大%d個です",
                          callee.builtin.name, max);
         } else {
-            result = callee.builtin.fn(node->call.arg_count, args);
+            result = callee.builtin.fn(effective_arg_count, args);
         }
     }
     // ユーザー定義関数
@@ -945,35 +1208,47 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
         
         // 必須引数の数をカウント（デフォルト値なしのパラメータ）
         int min_required = 0;
+        bool has_variadic = false;
         for (int i = 0; i < expected_count; i++) {
-            if (params[i].default_value == NULL) {
+            if (params[i].is_variadic) {
+                has_variadic = true;
+            } else if (params[i].default_value == NULL) {
                 min_required++;
             }
         }
         
-        // 引数の数をチェック（デフォルト引数対応）
-        if (node->call.arg_count < min_required || node->call.arg_count > expected_count) {
+        // 引数の数をチェック（デフォルト引数・可変長引数対応）
+        int max_allowed = has_variadic ? 999 : expected_count;
+        if (effective_arg_count < min_required || 
+            (!has_variadic && effective_arg_count > expected_count)) {
             if (min_required == expected_count) {
                 runtime_error(eval, node->location.line,
                              "%sには%d個の引数が必要です（%d個渡されました）",
                              func_name,
                              expected_count,
-                             node->call.arg_count);
+                             effective_arg_count);
             } else {
                 runtime_error(eval, node->location.line,
                              "%sには%d〜%d個の引数が必要です（%d個渡されました）",
                              func_name,
                              min_required,
                              expected_count,
-                             node->call.arg_count);
+                             effective_arg_count);
             }
         } else {
             // 新しいスコープを作成
             Environment *local = env_new(callee.function.closure);
             
-            // 引数をバインド（渡された引数 + デフォルト値）
+            // 引数をバインド（渡された引数 + デフォルト値 + 可変長）
             for (int i = 0; i < expected_count; i++) {
-                if (i < node->call.arg_count) {
+                if (params[i].is_variadic) {
+                    // 可変長引数: 残りの引数を配列に収集
+                    Value rest = value_array();
+                    for (int j = i; j < effective_arg_count; j++) {
+                        array_push(&rest, value_copy(args[j]));
+                    }
+                    env_define(local, params[i].name, rest, false);
+                } else if (i < effective_arg_count) {
                     // 渡された引数を使用
                     env_define(local, params[i].name, value_copy(args[i]), false);
                 } else if (params[i].default_value != NULL) {
@@ -987,20 +1262,62 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
             Environment *prev = eval->current;
             eval->current = local;
             
+            // コールスタックにプッシュ
+            if (eval->call_stack_depth < 128) {
+                eval->call_stack[eval->call_stack_depth].func_name = func_name;
+                eval->call_stack[eval->call_stack_depth].line = node->location.line;
+                eval->call_stack_depth++;
+            }
+            
             // メソッド呼び出しの場合、current_instanceを設定
             Value *prev_instance = eval->current_instance;
             Value *instance_ptr = NULL;
             if (is_method_call) {
-                instance_ptr = malloc(sizeof(Value));
-                *instance_ptr = instance;
+                if (is_super_call && eval->current_instance != NULL) {
+                    // superの場合は現在のインスタンスをそのまま使う（コピーしない）
+                    instance_ptr = eval->current_instance;
+                } else {
+                    instance_ptr = malloc(sizeof(Value));
+                    *instance_ptr = instance;
+                }
                 eval->current_instance = instance_ptr;
             }
             
-            evaluate(eval, body);
+            // ジェネレータ関数かどうかをチェック
+            bool func_is_generator = (callee.function.definition != NULL &&
+                                       callee.function.definition->type == NODE_FUNCTION_DEF &&
+                                       callee.function.definition->function.is_generator);
+            
+            if (func_is_generator) {
+                // ジェネレータモードで実行：yield値を収集
+                bool prev_in_generator = eval->in_generator;
+                Value *prev_gen_target = eval->generator_target;
+                
+                Value gen = value_generator();
+                eval->in_generator = true;
+                eval->generator_target = &gen;
+                
+                evaluate(eval, body);
+                
+                eval->in_generator = prev_in_generator;
+                eval->generator_target = prev_gen_target;
+                
+                // returning状態をクリア（ジェネレータのreturnは無視）
+                eval->returning = false;
+                
+                result = gen;
+            } else {
+                evaluate(eval, body);
+            }
+            
+            // コールスタックからポップ
+            if (eval->call_stack_depth > 0) {
+                eval->call_stack_depth--;
+            }
             
             // current_instanceを復元
             eval->current_instance = prev_instance;
-            if (instance_ptr != NULL) {
+            if (instance_ptr != NULL && !is_super_call) {
                 free(instance_ptr);
             }
             
@@ -1040,10 +1357,12 @@ static Value evaluate_index(Evaluator *eval, ASTNode *node) {
         }
         
         int idx = (int)index.number;
+        // 負のインデックス: -1 = 最後, -2 = 最後から2番目...
+        if (idx < 0) idx += array.array.length;
         if (idx < 0 || idx >= array.array.length) {
             runtime_error(eval, node->location.line,
                          "インデックスが範囲外です: %d（長さ: %d）",
-                         idx, array.array.length);
+                         (int)index.number, array.array.length);
             return value_null();
         }
         
@@ -1060,10 +1379,12 @@ static Value evaluate_index(Evaluator *eval, ASTNode *node) {
         int idx = (int)index.number;
         int len = string_length(&array);
         
+        // 負のインデックス対応
+        if (idx < 0) idx += len;
         if (idx < 0 || idx >= len) {
             runtime_error(eval, node->location.line,
                          "インデックスが範囲外です: %d（長さ: %d）",
-                         idx, len);
+                         (int)index.number, len);
             return value_null();
         }
         
@@ -1519,10 +1840,73 @@ static Value evaluate_new(Evaluator *eval, ASTNode *node) {
 }
 
 static Value evaluate_member(Evaluator *eval, ASTNode *node) {
+    const char *member_name = node->member.member_name;
+    
+    // 親クラスのメソッド呼び出し（super）
+    // 「親」キーワードが使われた場合は、先にオブジェクトを評価せずに処理
+    if (node->member.object->type == NODE_IDENTIFIER && 
+        strcmp(node->member.object->string_value, "親") == 0) {
+        // 現在のインスタンスから親クラスを探す
+        if (eval->current_instance == NULL) {
+            runtime_error(eval, node->location.line,
+                         "'親' はメソッド内でのみ使用できます");
+            return value_null();
+        }
+        
+        Value *instance = eval->current_instance;
+        if (instance->type != VALUE_INSTANCE || instance->instance.class_ref == NULL) {
+            runtime_error(eval, node->location.line,
+                         "インスタンスが無効です");
+            return value_null();
+        }
+        
+        // 現在のクラスの親クラスを取得
+        Value *class_ref = instance->instance.class_ref;
+        if (class_ref->type != VALUE_CLASS || class_ref->class_value.parent == NULL) {
+            runtime_error(eval, node->location.line,
+                         "親クラスがありません");
+            return value_null();
+        }
+        
+        Value *parent_class = class_ref->class_value.parent;
+        
+        // 親クラスからメソッドを検索
+        while (parent_class != NULL && parent_class->type == VALUE_CLASS) {
+            ASTNode *parent_def = parent_class->class_value.definition;
+            
+            // 初期化メソッドをチェック
+            if (strcmp(member_name, "初期化") == 0 && parent_def->class_def.init_method != NULL) {
+                return value_function(parent_def->class_def.init_method, eval->current);
+            }
+            
+            // 通常のメソッドをチェック
+            for (int i = 0; i < parent_def->class_def.method_count; i++) {
+                ASTNode *method = parent_def->class_def.methods[i];
+                if (strcmp(method->method.name, member_name) == 0) {
+                    return value_function(method, eval->current);
+                }
+            }
+            
+            // さらに親へ
+            if (parent_def->class_def.parent_name != NULL) {
+                Value *grandparent = env_get(eval->current, parent_def->class_def.parent_name);
+                if (grandparent != NULL && grandparent->type == VALUE_CLASS) {
+                    parent_class = grandparent;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        
+        runtime_error(eval, node->location.line,
+                     "親クラスに '%s' というメソッドがありません", member_name);
+        return value_null();
+    }
+    
     Value object = evaluate(eval, node->member.object);
     if (eval->had_error) return value_null();
-    
-    const char *member_name = node->member.member_name;
     
     // インスタンスのフィールドアクセス
     if (object.type == VALUE_INSTANCE) {
@@ -1755,7 +2139,24 @@ static Value evaluate_switch(Evaluator *eval, ASTNode *node) {
         if (eval->had_error) return value_null();
         
         if (value_equals(target, case_val)) {
-            return evaluate(eval, node->switch_stmt.case_bodies[i]);
+            // bodyがNULLの場合（複数パターンのフォールスルー）は次の非NULL bodyを探す
+            ASTNode *body = node->switch_stmt.case_bodies[i];
+            if (body == NULL) {
+                for (int j = i + 1; j < node->switch_stmt.case_count; j++) {
+                    if (node->switch_stmt.case_bodies[j] != NULL) {
+                        body = node->switch_stmt.case_bodies[j];
+                        break;
+                    }
+                }
+                // それでもNULLならdefault_bodyを使う
+                if (body == NULL) {
+                    body = node->switch_stmt.default_body;
+                }
+            }
+            if (body != NULL) {
+                return evaluate(eval, body);
+            }
+            return value_null();
         }
     }
     
@@ -2054,6 +2455,474 @@ static Value builtin_bit_rshift(int argc, Value *argv) {
     (void)argc;
     if (argv[0].type != VALUE_NUMBER || argv[1].type != VALUE_NUMBER) return value_null();
     return value_number((double)((long long)argv[0].number >> (int)argv[1].number));
+}
+
+// =============================================================================
+// 追加文字列関数
+// =============================================================================
+
+// 部分文字列: 文字列の部分を取得（開始位置, [長さ]）
+static Value builtin_substring(int argc, Value *argv) {
+    if (argv[0].type != VALUE_STRING || argv[1].type != VALUE_NUMBER) return value_null();
+    
+    const char *str = argv[0].string.data;
+    int len = argv[0].string.length;
+    int start = (int)argv[1].number;
+    
+    if (start < 0) start += len;
+    if (start < 0) start = 0;
+    if (start >= len) return value_string("");
+    
+    int sub_len;
+    if (argc >= 3 && argv[2].type == VALUE_NUMBER) {
+        sub_len = (int)argv[2].number;
+        if (sub_len < 0) sub_len = 0;
+    } else {
+        sub_len = len - start;
+    }
+    
+    if (start + sub_len > len) sub_len = len - start;
+    
+    return value_string_n(str + start, sub_len);
+}
+
+// 始まる: 文字列が指定のプレフィックスで始まるか
+static Value builtin_starts_with(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING || argv[1].type != VALUE_STRING) return value_bool(false);
+    
+    const char *str = argv[0].string.data;
+    const char *prefix = argv[1].string.data;
+    size_t prefix_len = strlen(prefix);
+    
+    return value_bool(strncmp(str, prefix, prefix_len) == 0);
+}
+
+// 終わる: 文字列が指定のサフィックスで終わるか
+static Value builtin_ends_with(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING || argv[1].type != VALUE_STRING) return value_bool(false);
+    
+    const char *str = argv[0].string.data;
+    const char *suffix = argv[1].string.data;
+    size_t str_len = strlen(str);
+    size_t suffix_len = strlen(suffix);
+    
+    if (suffix_len > str_len) return value_bool(false);
+    
+    return value_bool(strcmp(str + str_len - suffix_len, suffix) == 0);
+}
+
+// 文字コード: 文字列の指定位置の文字コード（UTF-8）を返す
+static Value builtin_char_code(int argc, Value *argv) {
+    if (argv[0].type != VALUE_STRING) return value_null();
+    
+    int pos = 0;
+    if (argc >= 2 && argv[1].type == VALUE_NUMBER) {
+        pos = (int)argv[1].number;
+    }
+    
+    const unsigned char *str = (const unsigned char *)argv[0].string.data;
+    int len = argv[0].string.length;
+    if (pos < 0 || pos >= len) return value_null();
+    
+    // UTF-8の先頭バイトからコードポイントを取得
+    unsigned char c = str[pos];
+    int code = 0;
+    if (c < 0x80) {
+        code = c;
+    } else if (c < 0xE0 && pos + 1 < len) {
+        code = ((c & 0x1F) << 6) | (str[pos + 1] & 0x3F);
+    } else if (c < 0xF0 && pos + 2 < len) {
+        code = ((c & 0x0F) << 12) | ((str[pos + 1] & 0x3F) << 6) | (str[pos + 2] & 0x3F);
+    } else if (pos + 3 < len) {
+        code = ((c & 0x07) << 18) | ((str[pos + 1] & 0x3F) << 12) | ((str[pos + 2] & 0x3F) << 6) | (str[pos + 3] & 0x3F);
+    }
+    
+    return value_number(code);
+}
+
+// コード文字: コードポイントから文字列を生成
+static Value builtin_from_char_code(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMBER) return value_null();
+    
+    int code = (int)argv[0].number;
+    char buf[5] = {0};
+    
+    if (code < 0x80) {
+        buf[0] = (char)code;
+    } else if (code < 0x800) {
+        buf[0] = (char)(0xC0 | (code >> 6));
+        buf[1] = (char)(0x80 | (code & 0x3F));
+    } else if (code < 0x10000) {
+        buf[0] = (char)(0xE0 | (code >> 12));
+        buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (code & 0x3F));
+    } else {
+        buf[0] = (char)(0xF0 | (code >> 18));
+        buf[1] = (char)(0x80 | ((code >> 12) & 0x3F));
+        buf[2] = (char)(0x80 | ((code >> 6) & 0x3F));
+        buf[3] = (char)(0x80 | (code & 0x3F));
+    }
+    
+    return value_string(buf);
+}
+
+// 繰り返し: 文字列を指定回数繰り返す
+static Value builtin_string_repeat(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING || argv[1].type != VALUE_NUMBER) return value_null();
+    
+    int count = (int)argv[1].number;
+    if (count <= 0) return value_string("");
+    
+    const char *str = argv[0].string.data;
+    size_t str_len = strlen(str);
+    size_t total = str_len * count;
+    
+    char *buffer = malloc(total + 1);
+    buffer[0] = '\0';
+    for (int i = 0; i < count; i++) {
+        memcpy(buffer + i * str_len, str, str_len);
+    }
+    buffer[total] = '\0';
+    
+    Value result = value_string(buffer);
+    free(buffer);
+    return result;
+}
+
+// =============================================================================
+// 追加配列関数
+// =============================================================================
+
+// 末尾削除: 配列の末尾要素を削除して返す
+static Value builtin_pop(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY) return value_null();
+    if (argv[0].array.length == 0) return value_null();
+    
+    Value last = value_copy(argv[0].array.elements[argv[0].array.length - 1]);
+    argv[0].array.length--;
+    return last;
+}
+
+// 探す: 配列から条件に合う最初の要素を検索
+static Value builtin_find_item(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY || argv[1].type != VALUE_FUNCTION) return value_null();
+    
+    for (int i = 0; i < argv[0].array.length; i++) {
+        Value arg = argv[0].array.elements[i];
+        Value result = call_function_value(&argv[1], &arg, 1);
+        if (g_eval && g_eval->had_error) return value_null();
+        if (value_is_truthy(result)) {
+            return value_copy(arg);
+        }
+    }
+    
+    return value_null();
+}
+
+// 全て: 配列の全要素が条件を満たすか
+static Value builtin_every(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY || argv[1].type != VALUE_FUNCTION) return value_bool(false);
+    
+    for (int i = 0; i < argv[0].array.length; i++) {
+        Value arg = argv[0].array.elements[i];
+        Value result = call_function_value(&argv[1], &arg, 1);
+        if (g_eval && g_eval->had_error) return value_bool(false);
+        if (!value_is_truthy(result)) return value_bool(false);
+    }
+    
+    return value_bool(true);
+}
+
+// 一つでも: 配列の少なくとも一つの要素が条件を満たすか
+static Value builtin_some(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY || argv[1].type != VALUE_FUNCTION) return value_bool(false);
+    
+    for (int i = 0; i < argv[0].array.length; i++) {
+        Value arg = argv[0].array.elements[i];
+        Value result = call_function_value(&argv[1], &arg, 1);
+        if (g_eval && g_eval->had_error) return value_bool(false);
+        if (value_is_truthy(result)) return value_bool(true);
+    }
+    
+    return value_bool(false);
+}
+
+// 一意: 配列の重複を除去
+static Value builtin_unique(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY) return value_array();
+    
+    Value result = value_array();
+    for (int i = 0; i < argv[0].array.length; i++) {
+        bool found = false;
+        for (int j = 0; j < result.array.length; j++) {
+            if (value_compare(argv[0].array.elements[i], result.array.elements[j]) == 0) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            array_push(&result, value_copy(argv[0].array.elements[i]));
+        }
+    }
+    
+    return result;
+}
+
+// 圧縮: 2つの配列をペアの配列に結合
+static Value builtin_zip(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY || argv[1].type != VALUE_ARRAY) return value_array();
+    
+    int len = argv[0].array.length < argv[1].array.length ? 
+              argv[0].array.length : argv[1].array.length;
+    
+    Value result = value_array_with_capacity(len);
+    for (int i = 0; i < len; i++) {
+        Value pair = value_array_with_capacity(2);
+        array_push(&pair, value_copy(argv[0].array.elements[i]));
+        array_push(&pair, value_copy(argv[1].array.elements[i]));
+        array_push(&result, pair);
+    }
+    
+    return result;
+}
+
+// 平坦化: ネストされた配列を一段フラットにする
+static Value builtin_flat(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY) return value_array();
+    
+    Value result = value_array();
+    for (int i = 0; i < argv[0].array.length; i++) {
+        Value elem = argv[0].array.elements[i];
+        if (elem.type == VALUE_ARRAY) {
+            for (int j = 0; j < elem.array.length; j++) {
+                array_push(&result, value_copy(elem.array.elements[j]));
+            }
+        } else {
+            array_push(&result, value_copy(elem));
+        }
+    }
+    
+    return result;
+}
+
+// 挿入: 配列の指定位置に要素を挿入
+static Value builtin_insert(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY || argv[1].type != VALUE_NUMBER) return value_null();
+    
+    int pos = (int)argv[1].number;
+    int len = argv[0].array.length;
+    
+    if (pos < 0) pos += len;
+    if (pos < 0) pos = 0;
+    if (pos > len) pos = len;
+    
+    Value result = value_array_with_capacity(len + 1);
+    for (int i = 0; i < pos; i++) {
+        array_push(&result, value_copy(argv[0].array.elements[i]));
+    }
+    array_push(&result, value_copy(argv[2]));
+    for (int i = pos; i < len; i++) {
+        array_push(&result, value_copy(argv[0].array.elements[i]));
+    }
+    
+    return result;
+}
+
+// 比較ソート用グローバル
+static Value *g_sort_func = NULL;
+
+static int compare_by_func(const void *a, const void *b) {
+    Value va = *(const Value *)a;
+    Value vb = *(const Value *)b;
+    Value args[2] = { va, vb };
+    Value result = call_function_value(g_sort_func, args, 2);
+    if (result.type == VALUE_NUMBER) {
+        if (result.number < 0) return -1;
+        if (result.number > 0) return 1;
+        return 0;
+    }
+    return 0;
+}
+
+// 比較ソート: カスタム比較関数でソート
+static Value builtin_sort_by(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY || argv[1].type != VALUE_FUNCTION) return value_array();
+    
+    Value result = value_copy(argv[0]);
+    g_sort_func = &argv[1];
+    qsort(result.array.elements, result.array.length, sizeof(Value), compare_by_func);
+    g_sort_func = NULL;
+    
+    return result;
+}
+
+// =============================================================================
+// 拡張数学関数
+// =============================================================================
+
+static Value builtin_sin(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMBER) return value_null();
+    return value_number(sin(argv[0].number));
+}
+
+static Value builtin_cos(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMBER) return value_null();
+    return value_number(cos(argv[0].number));
+}
+
+static Value builtin_tan(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMBER) return value_null();
+    return value_number(tan(argv[0].number));
+}
+
+static Value builtin_log(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMBER) return value_null();
+    return value_number(log(argv[0].number));
+}
+
+static Value builtin_log10_fn(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMBER) return value_null();
+    return value_number(log10(argv[0].number));
+}
+
+static Value builtin_random_int(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMBER || argv[1].type != VALUE_NUMBER) return value_null();
+    
+    int min_val = (int)argv[0].number;
+    int max_val = (int)argv[1].number;
+    if (min_val > max_val) { int tmp = min_val; min_val = max_val; max_val = tmp; }
+    
+    return value_number(min_val + rand() % (max_val - min_val + 1));
+}
+
+// =============================================================================
+// ファイル追記・ディレクトリ操作
+// =============================================================================
+
+// 追記: ファイルにテキストを追記
+static Value builtin_file_append(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING || argv[1].type != VALUE_STRING) return value_bool(false);
+    
+    FILE *fp = fopen(argv[0].string.data, "a");
+    if (!fp) return value_bool(false);
+    
+    fprintf(fp, "%s", argv[1].string.data);
+    fclose(fp);
+    return value_bool(true);
+}
+
+// ディレクトリ一覧: ディレクトリの内容をリスト
+static Value builtin_dir_list(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING) return value_array();
+    
+    DIR *dir = opendir(argv[0].string.data);
+    if (!dir) return value_array();
+    
+    Value result = value_array();
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+        array_push(&result, value_string(entry->d_name));
+    }
+    closedir(dir);
+    
+    return result;
+}
+
+// ディレクトリ作成: ディレクトリを再帰的に作成
+static Value builtin_dir_create(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING) return value_bool(false);
+    
+    // mkdir -p 相当（簡易版）
+    char *path = strdup(argv[0].string.data);
+    char *p = path;
+    
+    while (*p) {
+        if (*p == '/' && p != path) {
+            *p = '\0';
+            mkdir(path, 0755);
+            *p = '/';
+        }
+        p++;
+    }
+    int ret = mkdir(path, 0755);
+    free(path);
+    
+    return value_bool(ret == 0 || errno == EEXIST);
+}
+
+// =============================================================================
+// ユーティリティ関数
+// =============================================================================
+
+// 表明: アサーション（条件が偽なら実行停止）
+static Value builtin_assert(int argc, Value *argv) {
+    if (!value_is_truthy(argv[0])) {
+        const char *msg = "表明失敗";
+        if (argc >= 2 && argv[1].type == VALUE_STRING) {
+            msg = argv[1].string.data;
+        }
+        if (g_eval) {
+            runtime_error(g_eval, 0, "%s", msg);
+        } else {
+            fprintf(stderr, "表明失敗: %s\n", msg);
+        }
+        return value_null();
+    }
+    return value_bool(true);
+}
+
+// 型判定: オブジェクトが指定の型/クラスかどうかをチェック
+static Value builtin_typeof_check(int argc, Value *argv) {
+    (void)argc;
+    if (argv[1].type != VALUE_STRING) return value_bool(false);
+    
+    const char *type_name = argv[1].string.data;
+    
+    if (strcmp(type_name, "数値") == 0) return value_bool(argv[0].type == VALUE_NUMBER);
+    if (strcmp(type_name, "文字列") == 0) return value_bool(argv[0].type == VALUE_STRING);
+    if (strcmp(type_name, "真偽") == 0) return value_bool(argv[0].type == VALUE_BOOL);
+    if (strcmp(type_name, "配列") == 0) return value_bool(argv[0].type == VALUE_ARRAY);
+    if (strcmp(type_name, "辞書") == 0) return value_bool(argv[0].type == VALUE_DICT);
+    if (strcmp(type_name, "関数") == 0) return value_bool(argv[0].type == VALUE_FUNCTION);
+    if (strcmp(type_name, "無") == 0) return value_bool(argv[0].type == VALUE_NULL);
+    if (strcmp(type_name, "ジェネレータ") == 0) return value_bool(argv[0].type == VALUE_GENERATOR);
+    
+    // クラスインスタンスの場合、クラス名と比較
+    if (argv[0].type == VALUE_INSTANCE && argv[0].instance.class_ref != NULL) {
+        Value *class_ref = argv[0].instance.class_ref;
+        while (class_ref != NULL && class_ref->type == VALUE_CLASS) {
+            if (strcmp(class_ref->class_value.name, type_name) == 0) {
+                return value_bool(true);
+            }
+            // 親クラスも確認（instanceof 的な動作）
+            class_ref = class_ref->class_value.parent;
+        }
+    }
+    
+    return value_bool(false);
 }
 
 static Value builtin_to_number(int argc, Value *argv) {
@@ -2824,4 +3693,52 @@ static Value builtin_exit_program(int argc, Value *argv) {
     }
     exit(code);
     return value_null();  // 到達しない
+}
+
+// =============================================================================
+// ジェネレータ関連ビルトイン関数
+// =============================================================================
+
+// 次: ジェネレータから次の値を取得
+static Value builtin_generator_next(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_GENERATOR || argv[0].generator.state == NULL) {
+        return value_null();
+    }
+    
+    GeneratorState *s = argv[0].generator.state;
+    if (s->index >= s->length) {
+        s->done = true;
+        return value_null();
+    }
+    
+    return value_copy(s->values[s->index++]);
+}
+
+// 完了: ジェネレータが完了したかチェック
+static Value builtin_generator_done(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_GENERATOR || argv[0].generator.state == NULL) {
+        return value_bool(true);
+    }
+    
+    return value_bool(argv[0].generator.state->index >= argv[0].generator.state->length);
+}
+
+// 全値: ジェネレータの残りの値を配列として取得
+static Value builtin_generator_collect(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_GENERATOR || argv[0].generator.state == NULL) {
+        return value_array();
+    }
+    
+    GeneratorState *s = argv[0].generator.state;
+    Value result = value_array();
+    
+    while (s->index < s->length) {
+        array_push(&result, value_copy(s->values[s->index++]));
+    }
+    s->done = true;
+    
+    return result;
 }

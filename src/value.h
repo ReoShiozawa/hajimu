@@ -15,6 +15,16 @@
 struct ASTNode;
 struct Environment;
 
+// ジェネレータの共有状態
+typedef struct GeneratorState {
+    struct Value *values;       // yield された値の配列
+    int length;                 // 値の数
+    int capacity;               // 容量
+    int index;                  // 現在の読み取り位置
+    bool done;                  // 完了フラグ
+    int ref_count;              // 参照カウント（共有用）
+} GeneratorState;
+
 // =============================================================================
 // 値の型
 // =============================================================================
@@ -30,6 +40,7 @@ typedef enum {
     VALUE_BUILTIN,      // 組み込み関数
     VALUE_CLASS,        // クラス定義
     VALUE_INSTANCE,     // クラスインスタンス
+    VALUE_GENERATOR,    // ジェネレータ
 } ValueType;
 
 // =============================================================================
@@ -104,6 +115,11 @@ struct Value {
             int field_count;                // フィールド数
             int field_capacity;             // 容量
         } instance;
+        
+        // ジェネレータ
+        struct {
+            struct GeneratorState *state;   // 共有状態へのポインタ
+        } generator;
     };
 };
 
@@ -165,6 +181,16 @@ Value value_class(const char *name, struct ASTNode *definition, Value *parent);
  * インスタンス値を作成
  */
 Value value_instance(Value *class_ref);
+
+/**
+ * ジェネレータ値を作成
+ */
+Value value_generator(void);
+
+/**
+ * ジェネレータに値を追加
+ */
+void generator_add_value(Value *gen, Value val);
 
 /**
  * インスタンスにフィールドを設定
