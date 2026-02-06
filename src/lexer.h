@@ -67,6 +67,15 @@ typedef enum {
     TOKEN_FINALLY,          // 最終
     TOKEN_THROW,            // 投げる
     
+    // キーワード - 選択文
+    TOKEN_SWITCH,           // 選択
+    TOKEN_CASE,             // 場合
+    TOKEN_DEFAULT,          // 既定
+    
+    // キーワード - foreach
+    TOKEN_EACH,             // 各
+    TOKEN_IN,               // の中
+    
     // キーワード - 真偽値
     TOKEN_TRUE,             // 真
     TOKEN_FALSE,            // 偽

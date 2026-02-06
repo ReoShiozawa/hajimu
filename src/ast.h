@@ -36,6 +36,9 @@ typedef enum {
     NODE_METHOD_DEF,        // メソッド定義
     NODE_TRY,               // 試行文（try-catch-finally）
     NODE_THROW,             // 投げる文（throw）
+    NODE_LAMBDA,            // 無名関数
+    NODE_SWITCH,            // 選択文
+    NODE_FOREACH,           // foreach文
     
     // 式
     NODE_BINARY,            // 二項演算
@@ -239,6 +242,29 @@ struct ASTNode {
             ASTNode *expression;    // 投げる値
         } throw_stmt;
         
+        // NODE_LAMBDA（無名関数）
+        struct {
+            Parameter *params;      // パラメータ配列
+            int param_count;        // パラメータ数
+            ASTNode *body;          // 本体
+        } lambda;
+        
+        // NODE_SWITCH（選択文）
+        struct {
+            ASTNode *target;        // 選択対象
+            ASTNode **case_values;  // 場合の値配列
+            ASTNode **case_bodies;  // 場合の本体配列
+            int case_count;         // 場合の数
+            ASTNode *default_body;  // 既定の本体（NULLの場合あり）
+        } switch_stmt;
+        
+        // NODE_FOREACH
+        struct {
+            char *var_name;         // ループ変数名
+            ASTNode *iterable;      // 反復対象
+            ASTNode *body;          // ループ本体
+        } foreach_stmt;
+        
         // NODE_EXPR_STMT
         struct {
             ASTNode *expression;    // 式
@@ -409,6 +435,26 @@ ASTNode *node_try(ASTNode *try_block, const char *catch_var, ASTNode *catch_bloc
  * 投げる文ノードを作成
  */
 ASTNode *node_throw(ASTNode *expression, int line, int column);
+
+/**
+ * ラムダ（無名関数）ノードを作成
+ */
+ASTNode *node_lambda(Parameter *params, int param_count, ASTNode *body, int line, int column);
+
+/**
+ * 選択文ノードを作成
+ */
+ASTNode *node_switch(ASTNode *target, int line, int column);
+
+/**
+ * 選択文に場合を追加
+ */
+void switch_add_case(ASTNode *switch_node, ASTNode *value, ASTNode *body);
+
+/**
+ * foreach文ノードを作成
+ */
+ASTNode *node_foreach(const char *var_name, ASTNode *iterable, ASTNode *body, int line, int column);
 
 /**
  * 式文ノードを作成

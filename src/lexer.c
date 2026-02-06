@@ -59,6 +59,15 @@ static const KeywordEntry keywords[] = {
     {"最終", TOKEN_FINALLY},
     {"投げる", TOKEN_THROW},
     
+    // 選択文
+    {"選択", TOKEN_SWITCH},
+    {"場合", TOKEN_CASE},
+    {"既定", TOKEN_DEFAULT},
+    
+    // foreach
+    {"各", TOKEN_EACH},
+    {"の中", TOKEN_IN},
+    
     // 真偽値
     {"真", TOKEN_TRUE},
     {"偽", TOKEN_FALSE},

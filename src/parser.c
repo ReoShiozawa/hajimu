@@ -37,6 +37,8 @@ static ASTNode *continue_statement(Parser *parser);
 static ASTNode *import_statement(Parser *parser);
 static ASTNode *try_statement(Parser *parser);
 static ASTNode *throw_statement(Parser *parser);
+static ASTNode *switch_statement(Parser *parser);
+static ASTNode *foreach_statement(Parser *parser);
 static ASTNode *expression_statement(Parser *parser);
 static ASTNode *block(Parser *parser);
 
@@ -294,8 +296,24 @@ ASTNode *parse_program(Parser *parser) {
 // =============================================================================
 
 static ASTNode *declaration(Parser *parser) {
-    if (match(parser, TOKEN_FUNCTION)) {
-        return function_definition(parser);
+    if (check(parser, TOKEN_FUNCTION)) {
+        // 関数定義 vs ラムダ式の判定
+        // 関数 名前(...) は関数定義、関数(...) はラムダ式
+        Token saved_current = parser->current;
+        Token saved_previous = parser->previous;
+        Lexer saved_lexer = *parser->lexer;
+        
+        advance(parser);  // TOKEN_FUNCTIONを消費
+        
+        if (check(parser, TOKEN_IDENTIFIER)) {
+            // 関数定義
+            return function_definition(parser);
+        }
+        
+        // ラムダ式 → パーサー状態を戻して式文として処理
+        parser->current = saved_current;
+        parser->previous = saved_previous;
+        *parser->lexer = saved_lexer;
     }
     
     return statement(parser);
@@ -373,6 +391,12 @@ static ASTNode *statement(Parser *parser) {
     }
     if (match(parser, TOKEN_THROW)) {
         return throw_statement(parser);
+    }
+    if (match(parser, TOKEN_SWITCH)) {
+        return switch_statement(parser);
+    }
+    if (match(parser, TOKEN_EACH)) {
+        return foreach_statement(parser);
     }
     
     // for文のチェック（識別子 を ... から ... 繰り返す）
@@ -617,6 +641,91 @@ static ASTNode *throw_statement(Parser *parser) {
     return node_throw(expr, line, column);
 }
 
+// 選択文（switch）のパース
+// 選択 式:
+//   場合 値:
+//     文...
+//   場合 値:
+//     文...
+//   既定:
+//     文...
+// 終わり
+static ASTNode *switch_statement(Parser *parser) {
+    int line = parser->previous.line;
+    int column = parser->previous.column;
+    
+    // 選択対象の式
+    ASTNode *target = expression(parser);
+    
+    // コロン
+    consume(parser, TOKEN_COLON, "':' が必要です");
+    
+    ASTNode *node = node_switch(target, line, column);
+    
+    // 改行とインデント
+    skip_newlines(parser);
+    match(parser, TOKEN_INDENT);
+    
+    // 場合句を読み込む
+    while (match(parser, TOKEN_CASE)) {
+        // 場合の値
+        ASTNode *case_value = expression(parser);
+        
+        // コロン
+        consume(parser, TOKEN_COLON, "':' が必要です");
+        
+        // 場合の本体
+        ASTNode *case_body = block(parser);
+        
+        switch_add_case(node, case_value, case_body);
+    }
+    
+    // 既定句（オプション）
+    if (match(parser, TOKEN_DEFAULT)) {
+        consume(parser, TOKEN_COLON, "':' が必要です");
+        node->switch_stmt.default_body = block(parser);
+    }
+    
+    // デデントと終わり
+    match(parser, TOKEN_DEDENT);
+    consume(parser, TOKEN_END, "'終わり' が必要です");
+    
+    return node;
+}
+
+// 各要素ループ（foreach）のパース
+// 各 変数名 を 配列式 の中:
+//   文...
+// 終わり
+static ASTNode *foreach_statement(Parser *parser) {
+    int line = parser->previous.line;
+    int column = parser->previous.column;
+    
+    // ループ変数名
+    consume(parser, TOKEN_IDENTIFIER, "ループ変数名が必要です");
+    char *var_name = copy_token_string(&parser->previous);
+    
+    // を
+    consume(parser, TOKEN_TO, "'を' が必要です");
+    
+    // 反復対象の式
+    ASTNode *iterable = expression(parser);
+    
+    // の中
+    consume(parser, TOKEN_IN, "'の中' が必要です");
+    
+    // コロン
+    consume(parser, TOKEN_COLON, "':' が必要です");
+    
+    // ループ本体
+    ASTNode *body = block(parser);
+    
+    // 終わり
+    consume(parser, TOKEN_END, "'終わり' が必要です");
+    
+    return node_foreach(var_name, iterable, body, line, column);
+}
+
 // メソッド定義のパース（クラス内で使用）
 static ASTNode *method_definition(Parser *parser, bool is_init) {
     int line = parser->previous.line;
@@ -813,13 +922,15 @@ static ASTNode *block(Parser *parser) {
     // 文を読み込む
     while (!check(parser, TOKEN_DEDENT) && !check(parser, TOKEN_EOF) &&
            !check(parser, TOKEN_END) && !check(parser, TOKEN_ELSE) &&
-           !check(parser, TOKEN_CATCH) && !check(parser, TOKEN_FINALLY)) {
+           !check(parser, TOKEN_CATCH) && !check(parser, TOKEN_FINALLY) &&
+           !check(parser, TOKEN_CASE) && !check(parser, TOKEN_DEFAULT)) {
         
         skip_newlines(parser);
         
         if (check(parser, TOKEN_DEDENT) || check(parser, TOKEN_EOF) ||
             check(parser, TOKEN_END) || check(parser, TOKEN_ELSE) ||
-            check(parser, TOKEN_CATCH) || check(parser, TOKEN_FINALLY)) {
+            check(parser, TOKEN_CATCH) || check(parser, TOKEN_FINALLY) ||
+            check(parser, TOKEN_CASE) || check(parser, TOKEN_DEFAULT)) {
             break;
         }
         
@@ -1185,6 +1296,26 @@ static ASTNode *primary(Parser *parser) {
     // 自分
     if (match(parser, TOKEN_SELF)) {
         return node_self(line, column);
+    }
+    
+    // 無名関数（ラムダ）: 関数(引数): 本体 終わり
+    if (match(parser, TOKEN_FUNCTION)) {
+        // パラメータリスト
+        consume(parser, TOKEN_LPAREN, "'(' が必要です");
+        int param_count;
+        Parameter *params = parse_parameters(parser, &param_count);
+        consume(parser, TOKEN_RPAREN, "')' が必要です");
+        
+        // コロン
+        consume(parser, TOKEN_COLON, "':' が必要です");
+        
+        // 本体
+        ASTNode *body = block(parser);
+        
+        // 終わり
+        consume(parser, TOKEN_END, "'終わり' が必要です");
+        
+        return node_lambda(params, param_count, body, line, column);
     }
     
     error(parser, "式が必要です");

@@ -11,6 +11,11 @@
 #include <stdarg.h>
 #include <math.h>
 #include <time.h>
+#include <unistd.h>
+#include <regex.h>
+
+// 高階関数用のグローバル評価器ポインタ
+static Evaluator *g_eval = NULL;
 
 // =============================================================================
 // 前方宣言
@@ -34,6 +39,9 @@ static Value evaluate_class_def(Evaluator *eval, ASTNode *node);
 static Value evaluate_new(Evaluator *eval, ASTNode *node);
 static Value evaluate_try(Evaluator *eval, ASTNode *node);
 static Value evaluate_throw(Evaluator *eval, ASTNode *node);
+static Value evaluate_lambda(Evaluator *eval, ASTNode *node);
+static Value evaluate_switch(Evaluator *eval, ASTNode *node);
+static Value evaluate_foreach(Evaluator *eval, ASTNode *node);
 
 // =============================================================================
 // 組み込み関数のプロトタイプ
@@ -86,6 +94,24 @@ static Value builtin_file_exists(int argc, Value *argv);
 static Value builtin_now(int argc, Value *argv);
 static Value builtin_date(int argc, Value *argv);
 static Value builtin_time(int argc, Value *argv);
+
+// 高階配列関数
+static Value builtin_map(int argc, Value *argv);
+static Value builtin_filter(int argc, Value *argv);
+static Value builtin_reduce(int argc, Value *argv);
+static Value builtin_foreach(int argc, Value *argv);
+
+// 正規表現関数
+static Value builtin_regex_match(int argc, Value *argv);
+static Value builtin_regex_search(int argc, Value *argv);
+static Value builtin_regex_replace(int argc, Value *argv);
+
+// システムユーティリティ
+static Value builtin_sleep(int argc, Value *argv);
+static Value builtin_exec(int argc, Value *argv);
+static Value builtin_env_get(int argc, Value *argv);
+static Value builtin_env_set(int argc, Value *argv);
+static Value builtin_exit_program(int argc, Value *argv);
 
 // =============================================================================
 // 評価器の初期化・解放
@@ -264,6 +290,36 @@ void register_builtins(Evaluator *eval) {
                value_builtin(builtin_url_encode, "URLエンコード", 1, 1), true);
     env_define(eval->global, "URLデコード",
                value_builtin(builtin_url_decode, "URLデコード", 1, 1), true);
+    
+    // 高階配列関数
+    env_define(eval->global, "変換",
+               value_builtin(builtin_map, "変換", 2, 2), true);
+    env_define(eval->global, "抽出",
+               value_builtin(builtin_filter, "抽出", 2, 2), true);
+    env_define(eval->global, "集約",
+               value_builtin(builtin_reduce, "集約", 3, 3), true);
+    env_define(eval->global, "反復",
+               value_builtin(builtin_foreach, "反復", 2, 2), true);
+    
+    // 正規表現関数
+    env_define(eval->global, "正規一致",
+               value_builtin(builtin_regex_match, "正規一致", 2, 2), true);
+    env_define(eval->global, "正規検索",
+               value_builtin(builtin_regex_search, "正規検索", 2, 2), true);
+    env_define(eval->global, "正規置換",
+               value_builtin(builtin_regex_replace, "正規置換", 3, 3), true);
+    
+    // システムユーティリティ
+    env_define(eval->global, "待つ",
+               value_builtin(builtin_sleep, "待つ", 1, 1), true);
+    env_define(eval->global, "実行",
+               value_builtin(builtin_exec, "実行", 1, 1), true);
+    env_define(eval->global, "環境変数",
+               value_builtin(builtin_env_get, "環境変数", 1, 1), true);
+    env_define(eval->global, "環境変数設定",
+               value_builtin(builtin_env_set, "環境変数設定", 2, 2), true);
+    env_define(eval->global, "終了",
+               value_builtin(builtin_exit_program, "終了", 0, 1), true);
 }
 
 // =============================================================================
@@ -344,6 +400,8 @@ Value evaluator_run(Evaluator *eval, ASTNode *program) {
     if (program == NULL || program->type != NODE_PROGRAM) {
         return value_null();
     }
+    
+    g_eval = eval;
     
     Value result = value_null();
     
@@ -523,6 +581,18 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
         
         case NODE_THROW:
             result = evaluate_throw(eval, node);
+            break;
+        
+        case NODE_LAMBDA:
+            result = evaluate_lambda(eval, node);
+            break;
+        
+        case NODE_SWITCH:
+            result = evaluate_switch(eval, node);
+            break;
+        
+        case NODE_FOREACH:
+            result = evaluate_foreach(eval, node);
             break;
         
         case NODE_NEW:
@@ -800,20 +870,38 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
     else if (callee.type == VALUE_FUNCTION) {
         ASTNode *def = callee.function.definition;
         
+        // ラムダと通常関数の両方に対応
+        int expected_count;
+        Parameter *params;
+        ASTNode *body;
+        const char *func_name;
+        
+        if (def->type == NODE_LAMBDA) {
+            expected_count = def->lambda.param_count;
+            params = def->lambda.params;
+            body = def->lambda.body;
+            func_name = "無名関数";
+        } else {
+            expected_count = def->function.param_count;
+            params = def->function.params;
+            body = def->function.body;
+            func_name = def->function.name;
+        }
+        
         // 引数の数をチェック
-        if (node->call.arg_count != def->function.param_count) {
+        if (node->call.arg_count != expected_count) {
             runtime_error(eval, node->location.line,
                          "%sには%d個の引数が必要です（%d個渡されました）",
-                         def->function.name,
-                         def->function.param_count,
+                         func_name,
+                         expected_count,
                          node->call.arg_count);
         } else {
             // 新しいスコープを作成
             Environment *local = env_new(callee.function.closure);
             
             // 引数をバインド（コピーを作成）
-            for (int i = 0; i < def->function.param_count; i++) {
-                env_define(local, def->function.params[i].name, value_copy(args[i]), false);
+            for (int i = 0; i < expected_count; i++) {
+                env_define(local, params[i].name, value_copy(args[i]), false);
             }
             
             // 関数本体を実行
@@ -829,7 +917,7 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
                 eval->current_instance = instance_ptr;
             }
             
-            evaluate(eval, def->function.body);
+            evaluate(eval, body);
             
             // current_instanceを復元
             eval->current_instance = prev_instance;
@@ -1480,6 +1568,111 @@ static Value evaluate_throw(Evaluator *eval, ASTNode *node) {
     return value_null();
 }
 
+static Value evaluate_lambda(Evaluator *eval, ASTNode *node) {
+    // ラムダノードをそのまま関数値として包む
+    return value_function(node, eval->current);
+}
+
+static Value evaluate_switch(Evaluator *eval, ASTNode *node) {
+    Value target = evaluate(eval, node->switch_stmt.target);
+    if (eval->had_error) return value_null();
+    
+    // 各場合句をチェック
+    for (int i = 0; i < node->switch_stmt.case_count; i++) {
+        Value case_val = evaluate(eval, node->switch_stmt.case_values[i]);
+        if (eval->had_error) return value_null();
+        
+        if (value_equals(target, case_val)) {
+            return evaluate(eval, node->switch_stmt.case_bodies[i]);
+        }
+    }
+    
+    // 既定句
+    if (node->switch_stmt.default_body != NULL) {
+        return evaluate(eval, node->switch_stmt.default_body);
+    }
+    
+    return value_null();
+}
+
+static Value evaluate_foreach(Evaluator *eval, ASTNode *node) {
+    Value iterable = evaluate(eval, node->foreach_stmt.iterable);
+    if (eval->had_error) return value_null();
+    
+    Value result = value_null();
+    
+    // ループ用の新しいスコープを作成
+    Environment *loop_env = env_new(eval->current);
+    Environment *prev = eval->current;
+    eval->current = loop_env;
+    
+    if (iterable.type == VALUE_ARRAY) {
+        for (int i = 0; i < iterable.array.length; i++) {
+            env_define(eval->current, node->foreach_stmt.var_name,
+                      value_copy(iterable.array.elements[i]), false);
+            
+            result = evaluate(eval, node->foreach_stmt.body);
+            
+            if (eval->returning) break;
+            if (eval->breaking) {
+                eval->breaking = false;
+                break;
+            }
+            if (eval->continuing) {
+                eval->continuing = false;
+                continue;
+            }
+        }
+    } else if (iterable.type == VALUE_STRING) {
+        // 文字列の各文字をループ
+        int len = string_length(&iterable);
+        for (int i = 0; i < len; i++) {
+            Value ch = string_substring(&iterable, i, i + 1);
+            env_define(eval->current, node->foreach_stmt.var_name, ch, false);
+            
+            result = evaluate(eval, node->foreach_stmt.body);
+            
+            if (eval->returning) break;
+            if (eval->breaking) {
+                eval->breaking = false;
+                break;
+            }
+            if (eval->continuing) {
+                eval->continuing = false;
+                continue;
+            }
+        }
+    } else if (iterable.type == VALUE_DICT) {
+        // 辞書のキーをループ
+        for (int i = 0; i < iterable.dict.length; i++) {
+            if (iterable.dict.keys[i] != NULL) {
+                env_define(eval->current, node->foreach_stmt.var_name,
+                          value_string(iterable.dict.keys[i]), false);
+                
+                result = evaluate(eval, node->foreach_stmt.body);
+                
+                if (eval->returning) break;
+                if (eval->breaking) {
+                    eval->breaking = false;
+                    break;
+                }
+                if (eval->continuing) {
+                    eval->continuing = false;
+                    continue;
+                }
+            }
+        }
+    } else {
+        runtime_error(eval, node->location.line,
+                     "反復できるのは配列、文字列、辞書のみです");
+    }
+    
+    eval->current = prev;
+    env_free(loop_env);
+    
+    return result;
+}
+
 // =============================================================================
 // 組み込み関数の実装
 // =============================================================================
@@ -2009,4 +2202,334 @@ static Value builtin_time(int argc, Value *argv) {
     char buffer[32];
     strftime(buffer, sizeof(buffer), "%H:%M:%S", tm);
     return value_string(buffer);
+}
+
+// =============================================================================
+// 高階配列関数ヘルパー
+// =============================================================================
+
+// 関数値を呼び出すヘルパー（評価器が必要）
+static Value call_function_value(Value *func, Value *args, int argc) {
+    if (g_eval == NULL) return value_null();
+    if (func->type != VALUE_FUNCTION) return value_null();
+    
+    ASTNode *def = func->function.definition;
+    
+    // ラムダと通常関数の両方に対応
+    Parameter *params;
+    ASTNode *body;
+    int param_count;
+    
+    if (def->type == NODE_LAMBDA) {
+        params = def->lambda.params;
+        body = def->lambda.body;
+        param_count = def->lambda.param_count;
+    } else {
+        params = def->function.params;
+        body = def->function.body;
+        param_count = def->function.param_count;
+    }
+    
+    if (argc != param_count) return value_null();
+    
+    // 新しいスコープを作成
+    Environment *local = env_new(func->function.closure);
+    
+    for (int i = 0; i < param_count; i++) {
+        env_define(local, params[i].name, value_copy(args[i]), false);
+    }
+    
+    Environment *prev = g_eval->current;
+    g_eval->current = local;
+    
+    Value result = evaluate(g_eval, body);
+    
+    if (g_eval->returning) {
+        result = g_eval->return_value;
+        g_eval->returning = false;
+    }
+    
+    g_eval->current = prev;
+    env_free(local);
+    
+    return result;
+}
+
+// =============================================================================
+// 高階配列関数
+// =============================================================================
+
+// 変換（map）: 配列の各要素に関数を適用して新しい配列を返す
+static Value builtin_map(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY) return value_null();
+    if (argv[1].type != VALUE_FUNCTION) return value_null();
+    
+    Value result = value_array_with_capacity(argv[0].array.length);
+    
+    for (int i = 0; i < argv[0].array.length; i++) {
+        Value arg = argv[0].array.elements[i];
+        Value mapped = call_function_value(&argv[1], &arg, 1);
+        if (g_eval && g_eval->had_error) return value_null();
+        array_push(&result, mapped);
+    }
+    
+    return result;
+}
+
+// 抽出（filter）: 条件に合う要素だけを抽出
+static Value builtin_filter(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY) return value_null();
+    if (argv[1].type != VALUE_FUNCTION) return value_null();
+    
+    Value result = value_array();
+    
+    for (int i = 0; i < argv[0].array.length; i++) {
+        Value arg = argv[0].array.elements[i];
+        Value keep = call_function_value(&argv[1], &arg, 1);
+        if (g_eval && g_eval->had_error) return value_null();
+        if (value_is_truthy(keep)) {
+            array_push(&result, value_copy(arg));
+        }
+    }
+    
+    return result;
+}
+
+// 集約（reduce）: 配列を一つの値に集約
+static Value builtin_reduce(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY) return value_null();
+    if (argv[1].type != VALUE_FUNCTION) return value_null();
+    
+    Value accumulator = value_copy(argv[2]);
+    
+    for (int i = 0; i < argv[0].array.length; i++) {
+        Value args[2] = { accumulator, argv[0].array.elements[i] };
+        accumulator = call_function_value(&argv[1], args, 2);
+        if (g_eval && g_eval->had_error) return value_null();
+    }
+    
+    return accumulator;
+}
+
+// 反復（forEach）: 配列の各要素に対して関数を実行（戻り値なし）
+static Value builtin_foreach(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY) return value_null();
+    if (argv[1].type != VALUE_FUNCTION) return value_null();
+    
+    for (int i = 0; i < argv[0].array.length; i++) {
+        Value arg = argv[0].array.elements[i];
+        call_function_value(&argv[1], &arg, 1);
+        if (g_eval && g_eval->had_error) return value_null();
+    }
+    
+    return value_null();
+}
+
+// =============================================================================
+// 正規表現関数
+// =============================================================================
+
+// 正規一致: 文字列が正規表現パターンに完全一致するか
+static Value builtin_regex_match(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING || argv[1].type != VALUE_STRING) {
+        return value_bool(false);
+    }
+    
+    regex_t regex;
+    int ret = regcomp(&regex, argv[1].string.data, REG_EXTENDED | REG_NOSUB);
+    if (ret != 0) return value_bool(false);
+    
+    ret = regexec(&regex, argv[0].string.data, 0, NULL, 0);
+    regfree(&regex);
+    
+    return value_bool(ret == 0);
+}
+
+// 正規検索: 文字列から正規表現にマッチする部分を検索
+static Value builtin_regex_search(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING || argv[1].type != VALUE_STRING) {
+        return value_null();
+    }
+    
+    regex_t regex;
+    int ret = regcomp(&regex, argv[1].string.data, REG_EXTENDED);
+    if (ret != 0) return value_null();
+    
+    regmatch_t matches[10];
+    ret = regexec(&regex, argv[0].string.data, 10, matches, 0);
+    
+    if (ret != 0) {
+        regfree(&regex);
+        return value_null();
+    }
+    
+    // マッチした部分文字列の配列を返す
+    Value result = value_array();
+    
+    for (int i = 0; i < 10 && matches[i].rm_so != -1; i++) {
+        int start = matches[i].rm_so;
+        int end = matches[i].rm_eo;
+        int len = end - start;
+        
+        char *match_str = malloc(len + 1);
+        memcpy(match_str, argv[0].string.data + start, len);
+        match_str[len] = '\0';
+        
+        array_push(&result, value_string(match_str));
+        free(match_str);
+    }
+    
+    regfree(&regex);
+    return result;
+}
+
+// 正規置換: 正規表現パターンにマッチする部分を置換
+static Value builtin_regex_replace(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING || argv[1].type != VALUE_STRING ||
+        argv[2].type != VALUE_STRING) {
+        return value_null();
+    }
+    
+    regex_t regex;
+    int ret = regcomp(&regex, argv[1].string.data, REG_EXTENDED);
+    if (ret != 0) return value_copy(argv[0]);
+    
+    const char *src = argv[0].string.data;
+    const char *replacement = argv[2].string.data;
+    int rep_len = argv[2].string.length;
+    
+    // 結果バッファ
+    int buf_capacity = argv[0].string.length * 2 + 64;
+    char *buf = malloc(buf_capacity);
+    int buf_len = 0;
+    
+    regmatch_t match;
+    
+    while (*src && regexec(&regex, src, 1, &match, 0) == 0) {
+        // マッチ前の部分をコピー
+        int prefix_len = match.rm_so;
+        while (buf_len + prefix_len + rep_len + 1 >= buf_capacity) {
+            buf_capacity *= 2;
+            buf = realloc(buf, buf_capacity);
+        }
+        memcpy(buf + buf_len, src, prefix_len);
+        buf_len += prefix_len;
+        
+        // 置換文字列をコピー
+        memcpy(buf + buf_len, replacement, rep_len);
+        buf_len += rep_len;
+        
+        src += match.rm_eo;
+        if (match.rm_eo == 0) {
+            // 空マッチの場合、1文字進める
+            if (*src) {
+                buf[buf_len++] = *src++;
+            } else {
+                break;
+            }
+        }
+    }
+    
+    // 残りの部分をコピー
+    int remaining = strlen(src);
+    while (buf_len + remaining + 1 >= buf_capacity) {
+        buf_capacity *= 2;
+        buf = realloc(buf, buf_capacity);
+    }
+    memcpy(buf + buf_len, src, remaining);
+    buf_len += remaining;
+    buf[buf_len] = '\0';
+    
+    Value result = value_string(buf);
+    free(buf);
+    regfree(&regex);
+    
+    return result;
+}
+
+// =============================================================================
+// システムユーティリティ
+// =============================================================================
+
+// 待つ（sleep）: 指定秒数スリープ
+static Value builtin_sleep(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMBER) return value_null();
+    
+    double seconds = argv[0].number;
+    if (seconds > 0) {
+        usleep((useconds_t)(seconds * 1000000));
+    }
+    
+    return value_null();
+}
+
+// 実行: シェルコマンドを実行して出力を返す
+static Value builtin_exec(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING) return value_null();
+    
+    FILE *pipe = popen(argv[0].string.data, "r");
+    if (pipe == NULL) return value_null();
+    
+    int capacity = 1024;
+    char *buffer = malloc(capacity);
+    int length = 0;
+    
+    char chunk[256];
+    while (fgets(chunk, sizeof(chunk), pipe) != NULL) {
+        int chunk_len = strlen(chunk);
+        while (length + chunk_len + 1 >= capacity) {
+            capacity *= 2;
+            buffer = realloc(buffer, capacity);
+        }
+        memcpy(buffer + length, chunk, chunk_len);
+        length += chunk_len;
+    }
+    buffer[length] = '\0';
+    
+    int status = pclose(pipe);
+    (void)status;
+    
+    Value result = value_string(buffer);
+    free(buffer);
+    return result;
+}
+
+// 環境変数: 環境変数の値を取得
+static Value builtin_env_get(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING) return value_null();
+    
+    const char *val = getenv(argv[0].string.data);
+    if (val == NULL) return value_null();
+    return value_string(val);
+}
+
+// 環境変数設定: 環境変数を設定
+static Value builtin_env_set(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING || argv[1].type != VALUE_STRING) {
+        return value_bool(false);
+    }
+    
+    int result = setenv(argv[0].string.data, argv[1].string.data, 1);
+    return value_bool(result == 0);
+}
+
+// 終了: プログラムを終了
+static Value builtin_exit_program(int argc, Value *argv) {
+    int code = 0;
+    if (argc > 0 && argv[0].type == VALUE_NUMBER) {
+        code = (int)argv[0].number;
+    }
+    exit(code);
+    return value_null();  // 到達しない
 }

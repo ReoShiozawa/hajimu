@@ -64,7 +64,7 @@ static char *read_file(const char *path) {
 // ファイル実行
 // =============================================================================
 
-static int run_file(const char *path, bool debug_mode) {
+static int run_file(const char *path, bool debug_mode, int script_argc, char **script_argv) {
     char *source = read_file(path);
     if (source == NULL) {
         return 1;
@@ -92,6 +92,13 @@ static int run_file(const char *path, bool debug_mode) {
     
     // 実行
     Evaluator *eval = evaluator_new();
+    
+    // コマンドライン引数を「引数」変数として設定
+    Value args_array = value_array_with_capacity(script_argc > 0 ? script_argc : 1);
+    for (int i = 0; i < script_argc; i++) {
+        array_push(&args_array, value_string(script_argv[i]));
+    }
+    env_define(eval->global, "引数", args_array, true);
     
     // デバッグモードを設定
     if (debug_mode) {
@@ -296,6 +303,7 @@ int main(int argc, char *argv[]) {
     const char *filename = NULL;
     
     // 引数解析
+    int filename_index = -1;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             show_help = true;
@@ -313,6 +321,8 @@ int main(int argc, char *argv[]) {
             return 1;
         } else {
             filename = argv[i];
+            filename_index = i;
+            break;  // ファイル名以降はスクリプト引数として扱う
         }
     }
     
@@ -356,7 +366,13 @@ int main(int argc, char *argv[]) {
         free(source);
         
         // 実行
-        return run_file(filename, debug_mode);
+        int script_argc = 0;
+        char **script_argv = NULL;
+        if (filename_index >= 0 && filename_index + 1 < argc) {
+            script_argc = argc - filename_index - 1;
+            script_argv = &argv[filename_index + 1];
+        }
+        return run_file(filename, debug_mode, script_argc, script_argv);
     }
     
     // REPLモード

@@ -28,6 +28,9 @@ static const char *node_type_names[] = {
     [NODE_METHOD_DEF] = "METHOD_DEF",
     [NODE_TRY] = "TRY",
     [NODE_THROW] = "THROW",
+    [NODE_LAMBDA] = "LAMBDA",
+    [NODE_SWITCH] = "SWITCH",
+    [NODE_FOREACH] = "FOREACH",
     [NODE_EXPR_STMT] = "EXPR_STMT",
     [NODE_BINARY] = "BINARY",
     [NODE_UNARY] = "UNARY",
@@ -281,6 +284,43 @@ ASTNode *node_throw(ASTNode *expression, int line, int column) {
     return node;
 }
 
+ASTNode *node_lambda(Parameter *params, int param_count, ASTNode *body, int line, int column) {
+    ASTNode *node = node_new(NODE_LAMBDA, line, column);
+    node->lambda.params = params;
+    node->lambda.param_count = param_count;
+    node->lambda.body = body;
+    return node;
+}
+
+ASTNode *node_switch(ASTNode *target, int line, int column) {
+    ASTNode *node = node_new(NODE_SWITCH, line, column);
+    node->switch_stmt.target = target;
+    node->switch_stmt.case_values = NULL;
+    node->switch_stmt.case_bodies = NULL;
+    node->switch_stmt.case_count = 0;
+    node->switch_stmt.default_body = NULL;
+    return node;
+}
+
+void switch_add_case(ASTNode *switch_node, ASTNode *value, ASTNode *body) {
+    int count = switch_node->switch_stmt.case_count;
+    switch_node->switch_stmt.case_values = realloc(
+        switch_node->switch_stmt.case_values, sizeof(ASTNode *) * (count + 1));
+    switch_node->switch_stmt.case_bodies = realloc(
+        switch_node->switch_stmt.case_bodies, sizeof(ASTNode *) * (count + 1));
+    switch_node->switch_stmt.case_values[count] = value;
+    switch_node->switch_stmt.case_bodies[count] = body;
+    switch_node->switch_stmt.case_count++;
+}
+
+ASTNode *node_foreach(const char *var_name, ASTNode *iterable, ASTNode *body, int line, int column) {
+    ASTNode *node = node_new(NODE_FOREACH, line, column);
+    node->foreach_stmt.var_name = strdup(var_name);
+    node->foreach_stmt.iterable = iterable;
+    node->foreach_stmt.body = body;
+    return node;
+}
+
 ASTNode *node_expr_stmt(ASTNode *expression, int line, int column) {
     ASTNode *node = node_new(NODE_EXPR_STMT, line, column);
     node->expr_stmt.expression = expression;
@@ -476,6 +516,39 @@ void node_free(ASTNode *node) {
             }
             free(node->dict.keys);
             free(node->dict.values);
+            break;
+
+        case NODE_TRY:
+            node_free(node->try_stmt.try_block);
+            free(node->try_stmt.catch_var);
+            node_free(node->try_stmt.catch_block);
+            node_free(node->try_stmt.finally_block);
+            break;
+
+        case NODE_THROW:
+            node_free(node->throw_stmt.expression);
+            break;
+
+        case NODE_LAMBDA:
+            params_free(node->lambda.params, node->lambda.param_count);
+            node_free(node->lambda.body);
+            break;
+
+        case NODE_SWITCH:
+            node_free(node->switch_stmt.target);
+            for (int i = 0; i < node->switch_stmt.case_count; i++) {
+                node_free(node->switch_stmt.case_values[i]);
+                node_free(node->switch_stmt.case_bodies[i]);
+            }
+            free(node->switch_stmt.case_values);
+            free(node->switch_stmt.case_bodies);
+            node_free(node->switch_stmt.default_body);
+            break;
+
+        case NODE_FOREACH:
+            free(node->foreach_stmt.var_name);
+            node_free(node->foreach_stmt.iterable);
+            node_free(node->foreach_stmt.body);
             break;
             
         default:
