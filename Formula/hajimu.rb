@@ -2,7 +2,7 @@ class Hajimu < Formula
   desc "完全日本語プログラミング言語 - はじむ (Hajimu)"
   homepage "https://reoshiozawa.github.io/hajimu-document/"
   url "https://github.com/ReoShiozawa/hajimu/archive/refs/tags/v1.0.0.tar.gz"
-  sha256 "" # リリース時に更新
+  sha256 "54e300502e1ec244d0ba1042824d6b601b4846a467ceb9bfb953a689ceb7da8b"
   license "MIT"
   head "https://github.com/ReoShiozawa/hajimu.git", branch: "main"
 
