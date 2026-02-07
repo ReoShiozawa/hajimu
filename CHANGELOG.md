@@ -2,6 +2,32 @@
 
 すべての注目すべき変更はこのプロジェクトに記録されます。
 
+## [v1.0.0] - 2026-02-XX
+
+### 🎉 公開リリース
+
+**はじむ（Hajimu）** として正式に一般公開。
+
+#### 変更
+- 言語名を「日本語プログラミング言語」から「**はじむ**」に正式決定
+- リポジトリを https://github.com/ReoShiozawa/hajimu に移行
+- ドキュメントサイトを https://reoshiozawa.github.io/hajimu-document/ に移行
+
+#### 追加
+- **Homebrew サポート**: `brew install ReoShiozawa/hajimu/hajimu`
+- **LICENSE**: MIT License を明記
+- **CONTRIBUTING.md**: コントリビューションガイドラインを追加
+- **GitHub テンプレート**: Issue/PR テンプレートを追加
+- **Formula/hajimu.rb**: Homebrew Formula を追加
+
+#### ドキュメント
+- README.md を公開用に全面刷新
+  - バッジ追加（License, Release, Stars）
+  - インストール手順（Homebrew + ソースビルド）
+  - 機能リスト、クイックスタート、言語比較表を追加
+- すべてのドキュメントで「はじむ」の名称に統一
+- GitHub URL を ReoShiozawa/hajimu に更新
+
 ## [v0.2.0] - 2026-02-06
 
 ### 追加
