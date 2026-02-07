@@ -196,6 +196,63 @@ static Value builtin_base64_decode(int argc, Value *argv);
 // toStringプロトコル
 static Value call_instance_to_string(Value *instance);
 
+// 演算子オーバーロード
+static Value call_instance_operator(Value *instance, const char *method_name, Value *arg);
+
+// セット（集合）関数
+static Value builtin_set_create(int argc, Value *argv);
+static Value builtin_set_add(int argc, Value *argv);
+static Value builtin_set_remove(int argc, Value *argv);
+static Value builtin_set_contains(int argc, Value *argv);
+static Value builtin_set_union(int argc, Value *argv);
+static Value builtin_set_intersection(int argc, Value *argv);
+static Value builtin_set_difference(int argc, Value *argv);
+
+// テストフレームワーク
+static Value builtin_test_register(int argc, Value *argv);
+static Value builtin_test_run(int argc, Value *argv);
+static Value builtin_expect(int argc, Value *argv);
+static Value builtin_expect_error(int argc, Value *argv);
+static Value builtin_create_exception(int argc, Value *argv);
+
+// ドキュメントコメント
+static Value builtin_doc_set(int argc, Value *argv);
+static Value builtin_doc_get(int argc, Value *argv);
+static Value builtin_type_alias(int argc, Value *argv);
+
+// ドキュメントレジストリ
+typedef struct {
+    char *name;
+    char *doc;
+} DocEntry;
+
+#define MAX_DOCS 256
+static DocEntry g_docs[MAX_DOCS];
+static int g_doc_count = 0;
+
+// 型エイリアスレジストリ
+typedef struct {
+    char *alias;
+    char *original;
+} TypeAlias;
+
+#define MAX_TYPE_ALIASES 128
+static TypeAlias g_type_aliases[MAX_TYPE_ALIASES];
+static int g_type_alias_count = 0;
+
+// テストレジストリ
+typedef struct {
+    char *name;
+    Value func;
+} TestCase;
+
+#define MAX_TESTS 256
+static TestCase g_tests[MAX_TESTS];
+static int g_test_count = 0;
+static int g_expect_failures = 0;
+static char g_expect_messages[4096];
+static int g_expect_msg_len = 0;
+
 // =============================================================================
 // 評価器の初期化・解放
 // =============================================================================
@@ -254,7 +311,7 @@ void evaluator_free(Evaluator *eval) {
     }
     free(eval->imported_modules);
     
-    env_free(eval->global);
+    env_release(eval->global);
     free(eval);
 }
 
@@ -589,6 +646,46 @@ void register_builtins(Evaluator *eval) {
     env_define(eval->global, "Base64デコード",
                value_builtin(builtin_base64_decode, "Base64デコード", 1, 1), true);
     
+    // セット（集合）関数
+    env_define(eval->global, "集合",
+               value_builtin(builtin_set_create, "集合", 0, -1), true);
+    env_define(eval->global, "集合追加",
+               value_builtin(builtin_set_add, "集合追加", 2, 2), true);
+    env_define(eval->global, "集合削除",
+               value_builtin(builtin_set_remove, "集合削除", 2, 2), true);
+    env_define(eval->global, "集合含む",
+               value_builtin(builtin_set_contains, "集合含む", 2, 2), true);
+    env_define(eval->global, "和集合",
+               value_builtin(builtin_set_union, "和集合", 2, 2), true);
+    env_define(eval->global, "積集合",
+               value_builtin(builtin_set_intersection, "積集合", 2, 2), true);
+    env_define(eval->global, "差集合",
+               value_builtin(builtin_set_difference, "差集合", 2, 2), true);
+    
+    // テストフレームワーク
+    env_define(eval->global, "テスト",
+               value_builtin(builtin_test_register, "テスト", 2, 2), true);
+    env_define(eval->global, "テスト実行",
+               value_builtin(builtin_test_run, "テスト実行", 0, 0), true);
+    env_define(eval->global, "期待",
+               value_builtin(builtin_expect, "期待", 2, 3), true);
+    env_define(eval->global, "期待エラー",
+               value_builtin(builtin_expect_error, "期待エラー", 1, 1), true);
+    
+    // 例外関数
+    env_define(eval->global, "例外作成",
+               value_builtin(builtin_create_exception, "例外作成", 2, 2), true);
+    
+    // ドキュメントコメント
+    env_define(eval->global, "文書化",
+               value_builtin(builtin_doc_set, "文書化", 2, 2), true);
+    env_define(eval->global, "文書",
+               value_builtin(builtin_doc_get, "文書", 1, 1), true);
+    
+    // 型エイリアス
+    env_define(eval->global, "型別名",
+               value_builtin(builtin_type_alias, "型別名", 2, 2), true);
+    
     // 非同期ランタイムの初期化
     async_runtime_init();
 }
@@ -710,7 +807,7 @@ Value evaluator_run(Evaluator *eval, ASTNode *program) {
         }
         
         eval->current = prev;
-        env_free(local);
+        env_release(local);
     }
     
     return result;
@@ -1031,7 +1128,36 @@ static Value evaluate_binary(Evaluator *eval, ASTNode *node) {
         }
     }
     
-    // 等価比較
+    // 演算子オーバーロード: 左辺がインスタンスの場合、演算子メソッドを呼ぶ
+    // （等価比較のデフォルトより先にチェック）
+    if (left.type == VALUE_INSTANCE) {
+        const char *method = NULL;
+        switch (node->binary.operator) {
+            case TOKEN_PLUS:    method = "足す"; break;
+            case TOKEN_MINUS:   method = "引く"; break;
+            case TOKEN_STAR:    method = "掛ける"; break;
+            case TOKEN_SLASH:   method = "割る"; break;
+            case TOKEN_PERCENT: method = "剰余"; break;
+            case TOKEN_EQ:      method = "等しい"; break;
+            case TOKEN_NE:      method = "等しくない"; break;
+            case TOKEN_LT:      method = "小さい"; break;
+            case TOKEN_GT:      method = "大きい"; break;
+            case TOKEN_LE:      method = "以下"; break;
+            case TOKEN_GE:      method = "以上"; break;
+            default: break;
+        }
+        if (method != NULL) {
+            bool prev_error = eval->had_error;
+            eval->had_error = false;
+            Value result = call_instance_operator(&left, method, &right);
+            if (!eval->had_error) {
+                return result;
+            }
+            eval->had_error = prev_error;
+        }
+    }
+    
+    // 等価比較（デフォルト）
     if (node->binary.operator == TOKEN_EQ) {
         return value_bool(value_equals(left, right));
     }
@@ -1358,7 +1484,7 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
             }
             
             eval->current = prev;
-            env_free(local);
+            env_release(local);
         }
     }
     else {
@@ -1592,6 +1718,21 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
         if (eval->had_error) return value_null();
         
         if (object.type == VALUE_INSTANCE) {
+            // アクセス修飾子: _で始まるフィールドは非公開
+            const char *field_name = member_node->member.member_name;
+            if (field_name[0] == '_') {
+                bool is_self_access = (eval->current_instance != NULL &&
+                                       eval->current_instance->type == VALUE_INSTANCE &&
+                                       eval->current_instance->instance.fields == object.instance.fields);
+                // NODE_SELF（自分.xxx）からのアクセスも許可
+                if (!is_self_access && member_node->member.object->type != NODE_SELF) {
+                    eval->throwing = true;
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "'%s' は非公開フィールドです", field_name);
+                    eval->exception_value = value_string(msg);
+                    return value_null();
+                }
+            }
             instance_set_field(&object, member_node->member.member_name, value);
             // 元の変数を更新する必要がある
             if (member_node->member.object->type == NODE_IDENTIFIER) {
@@ -1713,20 +1854,16 @@ static Value evaluate_for(Evaluator *eval, ASTNode *node) {
 
 static Value evaluate_import(Evaluator *eval, ASTNode *node) {
     const char *module_path = node->import_stmt.module_path;
+    const char *alias = node->import_stmt.alias;
     
     // 現在のファイルディレクトリを基準にパスを解決
     char resolved_path[1024];
     
-    // 絶対パスの場合はそのまま使用
-    if (module_path[0] == '/') {
-        snprintf(resolved_path, sizeof(resolved_path), "%s", module_path);
+    // .jp拡張子がなければ追加
+    if (strstr(module_path, ".jp") == NULL) {
+        snprintf(resolved_path, sizeof(resolved_path), "%s.jp", module_path);
     } else {
-        // 相対パスの場合、.jp拡張子を追加
-        if (strstr(module_path, ".jp") == NULL) {
-            snprintf(resolved_path, sizeof(resolved_path), "%s.jp", module_path);
-        } else {
-            snprintf(resolved_path, sizeof(resolved_path), "%s", module_path);
-        }
+        snprintf(resolved_path, sizeof(resolved_path), "%s", module_path);
     }
     
     // ファイルを読み込む
@@ -1770,15 +1907,48 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
     eval->imported_modules[eval->imported_count].ast = program;
     eval->imported_count++;
     
-    // インポートしたモジュールを現在の環境で評価
-    Value result = value_null();
-    for (int i = 0; i < program->block.count; i++) {
-        result = evaluate(eval, program->block.statements[i]);
-        if (eval->had_error) break;
+    if (alias != NULL) {
+        // 名前空間付きインポート: 新しいスコープでモジュールを評価
+        Environment *module_env = env_new(eval->global);
+        Environment *prev = eval->current;
+        eval->current = module_env;
+        
+        for (int i = 0; i < program->block.count; i++) {
+            evaluate(eval, program->block.statements[i]);
+            if (eval->had_error) {
+                eval->current = prev;
+                env_release(module_env);
+                return value_null();
+            }
+        }
+        
+        eval->current = prev;
+        
+        // モジュール環境の定義を辞書に変換
+        Value ns = value_dict();
+        for (int i = 0; i < ENV_HASH_SIZE; i++) {
+            EnvEntry *entry = module_env->table[i];
+            while (entry != NULL) {
+                dict_set(&ns, entry->name, value_copy(entry->value));
+                entry = entry->next;
+            }
+        }
+        
+        env_release(module_env);
+        
+        // エイリアス名で辞書を定義
+        env_define(eval->current, alias, ns, true);
+    } else {
+        // 従来通り: インポートしたモジュールを現在の環境で評価
+        Value result = value_null();
+        for (int i = 0; i < program->block.count; i++) {
+            result = evaluate(eval, program->block.statements[i]);
+            if (eval->had_error) break;
+        }
     }
     
     // ソースとASTは保持しておく（関数定義で参照されるため）
-    return result;
+    return value_null();
 }
 
 static Value evaluate_class_def(Evaluator *eval, ASTNode *node) {
@@ -1845,7 +2015,7 @@ static Value evaluate_new(Evaluator *eval, ASTNode *node) {
             Value arg = evaluate(eval, node->new_expr.arguments[i]);
             if (eval->had_error) {
                 eval->current = saved_env;
-                env_free(method_env);
+                env_release(method_env);
                 return value_null();
             }
             env_define(method_env, init->method.params[i].name, arg, false);
@@ -1874,7 +2044,7 @@ static Value evaluate_new(Evaluator *eval, ASTNode *node) {
         
         // クリーンアップ
         free(instance_ptr);
-        env_free(method_env);
+        env_release(method_env);
     }
     
     return instance;
@@ -1951,6 +2121,23 @@ static Value evaluate_member(Evaluator *eval, ASTNode *node) {
     
     // インスタンスのフィールドアクセス
     if (object.type == VALUE_INSTANCE) {
+        // アクセス修飾子: _で始まるフィールドは非公開
+        if (member_name[0] == '_') {
+            // 自分自身からのアクセスは許可
+            bool is_self_access = (node->member.object->type == NODE_SELF) ||
+                                  (eval->current_instance != NULL &&
+                                   eval->current_instance->type == VALUE_INSTANCE &&
+                                   eval->current_instance->instance.fields == object.instance.fields);
+            if (!is_self_access) {
+                // 例外として投げる（try-catchで捕獲可能）
+                eval->throwing = true;
+                char msg[256];
+                snprintf(msg, sizeof(msg), "'%s' は非公開フィールドです", member_name);
+                eval->exception_value = value_string(msg);
+                return value_null();
+            }
+        }
+        
         Value *field = instance_get_field(&object, member_name);
         if (field != NULL) {
             return value_copy(*field);
@@ -2046,7 +2233,7 @@ static Value evaluate_try(Evaluator *eval, ASTNode *node) {
         evaluate(eval, node->try_stmt.catch_block);
         
         eval->current = prev;
-        env_free(catch_scope);
+        env_release(catch_scope);
     }
     
     // 最終ブロックがあれば必ず実行
@@ -2303,7 +2490,7 @@ static Value evaluate_foreach(Evaluator *eval, ASTNode *node) {
     }
     
     eval->current = prev;
-    env_free(loop_env);
+    env_release(loop_env);
     
     return result;
 }
@@ -2972,6 +3159,14 @@ static Value builtin_typeof_check(int argc, Value *argv) {
     
     const char *type_name = argv[1].string.data;
     
+    // 型エイリアスを解決
+    for (int i = 0; i < g_type_alias_count; i++) {
+        if (strcmp(g_type_aliases[i].alias, type_name) == 0) {
+            type_name = g_type_aliases[i].original;
+            break;
+        }
+    }
+    
     if (strcmp(type_name, "数値") == 0) return value_bool(argv[0].type == VALUE_NUMBER);
     if (strcmp(type_name, "文字列") == 0) return value_bool(argv[0].type == VALUE_STRING);
     if (strcmp(type_name, "真偽") == 0) return value_bool(argv[0].type == VALUE_BOOL);
@@ -2999,6 +3194,67 @@ static Value builtin_typeof_check(int argc, Value *argv) {
 static Value builtin_to_number(int argc, Value *argv) {
     (void)argc;
     return value_to_number(argv[0]);
+}
+
+// =============================================================================
+// 演算子オーバーロード
+// =============================================================================
+
+// インスタンスの演算子メソッドを呼ぶ（見つからなければ VALUE_NULL + g_eval->had_error=true）
+static Value call_instance_operator(Value *instance, const char *method_name, Value *arg) {
+    if (g_eval == NULL || instance->type != VALUE_INSTANCE) {
+        // フォールバック: メソッドが見つからない
+        return value_null();
+    }
+    
+    Value *class_ref = instance->instance.class_ref;
+    while (class_ref != NULL && class_ref->type == VALUE_CLASS) {
+        ASTNode *class_def = class_ref->class_value.definition;
+        for (int i = 0; i < class_def->class_def.method_count; i++) {
+            ASTNode *method = class_def->class_def.methods[i];
+            if (strcmp(method->method.name, method_name) == 0) {
+                // メソッドを呼び出す
+                Environment *method_env = env_new(g_eval->current);
+                Environment *saved = g_eval->current;
+                Value *saved_instance = g_eval->current_instance;
+                
+                g_eval->current = method_env;
+                g_eval->current_instance = instance;
+                env_define(method_env, "自分", value_copy(*instance), false);
+                
+                // 引数をバインド
+                ASTNode *func_body = method->method.body;
+                if (method->method.param_count > 0) {
+                    env_define(method_env, method->method.params[0].name,
+                              value_copy(*arg), false);
+                }
+                
+                Value ret = evaluate(g_eval, func_body);
+                
+                if (g_eval->returning) {
+                    ret = g_eval->return_value;
+                    g_eval->returning = false;
+                }
+                
+                g_eval->current = saved;
+                g_eval->current_instance = saved_instance;
+                env_release(method_env);
+                
+                return ret;
+            }
+        }
+        // 親クラスを探す
+        if (class_def->class_def.parent_name != NULL) {
+            Value *parent = env_get(g_eval->current, class_def->class_def.parent_name);
+            if (parent != NULL && parent->type == VALUE_CLASS) {
+                class_ref = parent;
+            } else break;
+        } else break;
+    }
+    
+    // メソッドが見つからなかった場合
+    g_eval->had_error = true;
+    return value_null();
 }
 
 // インスタンスの文字列化メソッドを呼ぶ（toStringプロトコル）
@@ -3035,7 +3291,7 @@ static Value call_instance_to_string(Value *instance) {
                 
                 g_eval->current = saved;
                 g_eval->current_instance = saved_instance;
-                env_free(method_env);
+                env_release(method_env);
                 
                 if (ret.type == VALUE_STRING) {
                     return value_copy(ret);
@@ -3549,7 +3805,7 @@ static Value call_function_value(Value *func, Value *args, int argc) {
     }
     
     g_eval->current = prev;
-    env_free(local);
+    env_release(local);
     
     return result;
 }
@@ -4030,4 +4286,348 @@ static Value builtin_base64_decode(int argc, Value *argv) {
     Value result = value_string(output);
     free(output);
     return result;
+}
+
+// =============================================================================
+// セット（集合）関数
+// =============================================================================
+
+// ヘルパー: 配列に値が既に存在するかチェック
+static bool array_contains_value(Value *arr, Value val) {
+    for (int i = 0; i < arr->array.length; i++) {
+        if (value_equals(arr->array.elements[i], val)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// 集合(要素1, 要素2, ...) - 重複を排除して配列として返す
+static Value builtin_set_create(int argc, Value *argv) {
+    Value result = value_array();
+    for (int i = 0; i < argc; i++) {
+        if (!array_contains_value(&result, argv[i])) {
+            array_push(&result, argv[i]);
+        }
+    }
+    return result;
+}
+
+// 集合追加(集合, 値) - 値がなければ追加した新しい集合を返す
+static Value builtin_set_add(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY) return value_null();
+    
+    Value result = value_copy(argv[0]);
+    if (!array_contains_value(&result, argv[1])) {
+        array_push(&result, argv[1]);
+    }
+    return result;
+}
+
+// 集合削除(集合, 値) - 値を除いた新しい集合を返す
+static Value builtin_set_remove(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY) return value_null();
+    
+    Value result = value_array();
+    for (int i = 0; i < argv[0].array.length; i++) {
+        if (!value_equals(argv[0].array.elements[i], argv[1])) {
+            array_push(&result, argv[0].array.elements[i]);
+        }
+    }
+    return result;
+}
+
+// 集合含む(集合, 値) - 値が含まれるか
+static Value builtin_set_contains(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY) return value_bool(false);
+    return value_bool(array_contains_value(&argv[0], argv[1]));
+}
+
+// 和集合(A, B) - AとBの和集合
+static Value builtin_set_union(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY || argv[1].type != VALUE_ARRAY) return value_null();
+    
+    Value result = value_array();
+    for (int i = 0; i < argv[0].array.length; i++) {
+        if (!array_contains_value(&result, argv[0].array.elements[i])) {
+            array_push(&result, argv[0].array.elements[i]);
+        }
+    }
+    for (int i = 0; i < argv[1].array.length; i++) {
+        if (!array_contains_value(&result, argv[1].array.elements[i])) {
+            array_push(&result, argv[1].array.elements[i]);
+        }
+    }
+    return result;
+}
+
+// 積集合(A, B) - AとBの共通要素
+static Value builtin_set_intersection(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY || argv[1].type != VALUE_ARRAY) return value_null();
+    
+    Value result = value_array();
+    for (int i = 0; i < argv[0].array.length; i++) {
+        if (array_contains_value(&argv[1], argv[0].array.elements[i]) &&
+            !array_contains_value(&result, argv[0].array.elements[i])) {
+            array_push(&result, argv[0].array.elements[i]);
+        }
+    }
+    return result;
+}
+
+// 差集合(A, B) - AにあってBにない要素
+static Value builtin_set_difference(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_ARRAY || argv[1].type != VALUE_ARRAY) return value_null();
+    
+    Value result = value_array();
+    for (int i = 0; i < argv[0].array.length; i++) {
+        if (!array_contains_value(&argv[1], argv[0].array.elements[i]) &&
+            !array_contains_value(&result, argv[0].array.elements[i])) {
+            array_push(&result, argv[0].array.elements[i]);
+        }
+    }
+    return result;
+}
+
+// =============================================================================
+// テストフレームワーク
+// =============================================================================
+
+// テスト(名前, 関数) - テストケースを登録
+static Value builtin_test_register(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING) return value_null();
+    if (argv[1].type != VALUE_FUNCTION && argv[1].type != VALUE_BUILTIN) return value_null();
+    
+    if (g_test_count >= MAX_TESTS) return value_null();
+    
+    g_tests[g_test_count].name = strdup(argv[0].string.data);
+    g_tests[g_test_count].func = value_copy(argv[1]);
+    g_test_count++;
+    
+    return value_null();
+}
+
+// 期待(実際, 期待値 [, メッセージ]) - テスト内アサーション
+static Value builtin_expect(int argc, Value *argv) {
+    Value actual = argv[0];
+    Value expected = argv[1];
+    
+    if (value_equals(actual, expected)) {
+        return value_bool(true);
+    }
+    
+    // 失敗
+    g_expect_failures++;
+    char *actual_str = value_to_string(actual);
+    char *expected_str = value_to_string(expected);
+    
+    int written;
+    if (argc >= 3 && argv[2].type == VALUE_STRING) {
+        written = snprintf(g_expect_messages + g_expect_msg_len,
+                          sizeof(g_expect_messages) - g_expect_msg_len,
+                          "    ✗ %s: 期待=%s, 実際=%s\n",
+                          argv[2].string.data, expected_str, actual_str);
+    } else {
+        written = snprintf(g_expect_messages + g_expect_msg_len,
+                          sizeof(g_expect_messages) - g_expect_msg_len,
+                          "    ✗ 期待=%s, 実際=%s\n",
+                          expected_str, actual_str);
+    }
+    if (written > 0) g_expect_msg_len += written;
+    
+    free(actual_str);
+    free(expected_str);
+    return value_bool(false);
+}
+
+// 期待エラー(関数) - 関数が例外を投げることを期待
+static Value builtin_expect_error(int argc, Value *argv) {
+    (void)argc;
+    if (g_eval == NULL) return value_bool(false);
+    
+    if (argv[0].type == VALUE_FUNCTION) {
+        // 関数を呼び出して例外を期待
+        Environment *call_env = env_new(g_eval->current);
+        Environment *saved = g_eval->current;
+        g_eval->current = call_env;
+        
+        evaluate(g_eval, argv[0].function.definition->function.body);
+        
+        g_eval->current = saved;
+        env_release(call_env);
+        
+        if (g_eval->throwing) {
+            // 例外が発生した = 期待通り
+            g_eval->throwing = false;
+            return value_bool(true);
+        }
+        
+        // 例外が発生しなかった = 失敗
+        g_expect_failures++;
+        int written = snprintf(g_expect_messages + g_expect_msg_len,
+                              sizeof(g_expect_messages) - g_expect_msg_len,
+                              "    ✗ 例外が発生しませんでした\n");
+        if (written > 0) g_expect_msg_len += written;
+        return value_bool(false);
+    }
+    
+    return value_bool(false);
+}
+
+// テスト実行() - 登録済みテストを全実行
+static Value builtin_test_run(int argc, Value *argv) {
+    (void)argc; (void)argv;
+    if (g_eval == NULL) return value_null();
+    
+    int passed = 0;
+    int failed = 0;
+    
+    printf("\n=== テスト実行 ===\n");
+    
+    for (int i = 0; i < g_test_count; i++) {
+        // テスト前にリセット
+        g_expect_failures = 0;
+        g_expect_msg_len = 0;
+        g_expect_messages[0] = '\0';
+        
+        bool test_error = false;
+        
+        if (g_tests[i].func.type == VALUE_FUNCTION) {
+            Environment *test_env = env_new(g_eval->current);
+            Environment *saved = g_eval->current;
+            g_eval->current = test_env;
+            
+            evaluate(g_eval, g_tests[i].func.function.definition->function.body);
+            
+            if (g_eval->returning) {
+                g_eval->returning = false;
+            }
+            if (g_eval->throwing) {
+                g_eval->throwing = false;
+                test_error = true;
+            }
+            if (g_eval->had_error) {
+                g_eval->had_error = false;
+                test_error = true;
+            }
+            
+            g_eval->current = saved;
+            env_release(test_env);
+        }
+        
+        if (g_expect_failures == 0 && !test_error) {
+            printf("  ✓ %s\n", g_tests[i].name);
+            passed++;
+        } else {
+            printf("  ✗ %s\n", g_tests[i].name);
+            if (g_expect_msg_len > 0) {
+                printf("%s", g_expect_messages);
+            }
+            failed++;
+        }
+        
+        // クリーンアップ
+        free(g_tests[i].name);
+        value_free(&g_tests[i].func);
+    }
+    
+    printf("\nテスト結果: %d/%d 成功", passed, passed + failed);
+    if (failed > 0) {
+        printf(" (%d 失敗)", failed);
+    }
+    printf("\n");
+    
+    g_test_count = 0;
+    
+    // 結果辞書を返す
+    Value result = value_dict();
+    dict_set(&result, "成功", value_number(passed));
+    dict_set(&result, "失敗", value_number(failed));
+    dict_set(&result, "合計", value_number(passed + failed));
+    return result;
+}
+
+// =============================================================================
+// カスタム例外
+// =============================================================================
+
+// 例外作成(種類, メッセージ) - 構造化例外辞書を作成
+static Value builtin_create_exception(int argc, Value *argv) {
+    (void)argc;
+    Value exc = value_dict();
+    dict_set(&exc, "種類", value_copy(argv[0]));
+    dict_set(&exc, "メッセージ", value_copy(argv[1]));
+    return exc;
+}
+
+// =============================================================================
+// ドキュメントコメント
+// =============================================================================
+
+// 文書化(名前, 説明) - ドキュメントを登録
+static Value builtin_doc_set(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING || argv[1].type != VALUE_STRING) return value_null();
+    
+    // 既存エントリを更新
+    for (int i = 0; i < g_doc_count; i++) {
+        if (strcmp(g_docs[i].name, argv[0].string.data) == 0) {
+            free(g_docs[i].doc);
+            g_docs[i].doc = strdup(argv[1].string.data);
+            return value_null();
+        }
+    }
+    
+    // 新規登録
+    if (g_doc_count < MAX_DOCS) {
+        g_docs[g_doc_count].name = strdup(argv[0].string.data);
+        g_docs[g_doc_count].doc = strdup(argv[1].string.data);
+        g_doc_count++;
+    }
+    return value_null();
+}
+
+// 文書(名前) - ドキュメントを取得
+static Value builtin_doc_get(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING) return value_null();
+    
+    for (int i = 0; i < g_doc_count; i++) {
+        if (strcmp(g_docs[i].name, argv[0].string.data) == 0) {
+            return value_string(g_docs[i].doc);
+        }
+    }
+    return value_null();
+}
+
+// 型別名(エイリアス, 元の型名) - 型エイリアスを登録
+static Value builtin_type_alias(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING || argv[1].type != VALUE_STRING) {
+        return value_null();
+    }
+    
+    // 既存のエイリアスを更新
+    for (int i = 0; i < g_type_alias_count; i++) {
+        if (strcmp(g_type_aliases[i].alias, argv[0].string.data) == 0) {
+            free(g_type_aliases[i].original);
+            g_type_aliases[i].original = strdup(argv[1].string.data);
+            return value_bool(true);
+        }
+    }
+    
+    // 新規登録
+    if (g_type_alias_count < MAX_TYPE_ALIASES) {
+        g_type_aliases[g_type_alias_count].alias = strdup(argv[0].string.data);
+        g_type_aliases[g_type_alias_count].original = strdup(argv[1].string.data);
+        g_type_alias_count++;
+    }
+    return value_bool(true);
 }

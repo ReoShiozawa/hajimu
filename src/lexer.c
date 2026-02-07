@@ -188,6 +188,7 @@ static const char *token_names[] = {
     [TOKEN_PIPE] = "|>",
     [TOKEN_QUESTION] = "?",
     [TOKEN_NULL_COALESCE] = "??",
+    [TOKEN_AT] = "@",
 };
 
 // =============================================================================
@@ -844,6 +845,9 @@ Token lexer_next(Lexer *lexer) {
                 return make_token(lexer, TOKEN_NULL_COALESCE);
             }
             return make_token(lexer, TOKEN_QUESTION);
+        
+        case '@':
+            return make_token(lexer, TOKEN_AT);
     }
     
     return error_token(lexer, "予期しない文字です");

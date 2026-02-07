@@ -3,6 +3,7 @@
  */
 
 #include "value.h"
+#include "environment.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -87,6 +88,10 @@ Value value_function(struct ASTNode *definition, struct Environment *closure) {
     v.ref_count = 1;
     v.function.definition = definition;
     v.function.closure = closure;
+    // クロージャ環境の参照カウントを増加
+    if (closure != NULL) {
+        env_retain(closure);
+    }
     return v;
 }
 
@@ -238,7 +243,10 @@ Value value_copy(Value v) {
             break;
             
         case VALUE_FUNCTION:
-            // 関数はシャロウコピー（クロージャを共有）
+            // 関数はシャロウコピー（クロージャを共有、参照カウント増加）
+            if (v.function.closure != NULL) {
+                env_retain(v.function.closure);
+            }
             copy.ref_count = 1;
             break;
         
@@ -339,6 +347,14 @@ void value_free(Value *v) {
                     free(v->generator.state);
                 }
                 v->generator.state = NULL;
+            }
+            break;
+        
+        case VALUE_FUNCTION:
+            // クロージャ環境の参照カウントを減少
+            if (v->function.closure != NULL) {
+                env_release(v->function.closure);
+                v->function.closure = NULL;
             }
             break;
             

@@ -333,6 +333,55 @@ ASTNode *parse_program(Parser *parser) {
 // =============================================================================
 
 static ASTNode *declaration(Parser *parser) {
+    // デコレータ: @デコレータ名 の後に関数定義が続く
+    if (check(parser, TOKEN_AT)) {
+        int line = parser->current.line;
+        int column = parser->current.column;
+        advance(parser); // @ を消費
+        
+        // デコレータ名を取得
+        consume(parser, TOKEN_IDENTIFIER, "デコレータ名が必要です");
+        char *decorator_name = copy_token_string(&parser->previous);
+        
+        // 改行をスキップして次の関数定義を読む
+        skip_newlines(parser);
+        
+        // 次に関数定義が来る
+        ASTNode *func_decl = declaration(parser);
+        
+        // 関数名を取得（NODE_FUNCTION_DEF の場合）
+        const char *func_name = NULL;
+        if (func_decl != NULL && func_decl->type == NODE_FUNCTION_DEF) {
+            func_name = func_decl->function.name;
+        }
+        
+        if (func_name == NULL) {
+            free(decorator_name);
+            error(parser, "デコレータの後に関数定義が必要です");
+            return func_decl;
+        }
+        
+        // ブロック: { func_decl; func_name = decorator(func_name); }
+        ASTNode *block_node = node_block(line, column);
+        block_add_statement(block_node, func_decl);
+        
+        // func_name = decorator(func_name) の代入ノードを作成
+        ASTNode *func_ref = node_identifier(func_name, line, column);
+        ASTNode *dec_ref = node_identifier(decorator_name, line, column);
+        
+        ASTNode **args = malloc(sizeof(ASTNode*));
+        args[0] = func_ref;
+        ASTNode *call = node_call(dec_ref, args, 1, line, column);
+        
+        ASTNode *assign = node_assign(
+            node_identifier(func_name, line, column),
+            TOKEN_ASSIGN, call, line, column);
+        block_add_statement(block_node, assign);
+        
+        free(decorator_name);
+        return block_node;
+    }
+    
     // 生成関数チェック
     if (check(parser, TOKEN_GENERATOR_FUNC)) {
         advance(parser); // TOKEN_GENERATOR_FUNC を消費
@@ -690,11 +739,21 @@ static ASTNode *import_statement(Parser *parser) {
     consume(parser, TOKEN_STRING, "取り込むファイルパスが必要です");
     char *module_path = parser->previous.value.string;
     
+    // エイリアス: 「として 名前」
+    char *alias = NULL;
+    if (check(parser, TOKEN_IDENTIFIER) && 
+        parser->current.length == strlen("として") &&
+        memcmp(parser->current.start, "として", strlen("として")) == 0) {
+        advance(parser);  // 「として」を消費
+        consume(parser, TOKEN_IDENTIFIER, "エイリアス名が必要です");
+        alias = copy_token_string(&parser->previous);
+    }
+    
     if (!check(parser, TOKEN_EOF) && !check(parser, TOKEN_DEDENT)) {
         match(parser, TOKEN_NEWLINE);
     }
     
-    return node_import(module_path, line, column);
+    return node_import(module_path, alias, line, column);
 }
 
 // 試行文（try-catch-finally）のパース

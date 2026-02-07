@@ -146,6 +146,7 @@ typedef enum {
     TOKEN_PIPE,             // |>
     TOKEN_QUESTION,         // ?
     TOKEN_NULL_COALESCE,    // ??
+    TOKEN_AT,               // @
     
     TOKEN_COUNT             // トークン種別の数
 } TokenType;

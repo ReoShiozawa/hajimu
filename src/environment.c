@@ -28,6 +28,7 @@ Environment *env_new(Environment *parent) {
     Environment *env = calloc(1, sizeof(Environment));
     env->parent = parent;
     env->depth = parent ? parent->depth + 1 : 0;
+    env->ref_count = 1;
     
     for (int i = 0; i < ENV_HASH_SIZE; i++) {
         env->table[i] = NULL;
@@ -52,6 +53,19 @@ void env_free(Environment *env) {
     }
     
     free(env);
+}
+
+void env_retain(Environment *env) {
+    if (env == NULL) return;
+    env->ref_count++;
+}
+
+void env_release(Environment *env) {
+    if (env == NULL) return;
+    env->ref_count--;
+    if (env->ref_count <= 0) {
+        env_free(env);
+    }
 }
 
 // =============================================================================

@@ -35,6 +35,7 @@ typedef struct Environment {
     EnvEntry *table[ENV_HASH_SIZE];  // ハッシュテーブル
     struct Environment *parent;       // 親スコープ
     int depth;                        // ネスト深度
+    int ref_count;                    // 参照カウント
 } Environment;
 
 // =============================================================================
@@ -53,6 +54,18 @@ Environment *env_new(Environment *parent);
  * @param env 環境
  */
 void env_free(Environment *env);
+
+/**
+ * 環境の参照カウントを増加
+ * @param env 環境
+ */
+void env_retain(Environment *env);
+
+/**
+ * 環境の参照カウントを減少し、0になれば解放
+ * @param env 環境
+ */
+void env_release(Environment *env);
 
 // =============================================================================
 // 変数操作

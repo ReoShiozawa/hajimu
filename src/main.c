@@ -125,16 +125,85 @@ static int run_file(const char *path, bool debug_mode, int script_argc, char **s
 // REPL
 // =============================================================================
 
+// REPL ヒストリ
+#define REPL_HISTORY_MAX 100
+static char *repl_history[REPL_HISTORY_MAX];
+static int repl_history_count = 0;
+
+static void repl_history_add(const char *line) {
+    if (repl_history_count > 0 && 
+        strcmp(repl_history[repl_history_count - 1], line) == 0) {
+        return;  // 直前と同じならスキップ
+    }
+    if (repl_history_count >= REPL_HISTORY_MAX) {
+        free(repl_history[0]);
+        memmove(repl_history, repl_history + 1, (REPL_HISTORY_MAX - 1) * sizeof(char *));
+        repl_history_count--;
+    }
+    repl_history[repl_history_count++] = strdup(line);
+}
+
+static void repl_history_free(void) {
+    for (int i = 0; i < repl_history_count; i++) {
+        free(repl_history[i]);
+    }
+    repl_history_count = 0;
+}
+
+// 行が複数行ブロックの開始かどうかを判定
+static bool needs_continuation(const char *line) {
+    // ブロック開始キーワードの出現をカウント
+    const char *keywords[] = {
+        "関数 ", "もし ", "それ以外", "繰り返す",
+        "条件 ", "各 ", "試行:", "型 ", "列挙 ",
+        "照合 ", "生成関数 ", NULL
+    };
+    const char *end_keyword = "終わり";
+    
+    int open_count = 0;
+    int close_count = 0;
+    
+    // 各行をチェック
+    const char *p = line;
+    while (*p) {
+        // 終わりをカウント
+        if (strncmp(p, end_keyword, strlen(end_keyword)) == 0) {
+            close_count++;
+        }
+        
+        // 開始キーワードをカウント
+        for (int i = 0; keywords[i] != NULL; i++) {
+            if (strncmp(p, keywords[i], strlen(keywords[i])) == 0) {
+                open_count++;
+                break;
+            }
+        }
+        
+        // 次の行に進む
+        while (*p && *p != '\n') p++;
+        if (*p == '\n') p++;
+    }
+    
+    return open_count > close_count;
+}
+
 static void run_repl(void) {
     printf("日本語プログラミング言語 v%s\n", VERSION);
     printf("作者: %s\n", AUTHOR);
-    printf("終了するには「終了」と入力してください。\n\n");
+    printf("終了するには「終了」と入力してください。\n");
+    printf("複数行入力: 「関数」「もし」等の後、「終わり」まで継続入力\n\n");
     
     Evaluator *eval = evaluator_new();
     char line[4096];
+    char multiline_buffer[16384];
+    bool in_multiline = false;
     
     while (true) {
-        printf(">>> ");
+        if (in_multiline) {
+            printf("... ");
+        } else {
+            printf(">>> ");
+        }
         fflush(stdout);
         
         if (fgets(line, sizeof(line), stdin) == NULL) {
@@ -149,75 +218,140 @@ static void run_repl(void) {
             len--;
         }
         
-        // 空行はスキップ
-        if (len == 0) continue;
+        // 空行はスキップ（複数行中でなければ）
+        if (len == 0 && !in_multiline) continue;
         
-        // 終了コマンド
-        if (strcmp(line, "終了") == 0 || 
-            strcmp(line, "exit") == 0 ||
-            strcmp(line, "quit") == 0) {
+        // 終了コマンド（複数行中でなければ）
+        if (!in_multiline && 
+            (strcmp(line, "終了") == 0 || 
+             strcmp(line, "exit") == 0 ||
+             strcmp(line, "quit") == 0)) {
             break;
         }
         
         // ヘルプコマンド
-        if (strcmp(line, "ヘルプ") == 0 || 
-            strcmp(line, "help") == 0) {
+        if (!in_multiline && 
+            (strcmp(line, "ヘルプ") == 0 || strcmp(line, "help") == 0)) {
             printf("\n使用可能なコマンド:\n");
-            printf("  終了, exit, quit - REPLを終了\n");
-            printf("  ヘルプ, help     - このヘルプを表示\n");
-            printf("  クリア, clear    - 画面をクリア\n");
+            printf("  終了, exit, quit  - REPLを終了\n");
+            printf("  ヘルプ, help      - このヘルプを表示\n");
+            printf("  クリア, clear     - 画面をクリア\n");
+            printf("  履歴, history     - 入力履歴を表示\n");
+            printf("\n複数行入力:\n");
+            printf("  「関数」「もし」等のブロック開始で自動的に複数行モードに入ります。\n");
+            printf("  「終わり」で対応するブロックを閉じると実行されます。\n");
             printf("\n");
             continue;
         }
         
         // クリアコマンド
-        if (strcmp(line, "クリア") == 0 || 
-            strcmp(line, "clear") == 0) {
-            printf("\033[2J\033[H");  // ANSIエスケープ
+        if (!in_multiline && 
+            (strcmp(line, "クリア") == 0 || strcmp(line, "clear") == 0)) {
+            printf("\033[2J\033[H");
             continue;
         }
         
-        // パースと実行
-        Parser parser;
-        parser_init(&parser, line, "<repl>");
-        
-        // 式として評価を試みる
-        ASTNode *expr = parse_expression(&parser);
-        
-        if (!parser_had_error(&parser)) {
-            // 式文としてラップ
-            ASTNode *program = node_program(1, 1);
-            ASTNode *stmt = node_expr_stmt(expr, 1, 1);
-            block_add_statement(program, stmt);
-            
-            evaluator_clear_error(eval);
-            Value result = evaluator_run(eval, program);
-            
-            if (!evaluator_had_error(eval) && result.type != VALUE_NULL) {
-                printf("=> ");
-                value_print(result);
-                printf("\n");
+        // 履歴表示
+        if (!in_multiline && 
+            (strcmp(line, "履歴") == 0 || strcmp(line, "history") == 0)) {
+            printf("\n入力履歴:\n");
+            for (int i = 0; i < repl_history_count; i++) {
+                printf("  %d: %s\n", i + 1, repl_history[i]);
             }
-            
-            node_free(program);
-        } else {
-            // 文として再パース
-            parser_free(&parser);
-            parser_init(&parser, line, "<repl>");
-            
-            ASTNode *program = parse_program(&parser);
-            
-            if (!parser_had_error(&parser)) {
-                evaluator_clear_error(eval);
-                evaluator_run(eval, program);
-            }
-            
-            node_free(program);
+            printf("\n");
+            continue;
         }
         
+        // 複数行バッファに追加
+        if (in_multiline) {
+            size_t buf_len = strlen(multiline_buffer);
+            snprintf(multiline_buffer + buf_len, sizeof(multiline_buffer) - buf_len, "\n%s", line);
+        } else {
+            strncpy(multiline_buffer, line, sizeof(multiline_buffer) - 1);
+            multiline_buffer[sizeof(multiline_buffer) - 1] = '\0';
+        }
+        
+        // 複数行の継続が必要かチェック
+        if (needs_continuation(multiline_buffer)) {
+            in_multiline = true;
+            continue;
+        }
+        
+        in_multiline = false;
+        char *input = multiline_buffer;
+        
+        // ヒストリに追加
+        repl_history_add(input);
+        
+        // パースと実行
+        Parser parser;
+        parser_init(&parser, input, "<repl>");
+        
+        // 文キーワードで始まるかどうかを判定
+        bool is_statement = false;
+        {
+            const char *stmt_prefixes[] = {
+                "変数 ", "定数 ", "関数 ", "もし ", "繰り返す", "条件 ",
+                "各 ", "試行:", "型 ", "列挙 ", "照合 ", "表示(",
+                "取り込む", "投げる", "戻す ", "生成関数 ", "@",
+                NULL
+            };
+            for (int i = 0; stmt_prefixes[i] != NULL; i++) {
+                if (strncmp(input, stmt_prefixes[i], strlen(stmt_prefixes[i])) == 0) {
+                    is_statement = true;
+                    break;
+                }
+            }
+            // 代入文の検出: 識別子の後に = がある
+            if (!is_statement) {
+                const char *eq = strstr(input, " = ");
+                if (eq != NULL && strstr(input, "==") == NULL) {
+                    is_statement = true;
+                }
+            }
+        }
+        
+        if (!is_statement) {
+            // 式として評価を試みる
+            ASTNode *expr = parse_expression(&parser);
+            
+            if (!parser_had_error(&parser)) {
+                // 式文としてラップ
+                ASTNode *program = node_program(1, 1);
+                ASTNode *stmt = node_expr_stmt(expr, 1, 1);
+                block_add_statement(program, stmt);
+                
+                evaluator_clear_error(eval);
+                Value result = evaluator_run(eval, program);
+                
+                if (!evaluator_had_error(eval) && result.type != VALUE_NULL) {
+                    printf("\033[36m=> ");  // シアン色
+                    value_print(result);
+                    printf("\033[0m\n");    // リセット
+                }
+                
+                node_free(program);
+                parser_free(&parser);
+                continue;
+            }
+            // 式パース失敗 → 文として再パース
+            parser_free(&parser);
+            parser_init(&parser, input, "<repl>");
+        }
+        
+        // 文としてパース
+        ASTNode *program = parse_program(&parser);
+        
+        if (!parser_had_error(&parser)) {
+            evaluator_clear_error(eval);
+            evaluator_run(eval, program);
+        }
+        
+        node_free(program);
         parser_free(&parser);
     }
     
+    repl_history_free();
     evaluator_free(eval);
     printf("さようなら！\n");
 }

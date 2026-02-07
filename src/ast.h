@@ -210,6 +210,7 @@ struct ASTNode {
         // NODE_IMPORT
         struct {
             char *module_path;      // インポートするファイルパス
+            char *alias;            // 名前空間エイリアス（NULLなら直接取り込み）
         } import_stmt;
         
         // NODE_CLASS_DEF
@@ -406,7 +407,7 @@ ASTNode *node_continue(int line, int column);
 /**
  * import文ノードを作成
  */
-ASTNode *node_import(const char *module_path, int line, int column);
+ASTNode *node_import(const char *module_path, const char *alias, int line, int column);
 
 /**
  * クラス定義ノードを作成

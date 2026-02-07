@@ -214,9 +214,10 @@ ASTNode *node_continue(int line, int column) {
     return node_new(NODE_CONTINUE, line, column);
 }
 
-ASTNode *node_import(const char *module_path, int line, int column) {
+ASTNode *node_import(const char *module_path, const char *alias, int line, int column) {
     ASTNode *node = node_new(NODE_IMPORT, line, column);
     node->import_stmt.module_path = strdup(module_path);
+    node->import_stmt.alias = alias ? strdup(alias) : NULL;
     return node;
 }
 
@@ -404,6 +405,7 @@ void node_free(ASTNode *node) {
         
         case NODE_IMPORT:
             free(node->import_stmt.module_path);
+            free(node->import_stmt.alias);
             break;
         
         case NODE_CLASS_DEF:

@@ -215,7 +215,7 @@ static void *async_task_runner(void *arg) {
             task->status = TASK_COMPLETED;
         }
         
-        env_free(local);
+        env_release(local);
         evaluator_free(thread_eval);
     } else {
         task->status = TASK_FAILED;
@@ -658,7 +658,7 @@ static void *schedule_task_runner(void *arg) {
             }
             
             thread_eval->current = prev;
-            env_free(local);
+            env_release(local);
             evaluator_free(thread_eval);
         }
         
