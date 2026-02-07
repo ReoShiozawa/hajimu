@@ -11,6 +11,7 @@ class Hajimu < Formula
   def install
     system "make"
     bin.install "nihongo" => "hajimu"
+    bin.install_symlink bin/"hajimu" => "hj"
     
     # ドキュメントのインストール
     doc.install "README.md"
