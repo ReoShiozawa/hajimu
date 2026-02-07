@@ -58,6 +58,7 @@ typedef enum {
     NODE_ARRAY,             // 配列リテラル
     NODE_DICT,              // 辞書リテラル
     NODE_NULL,              // null
+    NODE_LIST_COMPREHENSION, // リスト内包表記
     
     NODE_TYPE_COUNT
 } NodeType;
@@ -282,6 +283,14 @@ struct ASTNode {
         struct {
             ASTNode *expression;    // 式
         } expr_stmt;
+        
+        // NODE_LIST_COMPREHENSION (リスト内包表記)
+        struct {
+            ASTNode *expression;    // 生成式（n * 2 など）
+            char *var_name;         // ループ変数名
+            ASTNode *iterable;      // 反復対象（配列など）
+            ASTNode *condition;     // 条件式（NULLの場合は条件なし）
+        } list_comp;
     };
 };
 
@@ -484,6 +493,13 @@ ASTNode *node_block(int line, int column);
  * プログラムノードを作成
  */
 ASTNode *node_program(int line, int column);
+
+/**
+ * リスト内包表記ノードを作成
+ */
+ASTNode *node_list_comprehension(ASTNode *expression, const char *var_name,
+                                  ASTNode *iterable, ASTNode *condition,
+                                  int line, int column);
 
 // =============================================================================
 // ブロック操作

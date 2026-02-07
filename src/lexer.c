@@ -299,15 +299,6 @@ static char advance(Lexer *lexer) {
     return c;
 }
 
-// UTF-8で1文字進める
-static uint32_t advance_utf8(Lexer *lexer) {
-    int len;
-    uint32_t cp = utf8_decode(lexer->current, &len);
-    lexer->current += len;
-    lexer->column++;  // 列番号は文字単位
-    return cp;
-}
-
 // 現在のUTF-8文字を取得（進めない）
 static uint32_t peek_utf8(Lexer *lexer) {
     int len;

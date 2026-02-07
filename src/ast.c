@@ -47,6 +47,7 @@ static const char *node_type_names[] = {
     [NODE_ARRAY] = "ARRAY",
     [NODE_DICT] = "DICT",
     [NODE_NULL] = "NULL",
+    [NODE_LIST_COMPREHENSION] = "LIST_COMPREHENSION",
 };
 
 // =============================================================================
@@ -570,6 +571,13 @@ void node_free(ASTNode *node) {
             node_free(node->foreach_stmt.body);
             break;
         
+        case NODE_LIST_COMPREHENSION:
+            if (node->list_comp.var_name) free(node->list_comp.var_name);
+            node_free(node->list_comp.expression);
+            node_free(node->list_comp.iterable);
+            node_free(node->list_comp.condition);
+            break;
+        
         case NODE_YIELD:
             node_free(node->yield_stmt.value);
             break;
@@ -829,4 +837,18 @@ void ast_to_json(ASTNode *node, int indent) {
     printf("\n");
     print_indent(indent);
     printf("}");
+}
+// =============================================================================
+// リスト内包表記ノード
+// =============================================================================
+
+ASTNode *node_list_comprehension(ASTNode *expression, const char *var_name,
+                                  ASTNode *iterable, ASTNode *condition,
+                                  int line, int column) {
+    ASTNode *node = node_new(NODE_LIST_COMPREHENSION, line, column);
+    node->list_comp.expression = expression;
+    node->list_comp.var_name = var_name != NULL ? strdup(var_name) : NULL;
+    node->list_comp.iterable = iterable;
+    node->list_comp.condition = condition;
+    return node;
 }

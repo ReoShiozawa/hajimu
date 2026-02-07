@@ -16,6 +16,7 @@
 
 static void advance(Parser *parser);
 static bool check(Parser *parser, TokenType type);
+static bool check_keyword(Parser *parser, const char *keyword);
 static bool match(Parser *parser, TokenType type);
 static void consume(Parser *parser, TokenType type, const char *message);
 static void error_at(Parser *parser, Token *token, const char *message);
@@ -108,6 +109,13 @@ static void advance(Parser *parser) {
 
 static bool check(Parser *parser, TokenType type) {
     return parser->current.type == type;
+}
+
+static bool check_keyword(Parser *parser, const char *keyword) {
+    if (parser->current.type != TOKEN_IDENTIFIER) return false;
+    size_t kw_len = strlen(keyword);
+    return strncmp(parser->current.start, keyword, parser->current.length) == 0 &&
+           kw_len == (size_t)parser->current.length;
 }
 
 static bool match(Parser *parser, TokenType type) {
@@ -1647,30 +1655,92 @@ static ASTNode *primary(Parser *parser) {
     
     // 配列リテラル [...]
     if (match(parser, TOKEN_LBRACKET)) {
-        int capacity = 8;
-        int count = 0;
-        ASTNode **elements = malloc(sizeof(ASTNode *) * capacity);
+        // リスト内包表記を検出するために、最初に式を解析
+        if (check(parser, TOKEN_RBRACKET)) {
+            // 空の配列
+            consume(parser, TOKEN_RBRACKET, "']' が必要です");
+            return node_array(NULL, 0, line, column);
+        }
         
-        if (!check(parser, TOKEN_RBRACKET)) {
-            do {
+        // 最初の要素を解析（ただし 'を' より高い優先度までに制限）
+        ASTNode *first_expr = ternary_expr(parser);  // 'を' を含まない式まで解析
+        
+        // リスト内包表記かチェック: 次のトークンが 'を'
+        if (check(parser, TOKEN_TO)) {
+            // リスト内包表記: [expr を var から iterable]
+            
+            // TOKEN_TO をスキップ
+            advance(parser);
+            
+            // 変数名を取得
+            if (!check(parser, TOKEN_IDENTIFIER)) {
+                error(parser, "リスト内包表記で変数名が必要です");
+                node_free(first_expr);
+                while (!check(parser, TOKEN_RBRACKET) && !check(parser, TOKEN_EOF)) {
+                    advance(parser);
+                }
+                if (check(parser, TOKEN_RBRACKET)) consume(parser, TOKEN_RBRACKET, "']' が必要です");
+                return node_array(NULL, 0, line, column);
+            }
+            
+            char *var_name = copy_token_string(&parser->current);
+            advance(parser);
+            
+            // TOKEN_FROM ("から") が必要
+            if (!check(parser, TOKEN_FROM)) {
+                error(parser, "リスト内包表記で 'から' が必要です");
+                free(var_name);
+                node_free(first_expr);
+                while (!check(parser, TOKEN_RBRACKET) && !check(parser, TOKEN_EOF)) {
+                    advance(parser);
+                }
+                if (check(parser, TOKEN_RBRACKET)) consume(parser, TOKEN_RBRACKET, "']' が必要です");
+                return node_array(NULL, 0, line, column);
+            }
+            advance(parser);
+            
+            // 反復対象を解析
+            ASTNode *iterable = expression(parser);
+            
+            // 条件式をチェック（オプション）
+            ASTNode *condition = NULL;
+            if (check(parser, TOKEN_IF)) {
+                advance(parser);
+                condition = expression(parser);
+            }
+            
+            consume(parser, TOKEN_RBRACKET, "']' が必要です");
+            
+            return node_list_comprehension(first_expr, var_name, iterable, condition, line, column);
+        } else {
+            // 通常の配列リテラル
+            int capacity = 8;
+            int count = 1;
+            ASTNode **elements = malloc(sizeof(ASTNode *) * capacity);
+            elements[0] = first_expr;
+            
+            while (match(parser, TOKEN_COMMA)) {
                 if (count >= capacity) {
                     capacity *= 2;
                     elements = realloc(elements, sizeof(ASTNode *) * capacity);
                 }
+                if (check(parser, TOKEN_RBRACKET)) {
+                    break;
+                }
                 elements[count++] = expression(parser);
-            } while (match(parser, TOKEN_COMMA));
+            }
+            
+            consume(parser, TOKEN_RBRACKET, "']' が必要です");
+            
+            if (count > 0) {
+                elements = realloc(elements, sizeof(ASTNode *) * count);
+            } else {
+                free(elements);
+                elements = NULL;
+            }
+            
+            return node_array(elements, count, line, column);
         }
-        
-        consume(parser, TOKEN_RBRACKET, "']' が必要です");
-        
-        if (count > 0) {
-            elements = realloc(elements, sizeof(ASTNode *) * count);
-        } else {
-            free(elements);
-            elements = NULL;
-        }
-        
-        return node_array(elements, count, line, column);
     }
     
     // 辞書リテラル {...}

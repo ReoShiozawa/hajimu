@@ -39,8 +39,6 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node);
 static Value evaluate_if(Evaluator *eval, ASTNode *node);
 static Value evaluate_while(Evaluator *eval, ASTNode *node);
 static Value evaluate_for(Evaluator *eval, ASTNode *node);
-static Value evaluate_return(Evaluator *eval, ASTNode *node);
-static Value evaluate_block(Evaluator *eval, ASTNode *node);
 static Value evaluate_import(Evaluator *eval, ASTNode *node);
 static Value evaluate_class_def(Evaluator *eval, ASTNode *node);
 static Value evaluate_new(Evaluator *eval, ASTNode *node);
@@ -49,6 +47,7 @@ static Value evaluate_throw(Evaluator *eval, ASTNode *node);
 static Value evaluate_lambda(Evaluator *eval, ASTNode *node);
 static Value evaluate_switch(Evaluator *eval, ASTNode *node);
 static Value evaluate_foreach(Evaluator *eval, ASTNode *node);
+static Value evaluate_list_comprehension(Evaluator *eval, ASTNode *node);
 static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int line);
 static Value call_function_value(Value *func, Value *args, int argc);
 
@@ -986,6 +985,10 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
             result = evaluate_foreach(eval, node);
             break;
         
+        case NODE_LIST_COMPREHENSION:
+            result = evaluate_list_comprehension(eval, node);
+            break;
+        
         case NODE_NEW:
             result = evaluate_new(eval, node);
             break;
@@ -1316,9 +1319,6 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
         }
     }
     // スプレッド展開後の実際の引数数を使う
-    int original_arg_count = node->call.arg_count;
-    // 一時的にarg_countを実引数数に更新（後で戻す）
-    // NOTE: node自体を変更せず、ローカル変数で管理
     int effective_arg_count = actual_arg_count;
     
     Value result = value_null();
@@ -1375,7 +1375,6 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
         }
         
         // 引数の数をチェック（デフォルト引数・可変長引数対応）
-        int max_allowed = has_variadic ? 999 : expected_count;
         if (effective_arg_count < min_required || 
             (!has_variadic && effective_arg_count > expected_count)) {
             if (min_required == expected_count) {
@@ -1940,9 +1939,8 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
         env_define(eval->current, alias, ns, true);
     } else {
         // 従来通り: インポートしたモジュールを現在の環境で評価
-        Value result = value_null();
         for (int i = 0; i < program->block.count; i++) {
-            result = evaluate(eval, program->block.statements[i]);
+            evaluate(eval, program->block.statements[i]);
             if (eval->had_error) break;
         }
     }
@@ -2493,6 +2491,125 @@ static Value evaluate_foreach(Evaluator *eval, ASTNode *node) {
     env_release(loop_env);
     
     return result;
+}
+
+static Value evaluate_list_comprehension(Evaluator *eval, ASTNode *node) {
+    // リスト内包表記: [expr for var in iterable] または [expr for var in iterable if condition]
+    
+    // 反復対象を評価
+    Value iterable = evaluate(eval, node->list_comp.iterable);
+    if (eval->had_error) return value_null();
+    
+    // 結果配列を初期化
+    Value result = value_array_with_capacity(16);
+    
+    // ループ用の新しいスコープを作成
+    Environment *loop_env = env_new(eval->current);
+    Environment *prev = eval->current;
+    eval->current = loop_env;
+    
+    if (iterable.type == VALUE_ARRAY) {
+        for (int i = 0; i < iterable.array.length; i++) {
+            // ループ変数を定義
+            env_define(eval->current, node->list_comp.var_name,
+                      value_copy(iterable.array.elements[i]), false);
+            
+            // 条件式を評価（あれば）
+            if (node->list_comp.condition != NULL) {
+                Value cond = evaluate(eval, node->list_comp.condition);
+                if (eval->had_error) goto cleanup;
+                
+                bool include = value_is_truthy(cond);
+                value_free(&cond);
+                
+                if (!include) continue;  // この要素はスキップ
+            }
+            
+            // 式を評価して結果に追加
+            Value expr_result = evaluate(eval, node->list_comp.expression);
+            if (eval->had_error) goto cleanup;
+            
+            array_push(&result, expr_result);
+        }
+    } else if (iterable.type == VALUE_STRING) {
+        // 文字列の各文字をループ
+        int len = string_length(&iterable);
+        for (int i = 0; i < len; i++) {
+            Value ch = string_substring(&iterable, i, i + 1);
+            env_define(eval->current, node->list_comp.var_name, ch, false);
+            
+            // 条件式を評価（あれば）
+            if (node->list_comp.condition != NULL) {
+                Value cond = evaluate(eval, node->list_comp.condition);
+                if (eval->had_error) {
+                    goto cleanup;
+                }
+                
+                bool include = value_is_truthy(cond);
+                value_free(&cond);
+                
+                if (!include) {
+                    continue;
+                }
+            }
+            
+            // 式を評価して結果に追加
+            Value expr_result = evaluate(eval, node->list_comp.expression);
+            if (eval->had_error) {
+                goto cleanup;
+            }
+            
+            array_push(&result, expr_result);
+        }
+    } else if (iterable.type == VALUE_DICT) {
+        // 辞書のキーをループ
+        for (int i = 0; i < iterable.dict.length; i++) {
+            if (iterable.dict.keys[i] != NULL) {
+                Value key_val = value_string(iterable.dict.keys[i]);
+                env_define(eval->current, node->list_comp.var_name, key_val, false);
+                
+                // 条件式を評価（あれば）
+                if (node->list_comp.condition != NULL) {
+                    Value cond = evaluate(eval, node->list_comp.condition);
+                    if (eval->had_error) {
+                        goto cleanup;
+                    }
+                    
+                    bool include = value_is_truthy(cond);
+                    value_free(&cond);
+                    
+                    if (!include) {
+                        continue;
+                    }
+                }
+                
+                // 式を評価して結果に追加
+                Value expr_result = evaluate(eval, node->list_comp.expression);
+                if (eval->had_error) {
+                    goto cleanup;
+                }
+                
+                array_push(&result, expr_result);
+            }
+        }
+    } else {
+        runtime_error(eval, node->location.line,
+                     "リスト内包表記で反復できるのは配列、文字列、辞書のみです");
+        goto cleanup;
+    }
+    
+    eval->current = prev;
+    env_release(loop_env);
+    
+    // 結果配列を返す
+    return result;
+
+cleanup:
+    // エラーが発生した場合のクリーンアップ
+    value_free(&result);
+    eval->current = prev;
+    env_release(loop_env);
+    return value_null();
 }
 
 // =============================================================================

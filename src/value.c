@@ -916,6 +916,9 @@ bool value_equals(Value a, Value b) {
             return a.builtin.fn == b.builtin.fn;
         case VALUE_CLASS:
             return a.class_value.definition == b.class_value.definition;
+        case VALUE_GENERATOR:
+            // ジェネレータの比較
+            return a.generator.state == b.generator.state;
         case VALUE_INSTANCE:
             // インスタンスは同一性で比較
             return &a == &b;
