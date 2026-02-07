@@ -218,6 +218,8 @@ struct ASTNode {
             char *parent_name;      // 親クラス名（NULLなら継承なし）
             ASTNode **methods;      // メソッドの配列
             int method_count;       // メソッド数
+            ASTNode **static_methods;  // 静的メソッドの配列
+            int static_method_count;   // 静的メソッド数
             ASTNode *init_method;   // 初期化メソッド（NULLの場合あり）
         } class_def;
         
@@ -269,7 +271,8 @@ struct ASTNode {
         
         // NODE_FOREACH
         struct {
-            char *var_name;         // ループ変数名
+            char *var_name;         // ループ変数名（キー名）
+            char *value_name;       // 値の変数名（辞書展開時、NULLなら通常foreach）
             ASTNode *iterable;      // 反復対象
             ASTNode *body;          // ループ本体
         } foreach_stmt;
@@ -424,6 +427,7 @@ void method_add_param(ASTNode *method, const char *name, ValueType type, bool ha
  * クラスにメソッドを追加
  */
 void class_add_method(ASTNode *class_node, ASTNode *method);
+void class_add_static_method(ASTNode *class_node, ASTNode *method);
 
 /**
  * new式ノードを作成

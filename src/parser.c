@@ -1003,6 +1003,7 @@ static ASTNode *enum_definition(Parser *parser) {
 }
 
 // 各 変数名 を 配列式 の中:
+// 各 キー, 値 を 辞書 の中:
 //   文...
 // 終わり
 static ASTNode *foreach_statement(Parser *parser) {
@@ -1012,6 +1013,13 @@ static ASTNode *foreach_statement(Parser *parser) {
     // ループ変数名
     consume(parser, TOKEN_IDENTIFIER, "ループ変数名が必要です");
     char *var_name = copy_token_string(&parser->previous);
+    
+    // カンマがあれば辞書のキー・値展開
+    char *value_name = NULL;
+    if (match(parser, TOKEN_COMMA)) {
+        consume(parser, TOKEN_IDENTIFIER, "値の変数名が必要です");
+        value_name = copy_token_string(&parser->previous);
+    }
     
     // を
     consume(parser, TOKEN_TO, "'を' が必要です");
@@ -1031,7 +1039,11 @@ static ASTNode *foreach_statement(Parser *parser) {
     // 終わり
     consume(parser, TOKEN_END, "'終わり' が必要です");
     
-    return node_foreach(var_name, iterable, body, line, column);
+    ASTNode *node = node_foreach(var_name, iterable, body, line, column);
+    if (value_name) {
+        node->foreach_stmt.value_name = value_name;
+    }
+    return node;
 }
 
 // メソッド定義のパース（クラス内で使用）
@@ -1145,6 +1157,11 @@ static ASTNode *class_definition(Parser *parser) {
             // 初期化メソッド
             ASTNode *init = method_definition(parser, true);
             class_node->class_def.init_method = init;
+        } else if (match(parser, TOKEN_STATIC)) {
+            // 静的メソッド: 静的 関数 名前(...):
+            consume(parser, TOKEN_FUNCTION, "'静的' の後に '関数' が必要です");
+            ASTNode *method = method_definition(parser, false);
+            class_add_static_method(class_node, method);
         } else if (match(parser, TOKEN_FUNCTION)) {
             // 通常のメソッド
             ASTNode *method = method_definition(parser, false);
@@ -1183,7 +1200,8 @@ static ASTNode *expression_statement(Parser *parser) {
     // 代入演算子のチェック
     if (check(parser, TOKEN_ASSIGN) || check(parser, TOKEN_PLUS_ASSIGN) ||
         check(parser, TOKEN_MINUS_ASSIGN) || check(parser, TOKEN_STAR_ASSIGN) ||
-        check(parser, TOKEN_SLASH_ASSIGN)) {
+        check(parser, TOKEN_SLASH_ASSIGN) || check(parser, TOKEN_PERCENT_ASSIGN) ||
+        check(parser, TOKEN_POWER_ASSIGN)) {
         
         TokenType op = parser->current.type;
         advance(parser);

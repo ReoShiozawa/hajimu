@@ -62,6 +62,7 @@ static const KeywordEntry keywords[] = {
     {"投げる", TOKEN_THROW},
     {"列挙", TOKEN_ENUM},
     {"照合", TOKEN_MATCH},
+    {"静的", TOKEN_STATIC},
     {"譲渡", TOKEN_YIELD},
     {"生成関数", TOKEN_GENERATOR_FUNC},
     
@@ -147,6 +148,7 @@ static const char *token_names[] = {
     
     [TOKEN_ENUM] = "列挙",
     [TOKEN_MATCH] = "照合",
+    [TOKEN_STATIC] = "静的",
     [TOKEN_ARROW] = "=>",
     [TOKEN_YIELD] = "譲渡",
     [TOKEN_GENERATOR_FUNC] = "生成関数",
@@ -170,6 +172,8 @@ static const char *token_names[] = {
     [TOKEN_MINUS_ASSIGN] = "-=",
     [TOKEN_STAR_ASSIGN] = "*=",
     [TOKEN_SLASH_ASSIGN] = "/=",
+    [TOKEN_PERCENT_ASSIGN] = "%=",
+    [TOKEN_POWER_ASSIGN] = "**=",
     
     [TOKEN_LPAREN] = "(",
     [TOKEN_RPAREN] = ")",
@@ -423,6 +427,38 @@ static Token scan_identifier(Lexer *lexer) {
 
 // 数値をスキャン
 static Token scan_number(Lexer *lexer) {
+    // 16進数リテラル: 0x or 0X
+    if (peek(lexer) == '0' && (peek_next(lexer) == 'x' || peek_next(lexer) == 'X')) {
+        advance(lexer);  // '0'
+        advance(lexer);  // 'x'
+        while (isxdigit(peek(lexer))) {
+            advance(lexer);
+        }
+        Token token = make_token(lexer, TOKEN_NUMBER);
+        char *temp = malloc(token.length + 1);
+        memcpy(temp, token.start, token.length);
+        temp[token.length] = '\0';
+        token.value.number = (double)strtol(temp, NULL, 16);
+        free(temp);
+        return token;
+    }
+    
+    // 2進数リテラル: 0b or 0B
+    if (peek(lexer) == '0' && (peek_next(lexer) == 'b' || peek_next(lexer) == 'B')) {
+        advance(lexer);  // '0'
+        advance(lexer);  // 'b'
+        while (peek(lexer) == '0' || peek(lexer) == '1') {
+            advance(lexer);
+        }
+        Token token = make_token(lexer, TOKEN_NUMBER);
+        char *temp = malloc(token.length + 1);
+        memcpy(temp, token.start, token.length);
+        temp[token.length] = '\0';
+        token.value.number = (double)strtol(temp + 2, NULL, 2);  // skip "0b"
+        free(temp);
+        return token;
+    }
+    
     // 整数部
     while (isdigit(peek(lexer))) {
         advance(lexer);
@@ -768,7 +804,8 @@ Token lexer_next(Lexer *lexer) {
                 return make_token(lexer, TOKEN_SPREAD);
             }
             return make_token(lexer, TOKEN_DOT);
-        case '%': return make_token(lexer, TOKEN_PERCENT);
+        case '%':
+            return make_token(lexer, match(lexer, '=') ? TOKEN_PERCENT_ASSIGN : TOKEN_PERCENT);
         
         // 複合トークン
         case '+':
@@ -777,6 +814,7 @@ Token lexer_next(Lexer *lexer) {
             return make_token(lexer, match(lexer, '=') ? TOKEN_MINUS_ASSIGN : TOKEN_MINUS);
         case '*':
             if (match(lexer, '*')) {
+                if (match(lexer, '=')) return make_token(lexer, TOKEN_POWER_ASSIGN);
                 return make_token(lexer, TOKEN_POWER);
             }
             return make_token(lexer, match(lexer, '=') ? TOKEN_STAR_ASSIGN : TOKEN_STAR);

@@ -79,6 +79,7 @@ typedef enum {
     // キーワード - パターンマッチ
     TOKEN_MATCH,            // 照合
     TOKEN_ARROW,            // =>
+    TOKEN_STATIC,           // 静的
     
     // キーワード - 選択文
     TOKEN_SWITCH,           // 選択
@@ -128,6 +129,8 @@ typedef enum {
     TOKEN_MINUS_ASSIGN,     // -=
     TOKEN_STAR_ASSIGN,      // *=
     TOKEN_SLASH_ASSIGN,     // /=
+    TOKEN_PERCENT_ASSIGN,   // %=
+    TOKEN_POWER_ASSIGN,     // **=
     
     // 区切り記号
     TOKEN_LPAREN,           // (

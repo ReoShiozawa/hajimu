@@ -226,6 +226,8 @@ ASTNode *node_class_def(const char *name, const char *parent_name, int line, int
     node->class_def.parent_name = parent_name ? strdup(parent_name) : NULL;
     node->class_def.methods = NULL;
     node->class_def.method_count = 0;
+    node->class_def.static_methods = NULL;
+    node->class_def.static_method_count = 0;
     node->class_def.init_method = NULL;
     return node;
 }
@@ -256,6 +258,14 @@ void class_add_method(ASTNode *class_node, ASTNode *method) {
                                             (count + 1) * sizeof(ASTNode*));
     class_node->class_def.methods[count] = method;
     class_node->class_def.method_count++;
+}
+
+void class_add_static_method(ASTNode *class_node, ASTNode *method) {
+    int count = class_node->class_def.static_method_count;
+    class_node->class_def.static_methods = realloc(class_node->class_def.static_methods, 
+                                                    (count + 1) * sizeof(ASTNode*));
+    class_node->class_def.static_methods[count] = method;
+    class_node->class_def.static_method_count++;
 }
 
 ASTNode *node_new_expr(const char *class_name, int line, int column) {
@@ -317,6 +327,7 @@ void switch_add_case(ASTNode *switch_node, ASTNode *value, ASTNode *body) {
 ASTNode *node_foreach(const char *var_name, ASTNode *iterable, ASTNode *body, int line, int column) {
     ASTNode *node = node_new(NODE_FOREACH, line, column);
     node->foreach_stmt.var_name = strdup(var_name);
+    node->foreach_stmt.value_name = NULL;
     node->foreach_stmt.iterable = iterable;
     node->foreach_stmt.body = body;
     return node;
@@ -402,6 +413,10 @@ void node_free(ASTNode *node) {
                 node_free(node->class_def.methods[i]);
             }
             free(node->class_def.methods);
+            for (int i = 0; i < node->class_def.static_method_count; i++) {
+                node_free(node->class_def.static_methods[i]);
+            }
+            free(node->class_def.static_methods);
             node_free(node->class_def.init_method);
             break;
         
@@ -548,6 +563,7 @@ void node_free(ASTNode *node) {
 
         case NODE_FOREACH:
             free(node->foreach_stmt.var_name);
+            if (node->foreach_stmt.value_name) free(node->foreach_stmt.value_name);
             node_free(node->foreach_stmt.iterable);
             node_free(node->foreach_stmt.body);
             break;

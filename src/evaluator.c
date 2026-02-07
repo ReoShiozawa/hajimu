@@ -183,6 +183,16 @@ static Value builtin_generator_next(int argc, Value *argv);
 static Value builtin_generator_done(int argc, Value *argv);
 static Value builtin_generator_collect(int argc, Value *argv);
 
+// パス操作関数
+static Value builtin_path_join(int argc, Value *argv);
+static Value builtin_basename(int argc, Value *argv);
+static Value builtin_dirname(int argc, Value *argv);
+static Value builtin_extension(int argc, Value *argv);
+
+// Base64関数
+static Value builtin_base64_encode(int argc, Value *argv);
+static Value builtin_base64_decode(int argc, Value *argv);
+
 // =============================================================================
 // 評価器の初期化・解放
 // =============================================================================
@@ -557,6 +567,22 @@ void register_builtins(Evaluator *eval) {
                value_builtin(builtin_generator_done, "完了", 1, 1), true);
     env_define(eval->global, "全値",
                value_builtin(builtin_generator_collect, "全値", 1, 1), true);
+    
+    // パス操作関数
+    env_define(eval->global, "パス結合",
+               value_builtin(builtin_path_join, "パス結合", 2, 2), true);
+    env_define(eval->global, "ファイル名",
+               value_builtin(builtin_basename, "ファイル名", 1, 1), true);
+    env_define(eval->global, "ディレクトリ名",
+               value_builtin(builtin_dirname, "ディレクトリ名", 1, 1), true);
+    env_define(eval->global, "拡張子",
+               value_builtin(builtin_extension, "拡張子", 1, 1), true);
+    
+    // Base64関数
+    env_define(eval->global, "Base64エンコード",
+               value_builtin(builtin_base64_encode, "Base64エンコード", 1, 1), true);
+    env_define(eval->global, "Base64デコード",
+               value_builtin(builtin_base64_decode, "Base64デコード", 1, 1), true);
     
     // 非同期ランタイムの初期化
     async_runtime_init();
@@ -1476,6 +1502,16 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
                 }
                 value = value_number(current.number / value.number);
                 break;
+            case TOKEN_PERCENT_ASSIGN:
+                if (value.number == 0) {
+                    runtime_error(eval, node->location.line, "ゼロ除算");
+                    return value_null();
+                }
+                value = value_number(fmod(current.number, value.number));
+                break;
+            case TOKEN_POWER_ASSIGN:
+                value = value_number(pow(current.number, value.number));
+                break;
             default:
                 break;
         }
@@ -1956,8 +1992,23 @@ static Value evaluate_member(Evaluator *eval, ASTNode *node) {
         return value_null();
     }
     
+    // クラスの静的メソッドアクセス
+    if (object.type == VALUE_CLASS) {
+        ASTNode *class_def = object.class_value.definition;
+        for (int i = 0; i < class_def->class_def.static_method_count; i++) {
+            ASTNode *method = class_def->class_def.static_methods[i];
+            if (strcmp(method->method.name, member_name) == 0) {
+                return value_function(method, eval->current);
+            }
+        }
+        runtime_error(eval, node->location.line,
+                     "クラス '%s' に静的メソッド '%s' がありません",
+                     class_def->class_def.name, member_name);
+        return value_null();
+    }
+    
     runtime_error(eval, node->location.line,
-                 "メンバーアクセスはインスタンスまたは辞書に対してのみ使用できます");
+                 "メンバーアクセスはインスタンス、辞書、またはクラスに対してのみ使用できます");
     return value_null();
 }
 
@@ -2216,11 +2267,17 @@ static Value evaluate_foreach(Evaluator *eval, ASTNode *node) {
             }
         }
     } else if (iterable.type == VALUE_DICT) {
-        // 辞書のキーをループ
+        // 辞書のキー（＋値）をループ
         for (int i = 0; i < iterable.dict.length; i++) {
             if (iterable.dict.keys[i] != NULL) {
                 env_define(eval->current, node->foreach_stmt.var_name,
                           value_string(iterable.dict.keys[i]), false);
+                
+                // キー・値ペア展開: 各 キー, 値 を 辞書 の中:
+                if (node->foreach_stmt.value_name) {
+                    env_define(eval->current, node->foreach_stmt.value_name,
+                              value_copy(iterable.dict.values[i]), false);
+                }
                 
                 result = evaluate(eval, node->foreach_stmt.body);
                 
@@ -3740,5 +3797,156 @@ static Value builtin_generator_collect(int argc, Value *argv) {
     }
     s->done = true;
     
+    return result;
+}
+
+// =============================================================================
+// パス操作関数
+// =============================================================================
+
+static Value builtin_path_join(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING || argv[1].type != VALUE_STRING) {
+        return value_null();
+    }
+    
+    char result[2048];
+    const char *base = argv[0].string.data;
+    const char *part = argv[1].string.data;
+    
+    size_t base_len = strlen(base);
+    if (base_len > 0 && base[base_len - 1] == '/') {
+        snprintf(result, sizeof(result), "%s%s", base, part);
+    } else {
+        snprintf(result, sizeof(result), "%s/%s", base, part);
+    }
+    
+    return value_string(result);
+}
+
+static Value builtin_basename(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING) return value_null();
+    
+    const char *path = argv[0].string.data;
+    const char *last_slash = strrchr(path, '/');
+    
+    if (last_slash) {
+        return value_string(last_slash + 1);
+    }
+    return value_string(path);
+}
+
+static Value builtin_dirname(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING) return value_null();
+    
+    const char *path = argv[0].string.data;
+    const char *last_slash = strrchr(path, '/');
+    
+    if (last_slash) {
+        size_t len = last_slash - path;
+        char *dir = malloc(len + 1);
+        memcpy(dir, path, len);
+        dir[len] = '\0';
+        Value result = value_string(dir);
+        free(dir);
+        return result;
+    }
+    return value_string(".");
+}
+
+static Value builtin_extension(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING) return value_null();
+    
+    const char *path = argv[0].string.data;
+    const char *last_dot = strrchr(path, '.');
+    const char *last_slash = strrchr(path, '/');
+    
+    // ドットがスラッシュより前にある場合は拡張子なし
+    if (last_dot && (!last_slash || last_dot > last_slash)) {
+        return value_string(last_dot);
+    }
+    return value_string("");
+}
+
+// =============================================================================
+// Base64関数
+// =============================================================================
+
+static const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static Value builtin_base64_encode(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING) return value_null();
+    
+    const unsigned char *input = (const unsigned char *)argv[0].string.data;
+    size_t input_len = strlen((const char *)input);
+    size_t output_len = 4 * ((input_len + 2) / 3);
+    char *output = malloc(output_len + 1);
+    
+    size_t j = 0;
+    for (size_t i = 0; i < input_len; i += 3) {
+        unsigned int octet_a = input[i];
+        unsigned int octet_b = (i + 1 < input_len) ? input[i + 1] : 0;
+        unsigned int octet_c = (i + 2 < input_len) ? input[i + 2] : 0;
+        
+        unsigned int triple = (octet_a << 16) | (octet_b << 8) | octet_c;
+        
+        output[j++] = base64_chars[(triple >> 18) & 0x3F];
+        output[j++] = base64_chars[(triple >> 12) & 0x3F];
+        output[j++] = (i + 1 < input_len) ? base64_chars[(triple >> 6) & 0x3F] : '=';
+        output[j++] = (i + 2 < input_len) ? base64_chars[triple & 0x3F] : '=';
+    }
+    output[j] = '\0';
+    
+    Value result = value_string(output);
+    free(output);
+    return result;
+}
+
+static int base64_decode_char(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+static Value builtin_base64_decode(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_STRING) return value_null();
+    
+    const char *input = argv[0].string.data;
+    size_t input_len = strlen(input);
+    if (input_len % 4 != 0) return value_string("");
+    
+    size_t output_len = input_len / 4 * 3;
+    if (input_len > 0 && input[input_len - 1] == '=') output_len--;
+    if (input_len > 1 && input[input_len - 2] == '=') output_len--;
+    
+    char *output = malloc(output_len + 1);
+    size_t j = 0;
+    
+    for (size_t i = 0; i < input_len; i += 4) {
+        int a = base64_decode_char(input[i]);
+        int b = base64_decode_char(input[i + 1]);
+        int c = (input[i + 2] != '=') ? base64_decode_char(input[i + 2]) : 0;
+        int d = (input[i + 3] != '=') ? base64_decode_char(input[i + 3]) : 0;
+        
+        if (a < 0 || b < 0) break;
+        
+        unsigned int triple = (a << 18) | (b << 12) | (c << 6) | d;
+        
+        if (j < output_len) output[j++] = (triple >> 16) & 0xFF;
+        if (j < output_len) output[j++] = (triple >> 8) & 0xFF;
+        if (j < output_len) output[j++] = triple & 0xFF;
+    }
+    output[j] = '\0';
+    
+    Value result = value_string(output);
+    free(output);
     return result;
 }
