@@ -18,7 +18,7 @@
 #include <sys/stat.h>
 #include <dirent.h>
 
-// 高階関数用のグローバル評価器ポインタ
+// グローバルevaluatorポインタ（高階関数・toStringプロトコル用）
 static Evaluator *g_eval = NULL;
 
 // 非同期モジュール用のグローバル評価器ポインタ
@@ -193,6 +193,9 @@ static Value builtin_extension(int argc, Value *argv);
 static Value builtin_base64_encode(int argc, Value *argv);
 static Value builtin_base64_decode(int argc, Value *argv);
 
+// toStringプロトコル
+static Value call_instance_to_string(Value *instance);
+
 // =============================================================================
 // 評価器の初期化・解放
 // =============================================================================
@@ -218,6 +221,8 @@ Evaluator *evaluator_new(void) {
     eval->error_line = 0;
     eval->recursion_depth = 0;
     eval->call_stack_depth = 0;
+    
+    g_eval = eval;  // グローバルポインタ設定
     
     // インポートモジュールの初期化
     eval->imported_modules = NULL;
@@ -2310,9 +2315,18 @@ static Value evaluate_foreach(Evaluator *eval, ASTNode *node) {
 static Value builtin_print(int argc, Value *argv) {
     for (int i = 0; i < argc; i++) {
         if (i > 0) printf(" ");
-        char *str = value_to_string(argv[i]);
-        printf("%s", str);
-        free(str);
+        // toStringプロトコル
+        if (argv[i].type == VALUE_INSTANCE) {
+            Value str_val = call_instance_to_string(&argv[i]);
+            char *str = value_to_string(str_val);
+            printf("%s", str);
+            free(str);
+            value_free(&str_val);
+        } else {
+            char *str = value_to_string(argv[i]);
+            printf("%s", str);
+            free(str);
+        }
     }
     printf("\n");
     return value_null();
@@ -2987,8 +3001,75 @@ static Value builtin_to_number(int argc, Value *argv) {
     return value_to_number(argv[0]);
 }
 
+// インスタンスの文字列化メソッドを呼ぶ（toStringプロトコル）
+static Value call_instance_to_string(Value *instance) {
+    if (g_eval == NULL || instance->type != VALUE_INSTANCE) {
+        char *str = value_to_string(*instance);
+        Value result = value_string(str);
+        free(str);
+        return result;
+    }
+    
+    // 文字列化メソッドを探す
+    Value *class_ref = instance->instance.class_ref;
+    while (class_ref != NULL && class_ref->type == VALUE_CLASS) {
+        ASTNode *class_def = class_ref->class_value.definition;
+        for (int i = 0; i < class_def->class_def.method_count; i++) {
+            ASTNode *method = class_def->class_def.methods[i];
+            if (strcmp(method->method.name, "文字列化") == 0) {
+                // メソッドを呼び出す
+                Environment *method_env = env_new(g_eval->current);
+                Environment *saved = g_eval->current;
+                Value *saved_instance = g_eval->current_instance;
+                
+                g_eval->current = method_env;
+                g_eval->current_instance = instance;
+                env_define(method_env, "自分", value_copy(*instance), false);
+                
+                Value ret = evaluate(g_eval, method->method.body);
+                
+                if (g_eval->returning) {
+                    ret = g_eval->return_value;
+                    g_eval->returning = false;
+                }
+                
+                g_eval->current = saved;
+                g_eval->current_instance = saved_instance;
+                env_free(method_env);
+                
+                if (ret.type == VALUE_STRING) {
+                    return value_copy(ret);
+                }
+                char *str = value_to_string(ret);
+                Value result = value_string(str);
+                free(str);
+                return result;
+            }
+        }
+        // 親クラスを探す
+        if (class_def->class_def.parent_name != NULL) {
+            Value *parent = env_get(g_eval->current, class_def->class_def.parent_name);
+            if (parent != NULL && parent->type == VALUE_CLASS) {
+                class_ref = parent;
+            } else break;
+        } else break;
+    }
+    
+    // 文字列化メソッドがなければデフォルト
+    char *str = value_to_string(*instance);
+    Value result = value_string(str);
+    free(str);
+    return result;
+}
+
 static Value builtin_to_string(int argc, Value *argv) {
     (void)argc;
+    
+    // toStringプロトコル: インスタンスの文字列化メソッドを呼ぶ
+    if (argv[0].type == VALUE_INSTANCE) {
+        return call_instance_to_string(&argv[0]);
+    }
+    
     char *str = value_to_string(argv[0]);
     Value result = value_string(str);
     free(str);
