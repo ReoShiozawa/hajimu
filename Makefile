@@ -4,6 +4,12 @@ CC = gcc
 CFLAGS = -Wall -Wextra -std=c11 -g -O2
 LDFLAGS = -lm -lcurl -lpthread
 
+# Linux では -ldl が必要（macOS では不要）
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Linux)
+    LDFLAGS += -ldl
+endif
+
 # ディレクトリ
 SRC_DIR = src
 BUILD_DIR = build
@@ -18,7 +24,9 @@ SOURCES = $(SRC_DIR)/main.c \
           $(SRC_DIR)/environment.c \
           $(SRC_DIR)/evaluator.c \
           $(SRC_DIR)/http.c \
-          $(SRC_DIR)/async.c
+          $(SRC_DIR)/async.c \
+          $(SRC_DIR)/package.c \
+          $(SRC_DIR)/plugin.c
 
 # オブジェクトファイル
 OBJECTS = $(SOURCES:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
@@ -52,6 +60,10 @@ $(BUILD_DIR)/environment.o: $(SRC_DIR)/environment.c $(SRC_DIR)/environment.h $(
 $(BUILD_DIR)/evaluator.o: $(SRC_DIR)/evaluator.c $(SRC_DIR)/evaluator.h $(SRC_DIR)/ast.h $(SRC_DIR)/environment.h $(SRC_DIR)/http.h $(SRC_DIR)/async.h
 $(BUILD_DIR)/http.o: $(SRC_DIR)/http.c $(SRC_DIR)/http.h $(SRC_DIR)/value.h
 $(BUILD_DIR)/async.o: $(SRC_DIR)/async.c $(SRC_DIR)/async.h $(SRC_DIR)/evaluator.h $(SRC_DIR)/value.h
+$(BUILD_DIR)/package.o: $(SRC_DIR)/package.c $(SRC_DIR)/package.h
+$(BUILD_DIR)/plugin.o: $(SRC_DIR)/plugin.c $(SRC_DIR)/plugin.h $(SRC_DIR)/value.h
+$(BUILD_DIR)/main.o: $(SRC_DIR)/package.h
+$(BUILD_DIR)/evaluator.o: $(SRC_DIR)/package.h $(SRC_DIR)/plugin.h
 
 # 実行
 run: $(TARGET)

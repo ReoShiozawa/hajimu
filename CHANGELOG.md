@@ -2,6 +2,21 @@
 
 すべての注目すべき変更はこのプロジェクトに記録されます。
 
+## [v1.1.0] - 2026-02-08
+
+### 🔌 統一プラグイン形式 `.hjp`
+
+クロスプラットフォーム対応の統一拡張子 `.hjp`（Hajimu Plugin）を導入。
+
+#### 変更
+- プラグイン拡張子を OS 固有形式（.so/.dylib/.dll）から統一 `.hjp` 形式に移行
+- 拡張子なしインポート対応（`取り込む "名前"` で自動検索）
+- 4段階プラグイン検索: 呼出元相対 → CWD → `hajimu_packages/` → `~/.hajimu/plugins/`
+- Windows 対応のプラットフォーム抽象化レイヤー（LoadLibrary/GetProcAddress）
+- ドキュメント全面更新（REFERENCE.md、README.md、ROADMAP.md）
+
+---
+
 ## [v1.0.0] - 2026-02-XX
 
 ### 🎉 公開リリース
@@ -15,6 +30,19 @@
 
 #### 追加
 - **Homebrew サポート**: `brew install ReoShiozawa/hajimu/hajimu`
+- **パッケージ管理**: 内蔵パッケージマネージャ（`hajimu パッケージ 初期化/追加/削除/一覧/インストール`）
+  - `hajimu.json` マニフェストファイルによる依存管理
+  - GitHub リポジトリ / ローカルリポジトリからのパッケージインストール
+  - `hajimu_packages/`（ローカル）、`~/.hajimu/packages/`（グローバル）の2層パッケージ格納
+  - 再帰的な依存パッケージの自動インストール
+- **取り込みの強化**: パッケージ名解決、呼び出し元相対パス解決、重複インポート防止、循環参照検出
+- **C拡張プラグイン**: 統一拡張子 `.hjp` によるクロスプラットフォーム（Windows/macOS/Linux）ネイティブプラグイン
+  - `hajimu_plugin.h` プラグイン開発用公開ヘッダー
+  - 拡張子なしインポート対応（`取り込む "名前"` で自動検索）
+  - 4段階検索: 呼出元相対 → CWD → `hajimu_packages/` → `~/.hajimu/plugins/`
+  - C/C++/Rust/Go/Zig 等ではじむ用ライブラリを開発可能
+  - サンプルプラグイン（examples/plugins/）を同梱
+- **VS Code 拡張**: はじむ言語サポート（シンタックスハイライト、スニペット、自動補完）
 - **LICENSE**: MIT License を明記
 - **CONTRIBUTING.md**: コントリビューションガイドラインを追加
 - **GitHub テンプレート**: Issue/PR テンプレートを追加

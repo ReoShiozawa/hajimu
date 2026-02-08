@@ -10,6 +10,7 @@
 #include "ast.h"
 #include "value.h"
 #include "environment.h"
+#include "plugin.h"
 #include <stdbool.h>
 
 // =============================================================================
@@ -77,6 +78,17 @@ typedef struct {
     ImportedModule *imported_modules;
     int imported_count;
     int imported_capacity;
+    
+    // 現在実行中のファイルパス（インポートの相対パス解決用）
+    const char *current_file;
+    
+    // インポート済みパスのキャッシュ（重複防止）
+    char **imported_paths;
+    int imported_path_count;
+    int imported_path_capacity;
+    
+    // C拡張プラグインマネージャ
+    PluginManager plugin_manager;
 } Evaluator;
 
 // =============================================================================

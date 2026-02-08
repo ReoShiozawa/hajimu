@@ -6,6 +6,7 @@
 #include "parser.h"
 #include "http.h"
 #include "async.h"
+#include "package.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,6 +41,8 @@ static Value evaluate_if(Evaluator *eval, ASTNode *node);
 static Value evaluate_while(Evaluator *eval, ASTNode *node);
 static Value evaluate_for(Evaluator *eval, ASTNode *node);
 static Value evaluate_import(Evaluator *eval, ASTNode *node);
+static Value evaluate_import_plugin(Evaluator *eval, ASTNode *node,
+                                     const char *resolved_path);
 static Value evaluate_class_def(Evaluator *eval, ASTNode *node);
 static Value evaluate_new(Evaluator *eval, ASTNode *node);
 static Value evaluate_try(Evaluator *eval, ASTNode *node);
@@ -285,6 +288,17 @@ Evaluator *evaluator_new(void) {
     eval->imported_count = 0;
     eval->imported_capacity = 0;
     
+    // ファイルパス追跡
+    eval->current_file = NULL;
+    
+    // インポート済みパスキャッシュ
+    eval->imported_paths = NULL;
+    eval->imported_path_count = 0;
+    eval->imported_path_capacity = 0;
+    
+    // プラグインマネージャの初期化
+    plugin_manager_init(&eval->plugin_manager);
+    
     // 乱数初期化
     srand((unsigned int)time(NULL));
     
@@ -309,6 +323,15 @@ void evaluator_free(Evaluator *eval) {
         node_free(eval->imported_modules[i].ast);
     }
     free(eval->imported_modules);
+    
+    // インポート済みパスキャッシュを解放
+    for (int i = 0; i < eval->imported_path_count; i++) {
+        free(eval->imported_paths[i]);
+    }
+    free(eval->imported_paths);
+    
+    // プラグインマネージャを解放
+    plugin_manager_free(&eval->plugin_manager);
     
     env_release(eval->global);
     free(eval);
@@ -1851,19 +1874,204 @@ static Value evaluate_for(Evaluator *eval, ASTNode *node) {
     return result;
 }
 
+/**
+ * インポート済みパスキャッシュにパスが存在するかチェック
+ */
+static bool is_already_imported(Evaluator *eval, const char *path) {
+    for (int i = 0; i < eval->imported_path_count; i++) {
+        if (strcmp(eval->imported_paths[i], path) == 0) return true;
+    }
+    return false;
+}
+
+/**
+ * インポート済みパスキャッシュにパスを追加
+ */
+static void add_imported_path(Evaluator *eval, const char *path) {
+    if (eval->imported_path_count >= eval->imported_path_capacity) {
+        eval->imported_path_capacity = eval->imported_path_capacity == 0 ? 8 : eval->imported_path_capacity * 2;
+        eval->imported_paths = realloc(eval->imported_paths,
+                                       eval->imported_path_capacity * sizeof(char *));
+    }
+    eval->imported_paths[eval->imported_path_count++] = strdup(path);
+}
+
+/**
+ * realpath でパスを正規化（循環検出と重複防止用）
+ */
+static bool normalize_path(const char *path, char *out, int max_len) {
+    char *rp = realpath(path, NULL);
+    if (rp) {
+        snprintf(out, max_len, "%s", rp);
+        free(rp);
+        return true;
+    }
+    // realpath 失敗時はそのまま
+    snprintf(out, max_len, "%s", path);
+    return false;
+}
+
+// =============================================================================
+// ネイティブプラグイン（.hjp）のインポート
+// =============================================================================
+
+static Value evaluate_import_plugin(Evaluator *eval, ASTNode *node,
+                                     const char *resolved_path) {
+    const char *alias = node->import_stmt.alias;
+    
+    // プラグインを読み込む
+    HajimuPluginInfo *info = NULL;
+    if (!plugin_load(&eval->plugin_manager, resolved_path, &info)) {
+        runtime_error(eval, node->location.line,
+                     "プラグイン '%s' の読み込みに失敗しました", resolved_path);
+        return value_null();
+    }
+    
+    if (info == NULL || info->functions == NULL || info->function_count == 0) {
+        return value_null();
+    }
+    
+    if (alias != NULL) {
+        // 名前空間付きインポート: 辞書に関数を格納
+        Value ns = value_dict();
+        
+        for (int i = 0; i < info->function_count; i++) {
+            HajimuPluginFunc *pf = &info->functions[i];
+            Value fn = value_builtin((BuiltinFn)pf->fn, pf->name,
+                                     pf->min_args, pf->max_args);
+            dict_set(&ns, pf->name, fn);
+        }
+        
+        // メタ情報も辞書に追加
+        if (info->name) dict_set(&ns, "__名前__", value_string(info->name));
+        if (info->version) dict_set(&ns, "__バージョン__", value_string(info->version));
+        if (info->author) dict_set(&ns, "__作者__", value_string(info->author));
+        if (info->description) dict_set(&ns, "__説明__", value_string(info->description));
+        
+        env_define(eval->current, alias, ns, true);
+    } else {
+        // 直接インポート: 現在の環境に関数を登録
+        for (int i = 0; i < info->function_count; i++) {
+            HajimuPluginFunc *pf = &info->functions[i];
+            Value fn = value_builtin((BuiltinFn)pf->fn, pf->name,
+                                     pf->min_args, pf->max_args);
+            env_define(eval->current, pf->name, fn, true);
+        }
+    }
+    
+    return value_null();
+}
+
 static Value evaluate_import(Evaluator *eval, ASTNode *node) {
     const char *module_path = node->import_stmt.module_path;
     const char *alias = node->import_stmt.alias;
     
-    // 現在のファイルディレクトリを基準にパスを解決
-    char resolved_path[1024];
-    
-    // .jp拡張子がなければ追加
-    if (strstr(module_path, ".jp") == NULL) {
-        snprintf(resolved_path, sizeof(resolved_path), "%s.jp", module_path);
-    } else {
-        snprintf(resolved_path, sizeof(resolved_path), "%s", module_path);
+    // ============================================================
+    // 1. 明示的 .hjp 指定 → ネイティブプラグインとして読み込み
+    // ============================================================
+    if (plugin_is_hjp(module_path)) {
+        char resolved[1024];
+        if (plugin_resolve_hjp(module_path, eval->current_file,
+                               resolved, sizeof(resolved))) {
+            return evaluate_import_plugin(eval, node, resolved);
+        }
+        runtime_error(eval, node->location.line,
+                     "プラグイン '%s' が見つかりません", module_path);
+        return value_null();
     }
+    
+    char resolved_path[1024];
+    bool found = false;
+    
+    // ============================================================
+    // パス解決の優先順位:
+    //   1. 相対パス（呼び出し元ファイルのディレクトリ基準）
+    //   2. CWD基準の相対パス
+    //   3. パッケージ名としてパッケージディレクトリを検索
+    // ============================================================
+    
+    // パスに / や .jp が含まれる → ファイルパスとして扱う
+    bool is_file_path = (strchr(module_path, '/') != NULL || 
+                         strstr(module_path, ".jp") != NULL);
+    
+    if (is_file_path) {
+        // --- ファイルパスモード ---
+        char try_path[1024];
+        
+        // .jp 拡張子がなければ追加
+        const char *effective = module_path;
+        char with_ext[1024];
+        if (strstr(module_path, ".jp") == NULL) {
+            snprintf(with_ext, sizeof(with_ext), "%s.jp", module_path);
+            effective = with_ext;
+        }
+        
+        // 1. 呼び出し元ファイルからの相対パス
+        if (!found && eval->current_file) {
+            char dir[1024];
+            snprintf(dir, sizeof(dir), "%s", eval->current_file);
+            char *sep = strrchr(dir, '/');
+            if (sep) {
+                *(sep + 1) = '\0';
+                snprintf(try_path, sizeof(try_path), "%s%s", dir, effective);
+            } else {
+                snprintf(try_path, sizeof(try_path), "%s", effective);
+            }
+            FILE *f = fopen(try_path, "rb");
+            if (f) {
+                fclose(f);
+                snprintf(resolved_path, sizeof(resolved_path), "%s", try_path);
+                found = true;
+            }
+        }
+        
+        // 2. CWD基準
+        if (!found) {
+            snprintf(try_path, sizeof(try_path), "%s", effective);
+            FILE *f = fopen(try_path, "rb");
+            if (f) {
+                fclose(f);
+                snprintf(resolved_path, sizeof(resolved_path), "%s", try_path);
+                found = true;
+            }
+        }
+    }
+    
+    // 3. パッケージ名として検索
+    if (!found) {
+        found = package_resolve(module_path, eval->current_file,
+                                resolved_path, sizeof(resolved_path));
+    }
+    
+    // 4. .hjp プラグインとして検索（拡張子なしインポート対応）
+    if (!found) {
+        char hjp_resolved[1024];
+        if (plugin_resolve_hjp(module_path, eval->current_file,
+                               hjp_resolved, sizeof(hjp_resolved))) {
+            return evaluate_import_plugin(eval, node, hjp_resolved);
+        }
+    }
+    
+    if (!found) {
+        runtime_error(eval, node->location.line,
+                     "モジュール '%s' が見つかりません\n"
+                     "  ファイルパスまたはパッケージ名を確認してください\n"
+                     "  パッケージの場合: hajimu パッケージ 追加 ユーザー/リポジトリ",
+                     module_path);
+        return value_null();
+    }
+    
+    // パスを正規化（重複防止・循環検出用）
+    char canonical_path[1024];
+    normalize_path(resolved_path, canonical_path, sizeof(canonical_path));
+    
+    // 重複インポート防止: 既にインポート済みなら何もしない
+    if (is_already_imported(eval, canonical_path)) {
+        return value_null();
+    }
+    
+    // インポート済みとしてマーク（循環参照防止のため読み込み前に登録）
+    add_imported_path(eval, canonical_path);
     
     // ファイルを読み込む
     FILE *file = fopen(resolved_path, "rb");
@@ -1896,7 +2104,7 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
         return value_null();
     }
     
-    // モジュールを保存（ASTと ソースを解放しないように）
+    // モジュールを保存（ASTとソースを解放しないように）
     if (eval->imported_count >= eval->imported_capacity) {
         eval->imported_capacity = eval->imported_capacity == 0 ? 4 : eval->imported_capacity * 2;
         eval->imported_modules = realloc(eval->imported_modules, 
@@ -1905,6 +2113,10 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
     eval->imported_modules[eval->imported_count].source = source;
     eval->imported_modules[eval->imported_count].ast = program;
     eval->imported_count++;
+    
+    // current_file を一時的に切り替え（ネストしたインポートの相対パス解決用）
+    const char *prev_file = eval->current_file;
+    eval->current_file = resolved_path;
     
     if (alias != NULL) {
         // 名前空間付きインポート: 新しいスコープでモジュールを評価
@@ -1916,6 +2128,7 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
             evaluate(eval, program->block.statements[i]);
             if (eval->had_error) {
                 eval->current = prev;
+                eval->current_file = prev_file;
                 env_release(module_env);
                 return value_null();
             }
@@ -1944,6 +2157,9 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
             if (eval->had_error) break;
         }
     }
+    
+    // current_file を復元
+    eval->current_file = prev_file;
     
     // ソースとASTは保持しておく（関数定義で参照されるため）
     return value_null();

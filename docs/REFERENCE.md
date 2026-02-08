@@ -41,7 +41,9 @@ C言語で実装されたインタプリタにより実行されます。
 32. [ドキュメントコメント](#ドキュメントコメント)
 33. [型エイリアス](#型エイリアス)
 34. [モジュール名前空間](#モジュール名前空間)
-35. [リスト内包表記](#リスト内包表記)
+35. [パッケージ管理](#パッケージ管理)
+36. [C拡張プラグイン](#c拡張プラグイン)
+37. [リスト内包表記](#リスト内包表記)
 
 ---
 
@@ -524,10 +526,48 @@ i を 1 から 10 繰り返す
 
 ### モジュールのインポート
 
+`取り込む` 文を使って外部ファイルを読み込みます。
+
 ```
+// ファイルパスによるインポート
 取り込む "数学.jp"
 取り込む "utils/helpers.jp"
+
+// パッケージ名によるインポート（パッケージ管理と連携）
+取り込む "my-package"
 ```
+
+### パス解決の順序
+
+`取り込む` 文はファイルパスを以下の順序で解決します：
+
+1. **呼び出し元ファイルからの相対パス** — 現在実行中のファイルのディレクトリを基準
+2. **カレントディレクトリからの相対パス** — 実行時のワーキングディレクトリを基準
+3. **パッケージ検索** — `hajimu_packages/` および `~/.hajimu/packages/` を検索
+
+### パスの種類
+
+```
+// ファイルパス（/ または .jp を含む）
+取り込む "lib/math_utils.jp"   // 相対パス
+取り込む "utils/helpers"       // .jp は省略可能
+
+// パッケージ名（/ を含まない）
+取り込む "my-package"          // パッケージとして検索
+```
+
+### 重複インポートの防止
+
+同じファイルは一度だけ読み込まれます。2回目以降の `取り込む` は無視されます。
+
+```
+取り込む "utils.jp"  // 読み込まれる
+取り込む "utils.jp"  // 既に読み込み済み → スキップ
+```
+
+### 循環参照の検出
+
+循環的なインポートは自動的に検出され、無限ループを防止します。
 
 ---
 
@@ -1518,6 +1558,252 @@ nihongo -a ファイル  # AST表示
 表示(数学["足す"](3, 4))      // → 7
 表示(数学["バージョン"])       // → "1.0"
 ```
+
+---
+
+## パッケージ管理
+
+はじむには、外部パッケージの管理を行うパッケージマネージャが内蔵されています。
+
+### マニフェストファイル（hajimu.json）
+
+プロジェクトのパッケージ情報は `hajimu.json` で管理します。
+
+```json
+{
+    "名前": "私のプロジェクト",
+    "バージョン": "1.0.0",
+    "説明": "プロジェクトの説明",
+    "作者": "作者名",
+    "メイン": "main.jp",
+    "依存": {
+        "my-library": "https://github.com/user/my-library.git"
+    }
+}
+```
+
+### CLIコマンド
+
+```bash
+# プロジェクトの初期化（hajimu.json を生成）
+hajimu パッケージ 初期化
+
+# パッケージの追加（GitHubリポジトリから）
+hajimu パッケージ 追加 user/repo
+hajimu パッケージ 追加 https://github.com/user/repo.git
+
+# パッケージの追加（ローカルリポジトリから）
+hajimu パッケージ 追加 /path/to/local/repo
+
+# パッケージの削除
+hajimu パッケージ 削除 パッケージ名
+
+# インストール済みパッケージの一覧
+hajimu パッケージ 一覧
+
+# hajimu.json の依存パッケージを一括インストール
+hajimu パッケージ インストール
+```
+
+英語エイリアスも使用できます：
+
+```bash
+hajimu pkg init
+hajimu pkg add user/repo
+hajimu pkg remove package-name
+hajimu pkg list
+hajimu pkg install
+```
+
+### ディレクトリ構成
+
+```
+プロジェクト/
+├── hajimu.json              # マニフェストファイル
+├── hajimu_packages/         # ローカルパッケージ格納先
+│   ├── my-library/
+│   │   ├── hajimu.json
+│   │   └── main.jp
+│   └── another-lib/
+│       └── main.jp
+└── main.jp                  # メインプログラム
+```
+
+グローバルパッケージは `~/.hajimu/packages/` に格納されます。
+
+### パッケージの使用
+
+インストールしたパッケージは `取り込む` でインポートできます。
+
+```
+// パッケージをそのまま取り込む（関数・変数が直接利用可能）
+取り込む "my-library"
+
+// 名前空間付きで取り込む
+取り込む "my-library" として ライブラリ
+表示(ライブラリ["関数名"](引数))
+```
+
+### パッケージの解決順序
+
+パッケージ名で `取り込む` を実行すると、以下の順序で検索されます：
+
+1. **ローカル**: `./hajimu_packages/<パッケージ名>/`
+2. **グローバル**: `~/.hajimu/packages/<パッケージ名>/`
+
+各パッケージ内では、エントリポイントとなるファイルを以下の順序で検索します：
+
+1. `hajimu.json` の `メイン` フィールドで指定されたファイル
+2. `main.jp`
+3. `<パッケージ名>.jp`
+
+### パッケージの作成
+
+パッケージを作成するには、Gitリポジトリに以下を含めます：
+
+```
+my-package/
+├── hajimu.json     # パッケージ情報（推奨）
+├── main.jp         # エントリポイント
+└── lib/            # 追加モジュール（任意）
+    └── utils.jp
+```
+
+`hajimu.json` で依存パッケージを指定すると、インストール時に再帰的に依存パッケージもインストールされます。
+
+---
+
+## C拡張プラグイン
+
+C言語（または共有ライブラリを生成できる任意の言語）で書かれたネイティブプラグインを「はじむ」に読み込むことができます。
+プラグインは統一拡張子 `.hjp`（Hajimu Plugin）でビルドし、Windows/macOS/Linux 共通で使用できます。
+
+### プラグインの使用
+
+**拡張子なしのパッケージ名だけでインポートできます。**
+
+```
+// 名前空間付きインポート（推奨）
+取り込む "math_plugin" として 数学P
+表示(数学P["二乗"](5))       // → 25
+表示(数学P["階乗"](6))       // → 720
+
+// 直接インポート
+取り込む "math_plugin"
+表示(二乗(5))                // → 25
+
+// .hjp を明示的に指定してもOK
+取り込む "math_plugin.hjp" として 数学P
+```
+
+### プラグインの検索順序
+
+拡張子なしで `取り込む "名前"` した場合、以下の順序で `.hjp` ファイルを自動検索します：
+
+1. **呼び出し元ファイルからの相対パス**: `<呼出元のディレクトリ>/名前.hjp`
+2. **カレントディレクトリ**: `./名前.hjp`
+3. **ローカルパッケージ**: `./hajimu_packages/名前.hjp`、`./hajimu_packages/名前/名前.hjp`
+4. **グローバルプラグイン**: `~/.hajimu/plugins/名前.hjp`
+
+### プラグインのメタ情報
+
+名前空間付きインポート時、プラグインのメタ情報にもアクセスできます。
+
+```
+取り込む "my_plugin" として P
+表示(P["__名前__"])         // プラグイン名
+表示(P["__バージョン__"])   // バージョン
+表示(P["__作者__"])         // 作者
+表示(P["__説明__"])         // 説明
+```
+
+### プラグインの開発
+
+#### 1. ヘッダーのインクルード
+
+`include/hajimu_plugin.h` をインクルードします。
+
+```c
+#include "hajimu_plugin.h"
+```
+
+#### 2. 関数の実装
+
+プラグイン関数は `Value fn(int argc, Value *argv)` のシグネチャです。
+
+```c
+static Value fn_hello(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type == VALUE_STRING) {
+        printf("こんにちは、%sさん！\n", argv[0].string.data);
+    }
+    return hajimu_null();
+}
+```
+
+ヘルパー関数:
+
+| 関数 | 説明 |
+|------|------|
+| `hajimu_null()` | NULL値を作成 |
+| `hajimu_number(n)` | 数値を作成 |
+| `hajimu_bool(b)` | 真偽値を作成 |
+| `hajimu_string(s)` | 文字列を作成（コピー） |
+| `hajimu_array()` | 空の配列を作成 |
+| `hajimu_array_push(arr, elem)` | 配列に要素を追加 |
+
+#### 3. 関数テーブルと初期化
+
+```c
+// 関数テーブル
+static HajimuPluginFunc functions[] = {
+    {"挨拶", fn_hello, 1, 1},  // {名前, 関数, 最小引数, 最大引数}
+};
+
+// 初期化関数（必須）
+HAJIMU_PLUGIN_EXPORT HajimuPluginInfo *hajimu_plugin_init(void) {
+    static HajimuPluginInfo info = {
+        .name           = "my_plugin",
+        .version        = "1.0.0",
+        .author         = "作者名",
+        .description    = "プラグインの説明",
+        .functions      = functions,
+        .function_count = sizeof(functions) / sizeof(functions[0]),
+    };
+    return &info;
+}
+```
+
+#### 4. コンパイル（全OS共通で `.hjp` を出力）
+
+```bash
+# macOS
+gcc -shared -fPIC -I/path/to/hajimu/include -o my_plugin.hjp my_plugin.c
+
+# Linux
+gcc -shared -fPIC -I/path/to/hajimu/include -o my_plugin.hjp my_plugin.c -lm
+
+# Windows (MinGW)
+gcc -shared -I/path/to/hajimu/include -o my_plugin.hjp my_plugin.c
+
+# Windows (MSVC)
+cl /LD /Fe:my_plugin.hjp my_plugin.c
+```
+
+### 対応言語
+
+共有ライブラリを生成できる言語であれば、C以外でもプラグインを開発できます。
+すべて出力ファイル名を `.hjp` にするだけです。
+
+| 言語 | コンパイル例 |
+|------|----------|
+| C | `gcc -shared -fPIC -o plugin.hjp plugin.c` |
+| C++ | `g++ -shared -fPIC -o plugin.hjp plugin.cpp` |
+| Rust | `cargo build --release`（`cdylib` crate-type、出力を `.hjp` にリネーム） |
+| Go | `go build -buildmode=c-shared -o plugin.hjp` |
+| Zig | `zig build-lib -dynamic`（出力を `.hjp` にリネーム） |
+
+**要件**: `hajimu_plugin_init` シンボルをCリンケージ（`extern "C"`）でエクスポートし、`HajimuPluginInfo *` を返すこと。
 
 ---
 

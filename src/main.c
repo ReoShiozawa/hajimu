@@ -13,6 +13,7 @@
 #include "parser.h"
 #include "ast.h"
 #include "evaluator.h"
+#include "package.h"
 
 // =============================================================================
 // バージョン情報
@@ -92,6 +93,9 @@ static int run_file(const char *path, bool debug_mode, int script_argc, char **s
     
     // 実行
     Evaluator *eval = evaluator_new();
+    
+    // 現在のファイルパスを設定（インポートの相対パス解決用）
+    eval->current_file = path;
     
     // コマンドライン引数を「引数」変数として設定
     Value args_array = value_array_with_capacity(script_argc > 0 ? script_argc : 1);
@@ -370,6 +374,13 @@ static void print_usage(const char *program_name) {
     printf("  -t, --tokens   トークンを表示\n");
     printf("  -a, --ast      ASTを表示\n");
     printf("\n");
+    printf("パッケージ管理:\n");
+    printf("  %s パッケージ 初期化                  プロジェクトを初期化 (hajimu.json作成)\n", program_name);
+    printf("  %s パッケージ 追加 <ユーザー/リポ>    パッケージをインストール\n", program_name);
+    printf("  %s パッケージ 削除 <パッケージ名>     パッケージを削除\n", program_name);
+    printf("  %s パッケージ 一覧                    インストール済みパッケージ一覧\n", program_name);
+    printf("  %s パッケージ インストール             全依存パッケージをインストール\n", program_name);
+    printf("\n");
     printf("ファイルを指定しない場合、REPLモードで起動します。\n");
 }
 
@@ -427,6 +438,49 @@ static void show_ast(const char *source, const char *filename) {
 int main(int argc, char *argv[]) {
     // ロケール設定（日本語出力のため）
     setlocale(LC_ALL, "");
+    
+    // パッケージ管理サブコマンド
+    if (argc >= 2 && (strcmp(argv[1], "パッケージ") == 0 || strcmp(argv[1], "pkg") == 0)) {
+        if (argc < 3) {
+            printf("使用方法: %s パッケージ <コマンド> [引数]\n", argv[0]);
+            printf("\nコマンド:\n");
+            printf("  初期化 (init)              プロジェクトを初期化\n");
+            printf("  追加 (add) <ユーザー/リポ> パッケージを追加\n");
+            printf("  削除 (remove) <名前>       パッケージを削除\n");
+            printf("  一覧 (list)                インストール済み一覧\n");
+            printf("  インストール (install)     全依存をインストール\n");
+            return 1;
+        }
+        
+        const char *subcmd = argv[2];
+        
+        if (strcmp(subcmd, "初期化") == 0 || strcmp(subcmd, "init") == 0) {
+            return package_init();
+        } else if (strcmp(subcmd, "追加") == 0 || strcmp(subcmd, "add") == 0) {
+            if (argc < 4) {
+                fprintf(stderr, "エラー: パッケージ名またはリポジトリURLを指定してください\n");
+                fprintf(stderr, "  例: %s パッケージ 追加 ユーザー名/リポジトリ名\n", argv[0]);
+                return 1;
+            }
+            return package_install(argv[3]);
+        } else if (strcmp(subcmd, "削除") == 0 || strcmp(subcmd, "remove") == 0) {
+            if (argc < 4) {
+                fprintf(stderr, "エラー: パッケージ名を指定してください\n");
+                return 1;
+            }
+            return package_remove(argv[3]);
+        } else if (strcmp(subcmd, "一覧") == 0 || strcmp(subcmd, "list") == 0) {
+            return package_list();
+        } else if (strcmp(subcmd, "インストール") == 0 || strcmp(subcmd, "install") == 0) {
+            if (argc >= 4) {
+                return package_install(argv[3]);
+            }
+            return package_install_all();
+        } else {
+            fprintf(stderr, "未知のパッケージコマンド: %s\n", subcmd);
+            return 1;
+        }
+    }
     
     // オプション
     bool show_help = false;
