@@ -15,6 +15,10 @@
 #include <unistd.h>
 #include <errno.h>
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
 // =============================================================================
 // ヘルパー関数
 // =============================================================================
@@ -208,6 +212,8 @@ bool package_read_manifest(const char *path, PackageManifest *manifest) {
             p = json_parse_string(p, manifest->author, sizeof(manifest->author));
         } else if (json_key_equals(key, "メイン") || json_key_equals(key, "main")) {
             p = json_parse_string(p, manifest->main_file, sizeof(manifest->main_file));
+        } else if (json_key_equals(key, "ビルド") || json_key_equals(key, "build")) {
+            p = json_parse_string(p, manifest->build_cmd, sizeof(manifest->build_cmd));
         } else if (json_key_equals(key, "依存") || json_key_equals(key, "dependencies")) {
             // 依存オブジェクトをパース
             if (*p != '{') break;
@@ -284,6 +290,9 @@ static bool write_manifest(const char *path, const PackageManifest *manifest) {
     fprintf(f, "  \"説明\": \"%s\",\n", manifest->description);
     fprintf(f, "  \"作者\": \"%s\",\n", manifest->author);
     fprintf(f, "  \"メイン\": \"%s\",\n", manifest->main_file);
+    if (manifest->build_cmd[0]) {
+        fprintf(f, "  \"ビルド\": \"%s\",\n", manifest->build_cmd);
+    }
     fprintf(f, "  \"依存\": {");
     
     for (int i = 0; i < manifest->dep_count; i++) {
@@ -523,7 +532,8 @@ int package_install(const char *name_or_url) {
     snprintf(manifest_path, sizeof(manifest_path), "%s/%s", pkg_dir, PACKAGE_MANIFEST_FILE);
     
     PackageManifest pkg_manifest;
-    if (package_read_manifest(manifest_path, &pkg_manifest)) {
+    bool has_manifest = package_read_manifest(manifest_path, &pkg_manifest);
+    if (has_manifest) {
         printf("   パッケージ: %s v%s\n", pkg_manifest.name, pkg_manifest.version);
         if (pkg_manifest.description[0]) {
             printf("   説明: %s\n", pkg_manifest.description);
@@ -538,6 +548,107 @@ int package_install(const char *name_or_url) {
                 printf("\n   → 依存パッケージ '%s' をインストール中...\n", 
                        pkg_manifest.deps[i].name);
                 package_install(pkg_manifest.deps[i].source);
+            }
+        }
+    }
+    
+    // ポストインストールビルド:
+    // .hjp ファイルが存在しない場合、自動的にビルドを試みる
+    {
+        // .hjp ファイルを検索
+        bool hjp_found = false;
+        DIR *pkg_dir_handle = opendir(pkg_dir);
+        if (pkg_dir_handle) {
+            struct dirent *ent;
+            while ((ent = readdir(pkg_dir_handle)) != NULL) {
+                size_t nlen = strlen(ent->d_name);
+                if (nlen > 4 && strcmp(ent->d_name + nlen - 4, ".hjp") == 0) {
+                    hjp_found = true;
+                    break;
+                }
+            }
+            closedir(pkg_dir_handle);
+        }
+        
+        if (!hjp_found) {
+            // ビルドコマンドを決定（hajimu.json の "ビルド" → Makefile → 自動検出）
+            char build_cmd[PACKAGE_MAX_PATH * 2] = {0};
+            
+            // はじむヘッダーのパスを自動検出
+            // 実行ファイルのディレクトリから include/ を探す
+            char include_dir[PACKAGE_MAX_PATH] = {0};
+            {
+                char self_path[PACKAGE_MAX_PATH] = {0};
+                #ifdef __APPLE__
+                uint32_t self_size = sizeof(self_path);
+                _NSGetExecutablePath(self_path, &self_size);
+                #elif defined(__linux__)
+                readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
+                #endif
+                
+                if (self_path[0]) {
+                    char *last_slash = strrchr(self_path, '/');
+                    if (last_slash) {
+                        *last_slash = '\0';
+                        snprintf(include_dir, sizeof(include_dir),
+                                 "%s/include", self_path);
+                        if (!dir_exists(include_dir)) {
+                            include_dir[0] = '\0';
+                        }
+                    }
+                }
+            }
+            
+            if (has_manifest && pkg_manifest.build_cmd[0]) {
+                // hajimu.json にビルドコマンドが指定されている
+                if (include_dir[0]) {
+                    snprintf(build_cmd, sizeof(build_cmd),
+                             "cd \"%s\" && HAJIMU_INCLUDE=\"%s\" %s 2>&1",
+                             pkg_dir, include_dir, pkg_manifest.build_cmd);
+                } else {
+                    snprintf(build_cmd, sizeof(build_cmd), "cd \"%s\" && %s 2>&1",
+                             pkg_dir, pkg_manifest.build_cmd);
+                }
+            } else {
+                // Makefile を検索
+                char makefile_path[PACKAGE_MAX_PATH];
+                snprintf(makefile_path, sizeof(makefile_path), "%s/Makefile", pkg_dir);
+                if (file_exists(makefile_path)) {
+                    if (include_dir[0]) {
+                        snprintf(build_cmd, sizeof(build_cmd),
+                                 "cd \"%s\" && make HAJIMU_INCLUDE=\"%s\" 2>&1",
+                                 pkg_dir, include_dir);
+                    } else {
+                        snprintf(build_cmd, sizeof(build_cmd),
+                                 "cd \"%s\" && make 2>&1", pkg_dir);
+                    }
+                }
+            }
+            
+            if (build_cmd[0]) {
+                printf("   🔨 ビルド中...\n");
+                FILE *bp = popen(build_cmd, "r");
+                if (bp) {
+                    char line[1024];
+                    while (fgets(line, sizeof(line), bp)) {
+                        // エラーや警告を表示
+                        if (strstr(line, "error") || strstr(line, "エラー") ||
+                            strstr(line, "warning") || strstr(line, "警告") ||
+                            strstr(line, "✅")) {
+                            printf("      %s", line);
+                        }
+                    }
+                    int bstatus = pclose(bp);
+                    if (WEXITSTATUS(bstatus) == 0) {
+                        printf("   ✅ ビルド成功\n");
+                    } else {
+                        printf("   ⚠  ビルドに失敗しました（手動で make を実行してください）\n");
+                    }
+                }
+            } else {
+                printf("   ⚠  .hjp ファイルが見つかりません\n");
+                printf("      パッケージディレクトリで make を実行してください:\n");
+                printf("      cd %s && make\n", pkg_dir);
             }
         }
     }

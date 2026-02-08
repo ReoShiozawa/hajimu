@@ -60,6 +60,7 @@ typedef struct {
     char description[512];            // 説明
     char author[PACKAGE_MAX_NAME];    // 作者
     char main_file[PACKAGE_MAX_NAME]; // エントリポイント（デフォルト: main.jp）
+    char build_cmd[PACKAGE_MAX_PATH];  // ビルドコマンド（例: "make"）
     
     PackageDep deps[PACKAGE_MAX_DEPS]; // 依存パッケージ
     int dep_count;                     // 依存数

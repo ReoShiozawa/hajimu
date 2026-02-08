@@ -2041,6 +2041,10 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
     if (!found) {
         found = package_resolve(module_path, eval->current_file,
                                 resolved_path, sizeof(resolved_path));
+        // パッケージのメインが .hjp の場合はプラグインとして読み込む
+        if (found && plugin_is_hjp(resolved_path)) {
+            return evaluate_import_plugin(eval, node, resolved_path);
+        }
     }
     
     // 4. .hjp プラグインとして検索（拡張子なしインポート対応）
