@@ -598,19 +598,65 @@ void register_builtins(Evaluator *eval) {
     env_define(eval->global, "非同期実行",
                value_builtin(builtin_async_run, "非同期実行", 1, -1), true);
     env_define(eval->global, "待機",
-               value_builtin(builtin_async_await, "待機", 1, 1), true);
+               value_builtin(builtin_async_await, "待機", 1, 2), true);
     env_define(eval->global, "全待機",
                value_builtin(builtin_async_await_all, "全待機", 1, 1), true);
     env_define(eval->global, "タスク状態",
                value_builtin(builtin_task_status, "タスク状態", 1, 1), true);
+    env_define(eval->global, "競争待機",
+               value_builtin(builtin_async_race, "競争待機", 1, 1), true);
+    env_define(eval->global, "タスクキャンセル",
+               value_builtin(builtin_task_cancel, "タスクキャンセル", 1, 1), true);
+    
+    // Promise チェーン
+    env_define(eval->global, "成功時",
+               value_builtin(builtin_then, "成功時", 2, 2), true);
+    env_define(eval->global, "失敗時",
+               value_builtin(builtin_catch, "失敗時", 2, 2), true);
+    
+    // スレッドプール
+    env_define(eval->global, "プール作成",
+               value_builtin(builtin_pool_create, "プール作成", 0, 1), true);
+    env_define(eval->global, "プール情報",
+               value_builtin(builtin_pool_stats, "プール情報", 0, 0), true);
     
     // 並列処理
     env_define(eval->global, "並列実行",
                value_builtin(builtin_parallel_run, "並列実行", 1, 1), true);
+    env_define(eval->global, "並列マップ",
+               value_builtin(builtin_parallel_map, "並列マップ", 2, 2), true);
     env_define(eval->global, "排他作成",
                value_builtin(builtin_mutex_create, "排他作成", 0, 0), true);
     env_define(eval->global, "排他実行",
                value_builtin(builtin_mutex_exec, "排他実行", 2, 2), true);
+    
+    // 読み書きロック
+    env_define(eval->global, "読書ロック作成",
+               value_builtin(builtin_rwlock_create, "読書ロック作成", 0, 0), true);
+    env_define(eval->global, "読取実行",
+               value_builtin(builtin_rwlock_read, "読取実行", 2, 2), true);
+    env_define(eval->global, "書込実行",
+               value_builtin(builtin_rwlock_write, "書込実行", 2, 2), true);
+    
+    // セマフォ
+    env_define(eval->global, "セマフォ作成",
+               value_builtin(builtin_semaphore_create, "セマフォ作成", 1, 1), true);
+    env_define(eval->global, "セマフォ獲得",
+               value_builtin(builtin_semaphore_acquire, "セマフォ獲得", 1, 1), true);
+    env_define(eval->global, "セマフォ解放",
+               value_builtin(builtin_semaphore_release, "セマフォ解放", 1, 1), true);
+    env_define(eval->global, "セマフォ実行",
+               value_builtin(builtin_semaphore_exec, "セマフォ実行", 2, 2), true);
+    
+    // アトミックカウンター
+    env_define(eval->global, "カウンター作成",
+               value_builtin(builtin_atomic_create, "カウンター作成", 0, 1), true);
+    env_define(eval->global, "カウンター加算",
+               value_builtin(builtin_atomic_add, "カウンター加算", 1, 2), true);
+    env_define(eval->global, "カウンター取得",
+               value_builtin(builtin_atomic_get, "カウンター取得", 1, 1), true);
+    env_define(eval->global, "カウンター設定",
+               value_builtin(builtin_atomic_set, "カウンター設定", 2, 2), true);
     
     // チャネル（スレッド間通信）
     env_define(eval->global, "チャネル作成",
@@ -621,6 +667,14 @@ void register_builtins(Evaluator *eval) {
                value_builtin(builtin_channel_receive, "チャネル受信", 1, 1), true);
     env_define(eval->global, "チャネル閉じる",
                value_builtin(builtin_channel_close, "チャネル閉じる", 1, 1), true);
+    env_define(eval->global, "チャネル試送信",
+               value_builtin(builtin_channel_try_send, "チャネル試送信", 2, 2), true);
+    env_define(eval->global, "チャネル試受信",
+               value_builtin(builtin_channel_try_receive, "チャネル試受信", 1, 1), true);
+    env_define(eval->global, "チャネル残量",
+               value_builtin(builtin_channel_count, "チャネル残量", 1, 1), true);
+    env_define(eval->global, "チャネル選択",
+               value_builtin(builtin_channel_select, "チャネル選択", 1, 2), true);
     
     // スケジューラ
     env_define(eval->global, "定期実行",
