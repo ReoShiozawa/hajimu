@@ -297,6 +297,8 @@ i を 1 から 10 繰り返す
 変数 結果 = 足し算(3, 5)
 ```
 
+> **注**: `戻す` と `返す` は同義です。どちらも関数の戻り値を指定するキーワードとして使用できます。
+
 ### 型注釈付き関数
 
 ```
@@ -1805,6 +1807,31 @@ cl /LD /Fe:my_plugin.hjp my_plugin.c
 
 **要件**: `hajimu_plugin_init` シンボルをCリンケージ（`extern "C"`）でエクスポートし、`HajimuPluginInfo *` を返すこと。
 
+### プラグインランタイムコールバック
+
+v1.2.0 以降、プラグインからはじむの関数（ユーザー定義関数、ラムダ、ビルトイン関数）を呼び出すことができます。
+
+```c
+// プラグイン側のコード
+#include "hajimu_plugin.h"
+
+// ランタイム注入エントリポイント（自動呼び出し）
+HAJIMU_PLUGIN_EXPORT void hajimu_plugin_set_runtime(HajimuRuntime *rt) {
+    __hajimu_runtime = rt;
+}
+
+// プラグイン関数内で、はじむの関数を呼び出す
+static Value fn_example(int argc, Value *argv) {
+    if (argc >= 1 && (argv[0].type == VALUE_FUNCTION || argv[0].type == VALUE_BUILTIN)) {
+        Value arg = hajimu_string("Hello");
+        return hajimu_call(&argv[0], 1, &arg);  // はじむ関数を呼び出し
+    }
+    return hajimu_null();
+}
+```
+
+これにより、Express スタイルのコールバック関数ハンドラなど、プラグインとはじむコードの高度な連携が可能になります。
+
 ---
 
 ## リスト内包表記
@@ -1891,5 +1918,5 @@ $ nihongo hello.jp
 
 ## バージョン情報
 
-- バージョン: 0.1.0
+- バージョン: 1.2.0
 - 作者: Reo Shiozawa

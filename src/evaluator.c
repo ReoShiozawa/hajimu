@@ -26,6 +26,71 @@ static Evaluator *g_eval = NULL;
 Evaluator *g_eval_for_async = NULL;
 
 // =============================================================================
+// プラグインランタイムコールバック
+// =============================================================================
+
+/**
+ * プラグインからはじむ関数を呼び出すためのコールバック。
+ * VALUE_FUNCTION と VALUE_BUILTIN の両方に対応。
+ */
+static Value plugin_call_function(Value *func, int argc, Value *argv) {
+    if (g_eval == NULL || func == NULL) return value_null();
+    
+    if (func->type == VALUE_BUILTIN) {
+        return func->builtin.fn(argc, argv);
+    }
+    if (func->type == VALUE_FUNCTION) {
+        /* call_function_value 相当の処理を直接実行 */
+        ASTNode *def = func->function.definition;
+        Parameter *params;
+        ASTNode *body;
+        int param_count;
+        
+        if (def->type == NODE_LAMBDA) {
+            params = def->lambda.params;
+            body = def->lambda.body;
+            param_count = def->lambda.param_count;
+        } else {
+            params = def->function.params;
+            body = def->function.body;
+            param_count = def->function.param_count;
+        }
+        
+        /* 引数が足りない場合はデフォルト値で埋める */
+        Environment *local = env_new(func->function.closure);
+        for (int i = 0; i < param_count; i++) {
+            if (i < argc) {
+                env_define(local, params[i].name, value_copy(argv[i]), false);
+            } else if (params[i].default_value) {
+                Value def_val = evaluate(g_eval, params[i].default_value);
+                env_define(local, params[i].name, def_val, false);
+            } else {
+                env_define(local, params[i].name, value_null(), false);
+            }
+        }
+        
+        Environment *prev = g_eval->current;
+        g_eval->current = local;
+        
+        Value result = evaluate(g_eval, body);
+        
+        if (g_eval->returning) {
+            result = g_eval->return_value;
+            g_eval->returning = false;
+        }
+        
+        g_eval->current = prev;
+        env_release(local);
+        return result;
+    }
+    return value_null();
+}
+
+static HajimuRuntime g_plugin_runtime = {
+    .call = plugin_call_function,
+};
+
+// =============================================================================
 // 前方宣言
 // =============================================================================
 
@@ -1985,6 +2050,18 @@ static Value evaluate_import_plugin(Evaluator *eval, ASTNode *node,
         return value_null();
     }
     
+    // ランタイムコールバックをプラグインに注入
+    {
+        LoadedPlugin *lp = NULL;
+        for (int i = 0; i < eval->plugin_manager.count; i++) {
+            if (eval->plugin_manager.plugins[i].info == info) {
+                lp = &eval->plugin_manager.plugins[i];
+                break;
+            }
+        }
+        if (lp) plugin_set_runtime(lp, &g_plugin_runtime);
+    }
+    
     if (alias != NULL) {
         // 名前空間付きインポート: 辞書に関数を格納
         Value ns = value_dict();
@@ -2575,6 +2652,16 @@ static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int
             const char *expr_start = p;
             int brace_depth = 1;
             while (*p && brace_depth > 0) {
+                if (*p == '"') {
+                    // 文字列リテラル内の { } は補間対象外
+                    p++;
+                    while (*p && *p != '"') {
+                        if (*p == '\\' && *(p + 1)) p++;
+                        p++;
+                    }
+                    if (*p == '"') p++;
+                    continue;
+                }
                 if (*p == '{') brace_depth++;
                 else if (*p == '}') brace_depth--;
                 if (brace_depth > 0) p++;
@@ -2599,7 +2686,9 @@ static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int
             parser_init(&expr_parser, expr_str, "<interpolation>");
             ASTNode *expr = parse_expression(&expr_parser);
             
-            if (!parser_had_error(&expr_parser)) {
+            // 式が全テキストを消費し、エラーなく解析できた場合のみ補間
+            if (!parser_had_error(&expr_parser) && 
+                expr_parser.current.type == TOKEN_EOF) {
                 Value val = evaluate(eval, expr);
                 if (!eval->had_error) {
                     char *val_str = value_to_string(val);
@@ -2613,7 +2702,16 @@ static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int
                     free(val_str);
                 }
             } else {
-                runtime_error(eval, line, "文字列補間の式が不正です: %s", expr_str);
+                // 補間式として無効 → { と内容をリテラルとしてコピー
+                int total = 1 + expr_len + 1; // { + 内容 + }
+                while (length + total + 1 >= capacity) {
+                    capacity *= 2;
+                    result = realloc(result, capacity);
+                }
+                result[length++] = '{';
+                memcpy(result + length, expr_str, expr_len);
+                length += expr_len;
+                result[length++] = '}';
             }
             
             node_free(expr);

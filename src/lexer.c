@@ -24,6 +24,7 @@ static const KeywordEntry keywords[] = {
     {"関数", TOKEN_FUNCTION},
     {"終わり", TOKEN_END},
     {"戻す", TOKEN_RETURN},
+    {"返す", TOKEN_RETURN},
     
     // 変数
     {"変数", TOKEN_VARIABLE},

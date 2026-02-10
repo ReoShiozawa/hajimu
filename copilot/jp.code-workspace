@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../jp-document"
+		},
+		{
+			"path": "../../jp-extensions"
+		},
+		{
+			"path": "../../jp-pack/jp-web"
+		}
+	]
+}

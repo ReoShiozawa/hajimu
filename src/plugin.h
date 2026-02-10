@@ -19,6 +19,11 @@
 #include "value.h"
 #include <stdbool.h>
 
+// 前方宣言（hajimu_plugin.h で定義）
+typedef struct {
+    Value (*call)(Value *func, int argc, Value *argv);
+} HajimuRuntime;
+
 // =============================================================================
 // 統一プラグイン拡張子
 // =============================================================================
@@ -64,6 +69,10 @@ typedef HajimuPluginInfo *(*HajimuPluginInitFn)(void);
 
 // プラグイン初期化関数のシンボル名
 #define HAJIMU_PLUGIN_INIT_SYMBOL "hajimu_plugin_init"
+
+// ランタイム設定関数のシンボル名
+#define HAJIMU_PLUGIN_SET_RUNTIME_SYMBOL "hajimu_plugin_set_runtime"
+typedef void (*HajimuPluginSetRuntimeFn)(HajimuRuntime *);
 
 // =============================================================================
 // プラグインマネージャ（内部用）
@@ -120,5 +129,10 @@ bool plugin_resolve_hjp(const char *name, const char *caller,
  * プラグインを名前で検索
  */
 LoadedPlugin *plugin_find(PluginManager *mgr, const char *name);
+
+/**
+ * ロード済みプラグインにランタイムコールバックを注入
+ */
+void plugin_set_runtime(LoadedPlugin *plugin, HajimuRuntime *rt);
 
 #endif // PLUGIN_H

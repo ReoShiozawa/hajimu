@@ -259,4 +259,43 @@ typedef struct {
     int function_count;         // 関数の数
 } HajimuPluginInfo;
 
+// =============================================================================
+// ランタイムコールバック（プラグインからはじむ関数を呼び出す仕組み）
+// =============================================================================
+
+/**
+ * はじむランタイム — インタプリタが提供するコールバック群。
+ * プラグインは hajimu_call() を使って、はじむ側の関数を呼び出せる。
+ *
+ * 使い方:
+ *   // ルートハンドラとして受け取ったはじむ関数を呼び出す
+ *   Value result = hajimu_call(&callback_func, 1, &request_value);
+ */
+typedef struct {
+    /** はじむ関数 (VALUE_FUNCTION / VALUE_BUILTIN) を呼び出す */
+    Value (*call)(Value *func, int argc, Value *argv);
+} HajimuRuntime;
+
+/** グローバルランタイムポインタ（インタプリタが自動設定） */
+static HajimuRuntime *__hajimu_runtime = NULL;
+
+/**
+ * ランタイム設定（インタプリタ側から呼ばれる）
+ * プラグインは hajimu_plugin_set_runtime をエクスポートすることで
+ * インタプリタからランタイムを受け取れる。
+ */
+HAJIMU_PLUGIN_EXPORT void hajimu_plugin_set_runtime(HajimuRuntime *rt);
+
+/** はじむ関数を呼び出す便利マクロ */
+static inline Value hajimu_call(Value *func, int argc, Value *argv) {
+    if (__hajimu_runtime && __hajimu_runtime->call)
+        return __hajimu_runtime->call(func, argc, argv);
+    return hajimu_null();
+}
+
+/** ランタイムが利用可能かチェック */
+static inline bool hajimu_runtime_available(void) {
+    return __hajimu_runtime != NULL && __hajimu_runtime->call != NULL;
+}
+
 #endif // HAJIMU_PLUGIN_H

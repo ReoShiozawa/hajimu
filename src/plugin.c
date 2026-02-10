@@ -289,3 +289,17 @@ bool plugin_load(PluginManager *mgr, const char *path, HajimuPluginInfo **info_o
     
     return true;
 }
+
+// =============================================================================
+// ランタイムコールバック注入
+// =============================================================================
+
+void plugin_set_runtime(LoadedPlugin *plugin, HajimuRuntime *rt) {
+    if (!plugin || !plugin->handle || !rt) return;
+    
+    HajimuPluginSetRuntimeFn set_fn = (HajimuPluginSetRuntimeFn)
+        platform_dlsym(plugin->handle, HAJIMU_PLUGIN_SET_RUNTIME_SYMBOL);
+    if (set_fn) {
+        set_fn(rt);
+    }
+}
