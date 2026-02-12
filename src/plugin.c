@@ -208,9 +208,18 @@ bool plugin_resolve_hjp(const char *name, const char *caller,
     }
     
     // 4. グローバルプラグインディレクトリ: ~/.hajimu/plugins/
+    //    ~/.hajimu/plugins/<name>.hjp
+    //    ~/.hajimu/plugins/<name>/<name>.hjp
     const char *home = get_home_dir_plugin();
     if (home != NULL) {
         snprintf(try_path, sizeof(try_path), "%s/.hajimu/plugins/%s", home, hjp_name);
+        if (file_exists_plugin(try_path)) {
+            snprintf(out, out_size, "%s", try_path);
+            return true;
+        }
+        
+        snprintf(try_path, sizeof(try_path), "%s/.hajimu/plugins/%s/%s",
+                 home, base_name, hjp_name);
         if (file_exists_plugin(try_path)) {
             snprintf(out, out_size, "%s", try_path);
             return true;
