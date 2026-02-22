@@ -81,6 +81,9 @@ typedef struct {
     
     // 現在実行中のファイルパス（インポートの相対パス解決用）
     const char *current_file;
+
+    // ソースコード（エラー表示の行テキスト参照用）
+    const char *source_code;
     
     // インポート済みパスのキャッシュ（重複防止）
     char **imported_paths;
@@ -172,9 +175,10 @@ void evaluator_set_debug_mode(Evaluator *eval, bool enabled);
  * 実行時エラーを報告
  * @param eval 評価器
  * @param line 行番号
+ * @param col  列番号 (0 なら列表示なし)
  * @param format フォーマット文字列
  * @param ... 引数
  */
-void runtime_error(Evaluator *eval, int line, const char *format, ...);
+void runtime_error(Evaluator *eval, int line, int col, const char *format, ...);
 
 #endif // EVALUATOR_H

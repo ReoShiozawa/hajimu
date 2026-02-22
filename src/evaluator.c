@@ -7,6 +7,7 @@
 #include "http.h"
 #include "async.h"
 #include "package.h"
+#include "diag.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -835,31 +836,68 @@ void register_builtins(Evaluator *eval) {
 // エラー処理
 // =============================================================================
 
-void runtime_error(Evaluator *eval, int line, const char *format, ...) {
+void runtime_error(Evaluator *eval, int line, int col, const char *format, ...) {
     eval->had_error = true;
     eval->error_line = line;
-    
+    eval->error_column = col;
+
     va_list args;
     va_start(args, format);
-    
-    char message[256];
+    char message[512];
     vsnprintf(message, sizeof(message), format, args);
-    
     va_end(args);
-    
+
+    /* 後方互换: error_message をクリーンな形式で保持 */
     snprintf(eval->error_message, sizeof(eval->error_message),
-             "[%d行目] 実行時エラー: %s", line, message);
-    
-    fprintf(stderr, "%s\n", eval->error_message);
-    
-    // スタックトレースを出力
+             "%s (%d行目): %s", eval->current_file ? eval->current_file : "<不明>", line, message);
+
+    /* エラーカテゴリをメッセージ内容から自動分別 */
+    DiagKind kind = DIAG_RUNTIME;
+    if (strstr(message, "スタックオーバーフロー"))
+        kind = DIAG_OVERFLOW;
+    else if (strstr(message, "ゼロ除算"))
+        kind = DIAG_ZERO_DIV;
+    else if (strstr(message, "未定義") || strstr(message, "見つかりません")
+             || strstr(message, "定義されていません"))
+        kind = DIAG_NAME;
+    else if (strstr(message, "型") || strstr(message, "数値でなければ")
+             || strstr(message, "文字列でなければ") || strstr(message, "配列でなければ")
+             || strstr(message, "関数ではありません") || strstr(message, "呼び出せません")
+             || strstr(message, "型が"))
+        kind = DIAG_TYPE;
+    else if (strstr(message, "インデックス") || strstr(message, "範囲外")
+             || strstr(message, "範囲を超え"))
+        kind = DIAG_INDEX;
+    else if (strstr(message, "メンバー") || strstr(message, "属性")
+             || strstr(message, "プロパティ"))
+        kind = DIAG_ATTRIBUTE;
+
+    /* 視覚的なエラー表示 */
+    diag_report(kind,
+                eval->current_file,
+                eval->source_code,
+                line, col, col, message);
+
+    /* スタックトレース (最大20件を表示、超える場合は省略) */
     if (eval->call_stack_depth > 0) {
         fprintf(stderr, "スタックトレース:\n");
-        for (int i = eval->call_stack_depth - 1; i >= 0; i--) {
-            fprintf(stderr, "  %s() (%d行目)\n", 
-                    eval->call_stack[i].func_name,
-                    eval->call_stack[i].line);
+        /* 表示する件数の上限 */
+        int max_frames = 20;
+        int depth = eval->call_stack_depth;
+        int show  = depth < max_frames ? depth : max_frames;
+        for (int i = depth - 1; i >= depth - show; i--) {
+            const char *fname = eval->call_stack[i].func_name;
+            int   sline = eval->call_stack[i].line;
+            const char *file  = eval->current_file ? eval->current_file : "<不明>";
+            fprintf(stderr, "  %d: %s (%s:%d行目)\n",
+                    depth - 1 - i,
+                    fname ? fname : "<無名>",
+                    file, sline);
         }
+        if (depth > max_frames) {
+            fprintf(stderr, "  ... (他 %d 件省略)\n", depth - max_frames);
+        }
+        fputc('\n', stderr);
     }
 }
 
@@ -975,7 +1013,7 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
     // 再帰深度チェック
     eval->recursion_depth++;
     if (eval->recursion_depth > MAX_RECURSION_DEPTH) {
-        runtime_error(eval, node->location.line, "スタックオーバーフロー");
+        runtime_error(eval, node->location.line, node->location.column, "スタックオーバーフロー");
         eval->recursion_depth--;
         return value_null();
     }
@@ -1002,7 +1040,7 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
         case NODE_IDENTIFIER: {
             Value *val = env_get(eval->current, node->string_value);
             if (val == NULL) {
-                runtime_error(eval, node->location.line,
+                runtime_error(eval, node->location.line, node->location.column,
                              "未定義の変数: %s", node->string_value);
             } else {
                 result = *val;
@@ -1094,7 +1132,7 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
                     generator_add_value(eval->generator_target, yield_val);
                 }
             } else {
-                runtime_error(eval, node->location.line,
+                runtime_error(eval, node->location.line, node->location.column,
                              "'譲渡' は生成関数内でのみ使用できます");
             }
             break;
@@ -1141,7 +1179,7 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
         
         case NODE_SELF:
             if (eval->current_instance == NULL) {
-                runtime_error(eval, node->location.line,
+                runtime_error(eval, node->location.line, node->location.column,
                              "'自分' はメソッド内でのみ使用できます");
                 result = value_null();
             } else {
@@ -1165,7 +1203,7 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
             break;
             
         default:
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "未実装のノードタイプ: %s", node_type_name(node->type));
             break;
     }
@@ -1220,13 +1258,13 @@ static Value evaluate_binary(Evaluator *eval, ASTNode *node) {
             case TOKEN_STAR:    return value_number(l * r);
             case TOKEN_SLASH:
                 if (r == 0) {
-                    runtime_error(eval, node->location.line, "ゼロ除算");
+                    runtime_error(eval, node->location.line, node->location.column, "ゼロ除算");
                     return value_null();
                 }
                 return value_number(l / r);
             case TOKEN_PERCENT:
                 if (r == 0) {
-                    runtime_error(eval, node->location.line, "ゼロ除算");
+                    runtime_error(eval, node->location.line, node->location.column, "ゼロ除算");
                     return value_null();
                 }
                 return value_number(fmod(l, r));
@@ -1310,7 +1348,7 @@ static Value evaluate_binary(Evaluator *eval, ASTNode *node) {
         return value_bool(!value_equals(left, right));
     }
     
-    runtime_error(eval, node->location.line,
+    runtime_error(eval, node->location.line, node->location.column,
                  "不正な演算: %s %s %s",
                  value_type_name(left.type),
                  token_type_name(node->binary.operator),
@@ -1327,7 +1365,7 @@ static Value evaluate_unary(Evaluator *eval, ASTNode *node) {
             if (operand.type == VALUE_NUMBER) {
                 return value_number(-operand.number);
             }
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "数値以外に単項マイナスは使えません");
             return value_null();
             
@@ -1335,7 +1373,7 @@ static Value evaluate_unary(Evaluator *eval, ASTNode *node) {
             return value_bool(!value_is_truthy(operand));
             
         default:
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "未知の単項演算子");
             return value_null();
     }
@@ -1381,7 +1419,7 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
             Value *array_ptr = env_get(eval->current, arr_name);
             
             if (array_ptr == NULL || array_ptr->type != VALUE_ARRAY) {
-                runtime_error(eval, node->location.line,
+                runtime_error(eval, node->location.line, node->location.column,
                              "%sは配列ではありません", arr_name);
                 return value_null();
             }
@@ -1398,13 +1436,13 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
                 Value index = evaluate(eval, node->call.arguments[1]);
                 if (eval->had_error) return value_null();
                 if (index.type != VALUE_NUMBER) {
-                    runtime_error(eval, node->location.line,
+                    runtime_error(eval, node->location.line, node->location.column,
                                  "インデックスは数値でなければなりません");
                     return value_null();
                 }
                 int idx = (int)index.number;
                 if (idx < 0 || idx >= array_ptr->array.length) {
-                    runtime_error(eval, node->location.line,
+                    runtime_error(eval, node->location.line, node->location.column,
                                  "インデックスが範囲外です");
                     return value_null();
                 }
@@ -1434,7 +1472,7 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
                     return value_null();
                 }
                 if (spread_val.type != VALUE_ARRAY) {
-                    runtime_error(eval, arg_node->location.line, "スプレッド演算子は配列にのみ使用できます");
+                    runtime_error(eval, arg_node->location.line, arg_node->location.column, "スプレッド演算子は配列にのみ使用できます");
                     free(args);
                     return value_null();
                 }
@@ -1472,11 +1510,11 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
         int max = callee.builtin.max_args;
         
         if (effective_arg_count < min) {
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "%sには少なくとも%d個の引数が必要です",
                          callee.builtin.name, min);
         } else if (max >= 0 && effective_arg_count > max) {
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "%sの引数は最大%d個です",
                          callee.builtin.name, max);
         } else {
@@ -1520,13 +1558,13 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
         if (effective_arg_count < min_required || 
             (!has_variadic && effective_arg_count > expected_count)) {
             if (min_required == expected_count) {
-                runtime_error(eval, node->location.line,
+                runtime_error(eval, node->location.line, node->location.column,
                              "%sには%d個の引数が必要です（%d個渡されました）",
                              func_name,
                              expected_count,
                              effective_arg_count);
             } else {
-                runtime_error(eval, node->location.line,
+                runtime_error(eval, node->location.line, node->location.column,
                              "%sには%d〜%d個の引数が必要です（%d個渡されました）",
                              func_name,
                              min_required,
@@ -1629,7 +1667,7 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
         }
     }
     else {
-        runtime_error(eval, node->location.line,
+        runtime_error(eval, node->location.line, node->location.column,
                      "呼び出し可能ではありません");
     }
     
@@ -1649,7 +1687,7 @@ static Value evaluate_index(Evaluator *eval, ASTNode *node) {
     
     if (array.type == VALUE_ARRAY) {
         if (index.type != VALUE_NUMBER) {
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "配列のインデックスは数値でなければなりません");
             return value_null();
         }
@@ -1658,7 +1696,7 @@ static Value evaluate_index(Evaluator *eval, ASTNode *node) {
         // 負のインデックス: -1 = 最後, -2 = 最後から2番目...
         if (idx < 0) idx += array.array.length;
         if (idx < 0 || idx >= array.array.length) {
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "インデックスが範囲外です: %d（長さ: %d）",
                          (int)index.number, array.array.length);
             return value_null();
@@ -1669,7 +1707,7 @@ static Value evaluate_index(Evaluator *eval, ASTNode *node) {
     
     if (array.type == VALUE_STRING) {
         if (index.type != VALUE_NUMBER) {
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "文字列のインデックスは数値でなければなりません");
             return value_null();
         }
@@ -1680,7 +1718,7 @@ static Value evaluate_index(Evaluator *eval, ASTNode *node) {
         // 負のインデックス対応
         if (idx < 0) idx += len;
         if (idx < 0 || idx >= len) {
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "インデックスが範囲外です: %d（長さ: %d）",
                          (int)index.number, len);
             return value_null();
@@ -1691,7 +1729,7 @@ static Value evaluate_index(Evaluator *eval, ASTNode *node) {
     
     if (array.type == VALUE_DICT) {
         if (index.type != VALUE_STRING) {
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "辞書のキーは文字列でなければなりません");
             return value_null();
         }
@@ -1699,7 +1737,7 @@ static Value evaluate_index(Evaluator *eval, ASTNode *node) {
         return dict_get(&array, index.string.data);
     }
     
-    runtime_error(eval, node->location.line,
+    runtime_error(eval, node->location.line, node->location.column,
                  "インデックスアクセスは配列、文字列、辞書にのみ使用できます");
     return value_null();
 }
@@ -1718,7 +1756,7 @@ static Value evaluate_var_decl(Evaluator *eval, ASTNode *node) {
     Value copy = value_copy(value);
     if (!env_define(eval->current, node->var_decl.name, copy, node->var_decl.is_const)) {
         if (env_is_const(eval->current, node->var_decl.name)) {
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "定数 %s は再定義できません", node->var_decl.name);
         }
         value_free(&copy);  // 失敗した場合はコピーを解放
@@ -1738,7 +1776,7 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
         if (node->assign.target->type == NODE_IDENTIFIER) {
             Value *ptr = env_get(eval->current, node->assign.target->string_value);
             if (ptr == NULL) {
-                runtime_error(eval, node->location.line,
+                runtime_error(eval, node->location.line, node->location.column,
                              "未定義の変数: %s", node->assign.target->string_value);
                 return value_null();
             }
@@ -1747,12 +1785,12 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
             current = evaluate_index(eval, node->assign.target);
             if (eval->had_error) return value_null();
         } else {
-            runtime_error(eval, node->location.line, "不正な代入先");
+            runtime_error(eval, node->location.line, node->location.column, "不正な代入先");
             return value_null();
         }
         
         if (current.type != VALUE_NUMBER || value.type != VALUE_NUMBER) {
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "複合代入は数値にのみ使用できます");
             return value_null();
         }
@@ -1769,14 +1807,14 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
                 break;
             case TOKEN_SLASH_ASSIGN:
                 if (value.number == 0) {
-                    runtime_error(eval, node->location.line, "ゼロ除算");
+                    runtime_error(eval, node->location.line, node->location.column, "ゼロ除算");
                     return value_null();
                 }
                 value = value_number(current.number / value.number);
                 break;
             case TOKEN_PERCENT_ASSIGN:
                 if (value.number == 0) {
-                    runtime_error(eval, node->location.line, "ゼロ除算");
+                    runtime_error(eval, node->location.line, node->location.column, "ゼロ除算");
                     return value_null();
                 }
                 value = value_number(fmod(current.number, value.number));
@@ -1794,7 +1832,7 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
         const char *name = node->assign.target->string_value;
         
         if (env_is_const(eval->current, name)) {
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "定数 %s には代入できません", name);
             return value_null();
         }
@@ -1815,7 +1853,7 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
         }
         
         if (target_ptr == NULL) {
-            runtime_error(eval, node->location.line, "配列または辞書が見つかりません");
+            runtime_error(eval, node->location.line, node->location.column, "配列または辞書が見つかりません");
             return value_null();
         }
         
@@ -1825,14 +1863,14 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
         if (target_ptr->type == VALUE_ARRAY) {
             // 配列の場合
             if (index.type != VALUE_NUMBER) {
-                runtime_error(eval, node->location.line,
+                runtime_error(eval, node->location.line, node->location.column,
                              "配列のインデックスは数値でなければなりません");
                 return value_null();
             }
             
             int idx = (int)index.number;
             if (!array_set(target_ptr, idx, value)) {
-                runtime_error(eval, node->location.line,
+                runtime_error(eval, node->location.line, node->location.column,
                              "インデックスが範囲外です: %d", idx);
                 return value_null();
             }
@@ -1840,7 +1878,7 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
         else if (target_ptr->type == VALUE_DICT) {
             // 辞書の場合
             if (index.type != VALUE_STRING) {
-                runtime_error(eval, node->location.line,
+                runtime_error(eval, node->location.line, node->location.column,
                              "辞書のキーは文字列でなければなりません");
                 return value_null();
             }
@@ -1848,7 +1886,7 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
             dict_set(target_ptr, index.string.data, value);
         }
         else {
-            runtime_error(eval, node->location.line, "配列または辞書が見つかりません");
+            runtime_error(eval, node->location.line, node->location.column, "配列または辞書が見つかりません");
             return value_null();
         }
     }
@@ -1886,12 +1924,12 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
                 }
             }
         } else {
-            runtime_error(eval, node->location.line, "メンバー代入はインスタンスにのみ使用できます");
+            runtime_error(eval, node->location.line, node->location.column, "メンバー代入はインスタンスにのみ使用できます");
             return value_null();
         }
     }
     else {
-        runtime_error(eval, node->location.line, "不正な代入先");
+        runtime_error(eval, node->location.line, node->location.column, "不正な代入先");
         return value_null();
     }
     
@@ -1946,7 +1984,7 @@ static Value evaluate_for(Evaluator *eval, ASTNode *node) {
     if (eval->had_error) return value_null();
     
     if (start.type != VALUE_NUMBER || end.type != VALUE_NUMBER) {
-        runtime_error(eval, node->location.line,
+        runtime_error(eval, node->location.line, node->location.column,
                      "繰り返しの範囲は数値でなければなりません");
         return value_null();
     }
@@ -1959,7 +1997,7 @@ static Value evaluate_for(Evaluator *eval, ASTNode *node) {
         Value step_val = evaluate(eval, node->for_stmt.step);
         if (eval->had_error) return value_null();
         if (step_val.type != VALUE_NUMBER) {
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "ステップ値は数値でなければなりません");
             return value_null();
         }
@@ -2041,7 +2079,7 @@ static Value evaluate_import_plugin(Evaluator *eval, ASTNode *node,
     // プラグインを読み込む
     HajimuPluginInfo *info = NULL;
     if (!plugin_load(&eval->plugin_manager, resolved_path, &info)) {
-        runtime_error(eval, node->location.line,
+        runtime_error(eval, node->location.line, node->location.column,
                      "プラグイン '%s' の読み込みに失敗しました", resolved_path);
         return value_null();
     }
@@ -2106,7 +2144,7 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
                                resolved, sizeof(resolved))) {
             return evaluate_import_plugin(eval, node, resolved);
         }
-        runtime_error(eval, node->location.line,
+        runtime_error(eval, node->location.line, node->location.column,
                      "プラグイン '%s' が見つかりません", module_path);
         return value_null();
     }
@@ -2188,7 +2226,7 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
     }
     
     if (!found) {
-        runtime_error(eval, node->location.line,
+        runtime_error(eval, node->location.line, node->location.column,
                      "モジュール '%s' が見つかりません\n"
                      "  ファイルパスまたはパッケージ名を確認してください\n"
                      "  パッケージの場合: hajimu パッケージ 追加 ユーザー/リポジトリ",
@@ -2211,7 +2249,7 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
     // ファイルを読み込む
     FILE *file = fopen(resolved_path, "rb");
     if (file == NULL) {
-        runtime_error(eval, node->location.line,
+        runtime_error(eval, node->location.line, node->location.column,
                      "モジュール '%s' を読み込めません", resolved_path);
         return value_null();
     }
@@ -2234,7 +2272,7 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
     if (parser.had_error) {
         node_free(program);
         free(source);
-        runtime_error(eval, node->location.line,
+        runtime_error(eval, node->location.line, node->location.column,
                      "モジュール '%s' のパースに失敗しました", resolved_path);
         return value_null();
     }
@@ -2306,7 +2344,7 @@ static Value evaluate_class_def(Evaluator *eval, ASTNode *node) {
     if (node->class_def.parent_name != NULL) {
         Value *parent_ptr = env_get(eval->current, node->class_def.parent_name);
         if (parent_ptr == NULL || parent_ptr->type != VALUE_CLASS) {
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "'%s' はクラスではありません", node->class_def.parent_name);
             return value_null();
         }
@@ -2328,7 +2366,7 @@ static Value evaluate_new(Evaluator *eval, ASTNode *node) {
     // クラスを取得
     Value *class_ptr = env_get(eval->current, node->new_expr.class_name);
     if (class_ptr == NULL || class_ptr->type != VALUE_CLASS) {
-        runtime_error(eval, node->location.line,
+        runtime_error(eval, node->location.line, node->location.column,
                      "'%s' はクラスではありません", node->new_expr.class_name);
         return value_null();
     }
@@ -2348,7 +2386,7 @@ static Value evaluate_new(Evaluator *eval, ASTNode *node) {
         
         // 引数の数をチェック
         if (node->new_expr.arg_count != init->method.param_count) {
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "初期化メソッドは %d 個の引数が必要です（%d 個渡されました）",
                          init->method.param_count, node->new_expr.arg_count);
             return value_null();
@@ -2408,14 +2446,14 @@ static Value evaluate_member(Evaluator *eval, ASTNode *node) {
         strcmp(node->member.object->string_value, "親") == 0) {
         // 現在のインスタンスから親クラスを探す
         if (eval->current_instance == NULL) {
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "'親' はメソッド内でのみ使用できます");
             return value_null();
         }
         
         Value *instance = eval->current_instance;
         if (instance->type != VALUE_INSTANCE || instance->instance.class_ref == NULL) {
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "インスタンスが無効です");
             return value_null();
         }
@@ -2423,7 +2461,7 @@ static Value evaluate_member(Evaluator *eval, ASTNode *node) {
         // 現在のクラスの親クラスを取得
         Value *class_ref = instance->instance.class_ref;
         if (class_ref->type != VALUE_CLASS || class_ref->class_value.parent == NULL) {
-            runtime_error(eval, node->location.line,
+            runtime_error(eval, node->location.line, node->location.column,
                          "親クラスがありません");
             return value_null();
         }
@@ -2460,7 +2498,7 @@ static Value evaluate_member(Evaluator *eval, ASTNode *node) {
             }
         }
         
-        runtime_error(eval, node->location.line,
+        runtime_error(eval, node->location.line, node->location.column,
                      "親クラスに '%s' というメソッドがありません", member_name);
         return value_null();
     }
@@ -2516,7 +2554,7 @@ static Value evaluate_member(Evaluator *eval, ASTNode *node) {
             }
         }
         
-        runtime_error(eval, node->location.line,
+        runtime_error(eval, node->location.line, node->location.column,
                      "インスタンスに '%s' というフィールドまたはメソッドがありません",
                      member_name);
         return value_null();
@@ -2528,7 +2566,7 @@ static Value evaluate_member(Evaluator *eval, ASTNode *node) {
         if (val.type != VALUE_NULL) {
             return value_copy(val);
         }
-        runtime_error(eval, node->location.line,
+        runtime_error(eval, node->location.line, node->location.column,
                      "辞書に '%s' というキーがありません", member_name);
         return value_null();
     }
@@ -2542,13 +2580,13 @@ static Value evaluate_member(Evaluator *eval, ASTNode *node) {
                 return value_function(method, eval->current);
             }
         }
-        runtime_error(eval, node->location.line,
+        runtime_error(eval, node->location.line, node->location.column,
                      "クラス '%s' に静的メソッド '%s' がありません",
                      class_def->class_def.name, member_name);
         return value_null();
     }
     
-    runtime_error(eval, node->location.line,
+    runtime_error(eval, node->location.line, node->location.column,
                  "メンバーアクセスはインスタンス、辞書、またはクラスに対してのみ使用できます");
     return value_null();
 }
@@ -2668,7 +2706,7 @@ static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int
             }
             
             if (brace_depth != 0) {
-                runtime_error(eval, line, "文字列補間の '}' が閉じられていません");
+                runtime_error(eval, line, 0, "文字列補間の '}' が閉じられていません");
                 free(result);
                 return value_null();
             }
@@ -2855,7 +2893,7 @@ static Value evaluate_foreach(Evaluator *eval, ASTNode *node) {
             }
         }
     } else {
-        runtime_error(eval, node->location.line,
+        runtime_error(eval, node->location.line, node->location.column,
                      "反復できるのは配列、文字列、辞書のみです");
     }
     
@@ -2965,7 +3003,7 @@ static Value evaluate_list_comprehension(Evaluator *eval, ASTNode *node) {
             }
         }
     } else {
-        runtime_error(eval, node->location.line,
+        runtime_error(eval, node->location.line, node->location.column,
                      "リスト内包表記で反復できるのは配列、文字列、辞書のみです");
         goto cleanup;
     }
@@ -3632,7 +3670,7 @@ static Value builtin_assert(int argc, Value *argv) {
             msg = argv[1].string.data;
         }
         if (g_eval) {
-            runtime_error(g_eval, 0, "%s", msg);
+            runtime_error(g_eval, 0, 0, "%s", msg);
         } else {
             fprintf(stderr, "表明失敗: %s\n", msg);
         }

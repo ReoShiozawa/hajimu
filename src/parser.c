@@ -5,6 +5,7 @@
  */
 
 #include "parser.h"
+#include "diag.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -129,8 +130,33 @@ static void consume(Parser *parser, TokenType type, const char *message) {
         advance(parser);
         return;
     }
-    
-    error(parser, "%s（'%s'が必要です）", message, token_type_name(type));
+
+    /* 現在のトークンを見せたクリーンなメッセージを作る */
+    char msg[256];
+    if (parser->current.type == TOKEN_EOF) {
+        snprintf(msg, sizeof(msg), "%s （ファイルが最後まで達しました）", message);
+    } else {
+        /* トークン文字列から制御文字・改行をエスケープする */
+        char tok_repr[64];
+        int tok_len = parser->current.length;
+        if (tok_len <= 0) {
+            snprintf(tok_repr, sizeof(tok_repr), "（不明なトークン）");
+        } else {
+            int wi = 0;
+            for (int ti = 0; ti < tok_len && wi < 60; ti++) {
+                unsigned char c = (unsigned char)parser->current.start[ti];
+                if (c == '\n') { tok_repr[wi++] = '\\'; tok_repr[wi++] = 'n'; }
+                else if (c == '\r') { tok_repr[wi++] = '\\'; tok_repr[wi++] = 'r'; }
+                else if (c == '\t') { tok_repr[wi++] = '\\'; tok_repr[wi++] = 't'; }
+                else if (c < 0x20) { wi += snprintf(tok_repr + wi, sizeof(tok_repr) - wi, "\\x%02x", c); }
+                else tok_repr[wi++] = (char)c;
+            }
+            tok_repr[wi] = '\0';
+        }
+        snprintf(msg, sizeof(msg), "%s （実際には '%s' があります）",
+                 message, tok_repr);
+    }
+    error(parser, "%s", msg);
 }
 
 // =============================================================================
@@ -141,22 +167,39 @@ static void error_at(Parser *parser, Token *token, const char *message) {
     if (parser->panic_mode) return;
     parser->panic_mode = true;
     parser->had_error = true;
-    
+
+    /* backward compat: エラーメッセージを文字列としても保持 */
     snprintf(parser->error_message, sizeof(parser->error_message),
-             "[%d行目] エラー", token->line);
-    
-    if (token->type == TOKEN_EOF) {
-        strcat(parser->error_message, " ファイル終端で");
-    } else if (token->type != TOKEN_ERROR) {
-        char temp[64];
-        snprintf(temp, sizeof(temp), " '%.*s' の付近で", token->length, token->start);
-        strcat(parser->error_message, temp);
+             "[%d行目] 構文エラー: %s", token->line, message);
+
+    /* EOF トークンの場合は前トークンの位置でソース行を表示する */
+    Token *display_token = token;
+    Token prev_for_eof;
+    if (token->type == TOKEN_EOF && parser->previous.type != TOKEN_EOF) {
+        prev_for_eof = parser->previous;
+        display_token = &prev_for_eof;
     }
-    
-    strcat(parser->error_message, ": ");
-    strcat(parser->error_message, message);
-    
-    fprintf(stderr, "%s\n", parser->error_message);
+
+    /* トークン位置から強調範囲を計算 */
+    int col     = display_token->column > 0 ? display_token->column : 1;
+    int col_end = col;
+    if (display_token->type != TOKEN_EOF && display_token->type != TOKEN_ERROR
+            && display_token->length > 0) {
+        /* UTF-8 文字数でハイライト幅を決める */
+        int chars = diag_utf8_strlen(display_token->start, display_token->length);
+        col_end = col + (chars > 0 ? chars - 1 : 0);
+    }
+
+    /* ソース全体は lexer 経由で参照 */
+    const char *source = parser->lexer ? parser->lexer->source : NULL;
+
+    diag_report(DIAG_SYNTAX,
+                parser->filename,
+                source,
+                display_token->line,
+                col,
+                col_end,
+                message);
 }
 
 static void error(Parser *parser, const char *format, ...) {

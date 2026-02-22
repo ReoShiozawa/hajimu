@@ -97,6 +97,9 @@ static int run_file(const char *path, bool debug_mode, int script_argc, char **s
     // 現在のファイルパスを設定（インポートの相対パス解決用）
     eval->current_file = path;
     
+    // ソースコードを設定（エラー表示の行テキスト参照用）
+    eval->source_code = source;
+    
     // コマンドライン引数を「引数」変数として設定
     Value args_array = value_array_with_capacity(script_argc > 0 ? script_argc : 1);
     for (int i = 0; i < script_argc; i++) {

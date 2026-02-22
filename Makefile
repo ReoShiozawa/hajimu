@@ -23,6 +23,7 @@ SOURCES = $(SRC_DIR)/main.c \
           $(SRC_DIR)/value.c \
           $(SRC_DIR)/environment.c \
           $(SRC_DIR)/evaluator.c \
+          $(SRC_DIR)/diag.c \
           $(SRC_DIR)/http.c \
           $(SRC_DIR)/async.c \
           $(SRC_DIR)/package.c \
@@ -58,6 +59,7 @@ $(BUILD_DIR)/parser.o: $(SRC_DIR)/parser.c $(SRC_DIR)/parser.h $(SRC_DIR)/lexer.
 $(BUILD_DIR)/value.o: $(SRC_DIR)/value.c $(SRC_DIR)/value.h
 $(BUILD_DIR)/environment.o: $(SRC_DIR)/environment.c $(SRC_DIR)/environment.h $(SRC_DIR)/value.h
 $(BUILD_DIR)/evaluator.o: $(SRC_DIR)/evaluator.c $(SRC_DIR)/evaluator.h $(SRC_DIR)/ast.h $(SRC_DIR)/environment.h $(SRC_DIR)/http.h $(SRC_DIR)/async.h
+$(BUILD_DIR)/diag.o: $(SRC_DIR)/diag.c $(SRC_DIR)/diag.h $(SRC_DIR)/lexer.h
 $(BUILD_DIR)/http.o: $(SRC_DIR)/http.c $(SRC_DIR)/http.h $(SRC_DIR)/value.h
 $(BUILD_DIR)/async.o: $(SRC_DIR)/async.c $(SRC_DIR)/async.h $(SRC_DIR)/evaluator.h $(SRC_DIR)/value.h
 $(BUILD_DIR)/package.o: $(SRC_DIR)/package.c $(SRC_DIR)/package.h
