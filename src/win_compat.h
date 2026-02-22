@@ -134,6 +134,32 @@ static void win_wsa_cleanup(void)
     WSACleanup();
 }
 
+/* ── コンソール UTF-8 設定 ─────────────────────────── */
+/* Windows コンソールを UTF-8 モードに設定し、2文化けを防ぐ。         */
+/* また ANSI/VT100 エスケープシーケンス（色彩表示）も有効化する。   */
+static void win_console_setup(void) __attribute__((constructor));
+static void win_console_setup(void)
+{
+    /* CP_UTF8 = 65001 */
+    SetConsoleOutputCP(65001);
+    SetConsoleCP(65001);
+
+    /* ENABLE_VIRTUAL_TERMINAL_PROCESSING (= 0x0004):
+     * Windows Terminal および VT100対応ターミナルで ANSI エスケープを使えるようにする */
+    HANDLE hout = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hout != INVALID_HANDLE_VALUE) {
+        DWORD mode = 0;
+        if (GetConsoleMode(hout, &mode))
+            SetConsoleMode(hout, mode | 0x0004);
+    }
+    HANDLE herr = GetStdHandle(STD_ERROR_HANDLE);
+    if (herr != INVALID_HANDLE_VALUE) {
+        DWORD mode = 0;
+        if (GetConsoleMode(herr, &mode))
+            SetConsoleMode(herr, mode | 0x0004);
+    }
+}
+
 #endif /* _WIN32 */
 
 #endif /* WIN_COMPAT_H */

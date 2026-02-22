@@ -21,11 +21,19 @@
 #  define TokenType  _winnt_TokenType_collision_guard_
 #  include <windows.h>   /* GetModuleFileNameA, FindFirstFile等 */
 #  undef TokenType
-#  include <direct.h>    /* _mkdir */
-#  define mkdir(p,m)  _mkdir(p)  /* Windows mkdir はモード引数なし */
-/* pclose() の戻り値は終了コードが上位バイトに格納されない (直接終了コード) */
+#  include <direct.h>    /* _mkdir, _rmdir */
+#  define mkdir(p,m)  _mkdir(p)   /* Windows mkdir はモード引数なし */
+#  ifndef rmdir
+#    define rmdir(p)  _rmdir(p)   /* 安全のため明示定義 */
+#  endif
+/* pclose() の戒り値は終了コードが上位バイトに格納されない (直接終了コード) */
 #  ifndef WEXITSTATUS
 #    define WEXITSTATUS(s)  (s)
+#  endif
+/* POSIX unlink エイリアス */
+#  include <io.h>   /* _unlink → unlink, _access など */
+#  ifndef unlink
+#    define unlink(p)  _unlink(p)
 #  endif
 /* Windows 用 DIR エミュレーション (win_compat2.h と同等) */
 #  include "win_compat2.h"
@@ -307,7 +315,9 @@ bool package_read_manifest(const char *path, PackageManifest *manifest) {
  * hajimu.json を書き出し
  */
 static bool write_manifest(const char *path, const PackageManifest *manifest) {
-    FILE *f = fopen(path, "w");
+    /* "wb": バイナリモードで書たることで Windows の CRLF 変換を防ぎ、
+     * UTF-8 JSON として常に LF 改行で保存する。 */
+    FILE *f = fopen(path, "wb");
     if (!f) return false;
     
     fprintf(f, "{\n");
@@ -417,22 +427,40 @@ static void normalize_github_url(const char *input, char *url, int max_len) {
  */
 static int git_clone(const char *url, const char *dest) {
     char cmd[PACKAGE_MAX_PATH * 2];
+
+#ifdef _WIN32
+    /* where コマンドで git の存在を事前確認 */
+    if (system("where git >nul 2>&1") != 0) {
+        fprintf(stderr, "エラー: git が見つかりません\n");
+        fprintf(stderr, "  Git for Windows をインストールしてください。\n");
+        fprintf(stderr, "  https://git-scm.com/download/win\n");
+        return 1;
+    }
+#else
+    /* Unix系: which で確認 */
+    if (system("which git >/dev/null 2>&1") != 0) {
+        fprintf(stderr, "エラー: git が見つかりません。git をインストールしてください。\n");
+        return 1;
+    }
+#endif
+
     snprintf(cmd, sizeof(cmd), "git clone --depth 1 -q \"%s\" \"%s\" 2>&1", url, dest);
-    
+
     FILE *pipe = popen(cmd, "r");
     if (!pipe) {
         fprintf(stderr, "エラー: git clone を実行できません\n");
         return 1;
     }
-    
+
     char output[1024];
+    bool any_output = false;
     while (fgets(output, sizeof(output), pipe)) {
-        // エラー出力を表示
-        if (strstr(output, "fatal:") || strstr(output, "error:")) {
-            fprintf(stderr, "%s", output);
-        }
+        /* 全てのエラー出力を表示（git メッセージや CMD エラーも含む） */
+        fprintf(stderr, "  %s", output);
+        any_output = true;
     }
-    
+    if (any_output) fflush(stderr);
+
     int status = pclose(pipe);
     return WEXITSTATUS(status);
 }
