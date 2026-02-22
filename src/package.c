@@ -11,12 +11,31 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <dirent.h>
-#include <unistd.h>
 #include <errno.h>
 
-#ifdef __APPLE__
-#include <mach-o/dyld.h>
+#ifdef _WIN32
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+/* TokenType collision guard: winnt.h defines TokenType as enum value */
+#  define TokenType  _winnt_TokenType_collision_guard_
+#  include <windows.h>   /* GetModuleFileNameA, FindFirstFile等 */
+#  undef TokenType
+#  include <direct.h>    /* _mkdir */
+#  define mkdir(p,m)  _mkdir(p)  /* Windows mkdir はモード引数なし */
+/* pclose() の戻り値は終了コードが上位バイトに格納されない (直接終了コード) */
+#  ifndef WEXITSTATUS
+#    define WEXITSTATUS(s)  (s)
+#  endif
+/* Windows 用 DIR エミュレーション (win_compat2.h と同等) */
+#  include "win_compat2.h"
+#elif defined(__APPLE__)
+#  include <mach-o/dyld.h>
+#  include <unistd.h>
+#  include <dirent.h>
+#else
+#  include <unistd.h>
+#  include <dirent.h>
 #endif
 
 // =============================================================================
@@ -91,9 +110,16 @@ static int remove_directory(const char *path) {
  * ホームディレクトリを取得
  */
 static const char *get_home_dir(void) {
+#ifdef _WIN32
+    const char *home = getenv("USERPROFILE");
+    if (!home) home = getenv("HOMEPATH");
+    if (!home) home = "C:\\Users\\Public";
+    return home;
+#else
     const char *home = getenv("HOME");
     if (!home) home = "/tmp";
     return home;
+#endif
 }
 
 /**
@@ -582,6 +608,10 @@ int package_install(const char *name_or_url) {
                 #ifdef __APPLE__
                 uint32_t self_size = sizeof(self_path);
                 _NSGetExecutablePath(self_path, &self_size);
+                #elif defined(_WIN32)
+                GetModuleFileNameA(NULL, self_path, (DWORD)sizeof(self_path));
+                /* バックスラッシュをスラッシュに統一 */
+                for (char *p = self_path; *p; p++) { if (*p == '\\') *p = '/'; }
                 #elif defined(__linux__)
                 readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
                 #endif

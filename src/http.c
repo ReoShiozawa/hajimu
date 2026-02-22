@@ -10,13 +10,20 @@
 #include <string.h>
 #include <ctype.h>
 #include <math.h>
-#include <curl/curl.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <unistd.h>
-#include <signal.h>
-#include <errno.h>
-#include <fcntl.h>
+
+/* ── プラットフォーム依存ヘッダー ─────────────────────────── */
+#ifdef _WIN32
+#  include "win_compat.h"   /* Winsock2 + usleep + gettimeofday + close→closesocket */
+#  include <curl/curl.h>    /* Windows 用 libcurl (DLL) */
+#else
+#  include <curl/curl.h>
+#  include <sys/socket.h>
+#  include <netinet/in.h>
+#  include <unistd.h>
+#  include <signal.h>
+#  include <errno.h>
+#  include <fcntl.h>
+#endif
 
 // =============================================================================
 // JSON パーサー
@@ -913,7 +920,11 @@ Value builtin_http_serve(int argc, Value *argv) {
     
     // ポート再利用を許可
     int opt = 1;
+#ifdef _WIN32
+    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
+#else
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#endif
     
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
@@ -943,7 +954,11 @@ Value builtin_http_serve(int argc, Value *argv) {
     struct timeval tv;
     tv.tv_sec = timeout_sec;
     tv.tv_usec = 0;
+#ifdef _WIN32
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
+#else
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
     
     // 接続待ち
     struct sockaddr_in client_addr;

@@ -14,21 +14,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/time.h>
 #include <errno.h>
 
-// WebSocket用
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <arpa/inet.h>
-#include <fcntl.h>
-
-// SSL/TLS用（wssサポート）
-#ifdef __APPLE__
-#include <Security/Security.h>
-#include <Security/SecureTransport.h>
+/* ── プラットフォーム依存ヘッダー ─────────────────────────── */
+#ifdef _WIN32
+#  include "win_compat.h"   /* Winsock2 + usleep + gettimeofday + close→closesocket */
+#else
+#  include <unistd.h>
+#  include <sys/time.h>
+#  include <sys/socket.h>
+#  include <netinet/in.h>
+#  include <netdb.h>
+#  include <arpa/inet.h>
+#  include <fcntl.h>
+   /* SSL/TLS用（wssサポート: macOS のみ） */
+#  ifdef __APPLE__
+#    include <Security/Security.h>
+#    include <Security/SecureTransport.h>
+#  endif
 #endif
 
 // =============================================================================
@@ -1977,7 +1980,11 @@ static int ws_recv_frame(int sockfd, char *buffer, int buf_size, double timeout_
     struct timeval tv;
     tv.tv_sec = (long)timeout_sec;
     tv.tv_usec = (long)((timeout_sec - (long)timeout_sec) * 1000000);
+#ifdef _WIN32
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
+#else
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
     
     unsigned char header[2];
     int n = (int)recv(sockfd, header, 2, 0);

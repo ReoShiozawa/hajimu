@@ -14,11 +14,18 @@
 #include <stdarg.h>
 #include <math.h>
 #include <time.h>
-#include <unistd.h>
-#include <regex.h>
 #include <errno.h>
-#include <sys/stat.h>
-#include <dirent.h>
+
+/* ── プラットフォーム依存ヘッダー ───────────────────────────── */
+#ifdef _WIN32
+#  include "win_regex.h"   /* POSIX regex エミュレーション */
+#  include "win_compat2.h" /* dirent, usleep, realpath, setenv, mkdir */
+#else
+#  include <unistd.h>
+#  include <regex.h>
+#  include <sys/stat.h>
+#  include <dirent.h>
+#endif
 
 // グローバルevaluatorポインタ（高階関数・toStringプロトコル用）
 static Evaluator *g_eval = NULL;

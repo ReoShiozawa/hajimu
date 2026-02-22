@@ -108,13 +108,69 @@ rebuild: clean all
 # ヘルプ
 help:
 	@echo "使用可能なターゲット:"
-	@echo "  all      - ビルド（デフォルト）"
-	@echo "  run      - REPL起動"
-	@echo "  hello    - Hello Worldサンプル実行"
-	@echo "  test     - テスト実行"
-	@echo "  clean    - クリーンアップ"
-	@echo "  debug    - デバッグビルド"
-	@echo "  release  - リリースビルド"
-	@echo "  help     - このヘルプを表示"
+	@echo "  all               - ビルド（デフォルト）"
+	@echo "  run               - REPL起動"
+	@echo "  hello             - Hello Worldサンプル実行"
+	@echo "  test              - テスト実行"
+	@echo "  clean             - クリーンアップ"
+	@echo "  debug             - デバッグビルド"
+	@echo "  release           - リリースビルド"
+	@echo "  windows           - Windows向けクロスコンパイル (hajimu.exe)"
+	@echo "  windows-installer - Windows インストーラー .exe を生成 (NSIS必要)"
+	@echo "  help              - このヘルプを表示"
 
-.PHONY: all run hello factorial fibonacci test clean debug release rebuild help
+# =============================================================================
+# Windows クロスコンパイル (macOS/Linux ホストから MinGW-w64 を使用)
+# =============================================================================
+
+WIN_CC      = x86_64-w64-mingw32-gcc
+WIN_CFLAGS  = -Wall -Wextra -std=c11 -O2 -D_WIN32_WINNT=0x0601
+WIN_BUILD   = win/build
+WIN_DIST    = win/dist
+WIN_TARGET  = $(WIN_DIST)/hajimu.exe
+
+# Windows 向けソースは同じ SOURCES を使用
+WIN_OBJECTS = $(SOURCES:$(SRC_DIR)/%.c=$(WIN_BUILD)/%.o)
+
+# curl for Windows のパス (win/build_win.sh でセットアップ)
+WIN_CURL_DIR = win/curl-win64
+WIN_CFLAGS  += -I$(WIN_CURL_DIR)/include
+WIN_LDFLAGS  = -L$(WIN_CURL_DIR)/lib -lcurl -lws2_32 -lwsock32 -lpthread -lm
+
+windows: win/curl-win64 $(WIN_BUILD) $(WIN_DIST) $(WIN_TARGET)
+	@echo "Windows ビルド完了: $(WIN_TARGET)"
+	@echo "同梱 DLL を $(WIN_DIST)/ にコピー中..."
+	@bash win/copy_dlls.sh "$(WIN_DIST)" "$(WIN_CURL_DIR)"
+
+$(WIN_BUILD):
+	mkdir -p $(WIN_BUILD)
+
+$(WIN_DIST):
+	mkdir -p $(WIN_DIST)
+
+$(WIN_TARGET): $(WIN_OBJECTS)
+	$(WIN_CC) $(WIN_OBJECTS) -o $@ $(WIN_LDFLAGS) -static-libgcc -static-libstdc++
+	@echo "リンク完了: $@"
+
+$(WIN_BUILD)/%.o: $(SRC_DIR)/%.c
+	$(WIN_CC) $(WIN_CFLAGS) -c $< -o $@
+
+# curl for Windows を自動取得
+win/curl-win64:
+	@echo "curl for Windows をダウンロード中..."
+	bash win/setup_curl.sh
+
+# NSIS インストーラー生成
+windows-installer: windows
+	@command -v makensis >/dev/null 2>&1 || \
+	  { echo "NSISが必要です: brew install nsis"; exit 1; }
+	makensis -NOCD win/installer.nsi
+	@echo "インストーラー生成完了: win/dist/hajimu_setup.exe"
+
+# Windows ビルド成果物をクリーン
+clean-windows:
+	rm -rf $(WIN_BUILD) $(WIN_DIST)
+	@echo "Windows ビルドをクリーンアップ完了"
+
+.PHONY: all run hello factorial fibonacci test clean debug release rebuild help \
+        windows windows-installer clean-windows

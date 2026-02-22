@@ -9,6 +9,9 @@
 #include <string.h>
 #include <locale.h>
 
+/* NOTE: win_compat.h はソケット利用ファイル (http.c / async.c) に包含される。
+         main.c には include しない → lexer.hの TokenType と winnt.h の衆突を回避。
+         WSAStartup は http.c / async.c 内の constructor 関数が自動履行する。 */
 #include "lexer.h"
 #include "parser.h"
 #include "ast.h"
@@ -439,6 +442,8 @@ static void show_ast(const char *source, const char *filename) {
 // =============================================================================
 
 int main(int argc, char *argv[]) {
+    /* Windows: WSAStartup は http.c / async.c 内の constructor 関数で自動実行済み */
+
     // ロケール設定（日本語出力のため）
     setlocale(LC_ALL, "");
     
