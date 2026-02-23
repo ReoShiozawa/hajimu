@@ -2,6 +2,17 @@
 
 すべての注目すべき変更はこのプロジェクトに記録されます。
 
+## [v1.2.8] - 2026-02-24
+
+### 🪟 Windows 互換性強化 (package.c — ビルドコマンド引用符修正)
+
+#### 修正
+- **package.c**: `cmd /C "cd /D "スペースを含むパス" && make"` で発生していたCMD引用符誤解析を修正
+  - **旧**: `cmd /C "cd /D "パス" && コマンド"` — 内側の `"` をCMDが誤解析してビルド失敗
+  - **新**: `_chdir(pkg_dir)` でディレクトリ変更 → `popen(user_cmd)` を直接実行（`cd` 不要）
+  - `pclose` 後に `_chdir(orig_dir)` で確実に元ディレクトリへ復帰
+  - `build_cmd[0]` チェックで `_chdir` 失敗時に `popen` が実行されないよう保護
+
 ## [v1.2.7] - 2026-02-11
 
 ### 🪟 Windows 互換性強化 (plugin / package / hajimu_discord)

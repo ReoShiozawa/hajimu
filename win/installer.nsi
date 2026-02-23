@@ -14,7 +14,7 @@
 ; ── バージョン情報 ─────────────────────────────────────────────
 !define APP_NAME        "はじむ言語"
 !define APP_NAME_EN     "Hajimu"
-!define APP_VERSION     "1.2.7"
+!define APP_VERSION     "1.2.8"
 !define APP_PUBLISHER   "Reo Shiozawa"
 !define APP_URL         "https://github.com/ReoShiozawa/hajimu"
 !define APP_EXE         "hajimu.exe"

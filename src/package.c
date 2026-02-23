@@ -707,16 +707,26 @@ int package_install(const char *name_or_url) {
             if (user_cmd[0]) {
 #ifdef _WIN32
                 /* Windows CMD は "VAR=val cmd" 構文をサポートしない。
-                 * _putenv で環境変数を設定してから cmd /C で実行する。
-                 * cmd /C が必要: popen は CMD を経由するため cd がなければ
-                 * カレントディレクトリが変わらない。 */
+                 * _putenv で環境変数を設定してから popen で実行する。
+                 * cmd /C "cd /D "path with space" && cmd" はCMDが
+                 * 内側の " を誤解析するため _chdir() でディレクトリ変更する。 */
                 if (include_dir[0]) {
                     char env_entry[PACKAGE_MAX_PATH + 20];
                     snprintf(env_entry, sizeof(env_entry), "HAJIMU_INCLUDE=%s", include_dir);
                     _putenv(env_entry);
                 }
-                snprintf(build_cmd, sizeof(build_cmd),
-                         "cmd /C \"cd /D \"%s\" && %s\" 2>&1", pkg_dir, user_cmd);
+                /* カレントディレクトリをパッケージディレクトリに変更 */
+                char orig_dir[PACKAGE_MAX_PATH] = {0};
+                _getcwd(orig_dir, sizeof(orig_dir));
+                /* Windows パスの / を \ に再変換して _chdir に渡す */
+                char win_pkg_dir[PACKAGE_MAX_PATH];
+                snprintf(win_pkg_dir, sizeof(win_pkg_dir), "%s", pkg_dir);
+                for (char *p = win_pkg_dir; *p; p++) { if (*p == '/') *p = '\\'; }
+                if (_chdir(win_pkg_dir) != 0) {
+                    fprintf(stderr, "   ⚠  ディレクトリ変更失敗: %s\n", win_pkg_dir);
+                } else {
+                    snprintf(build_cmd, sizeof(build_cmd), "%s 2>&1", user_cmd);
+                }
 #else
                 if (include_dir[0]) {
                     snprintf(build_cmd, sizeof(build_cmd),
@@ -727,6 +737,7 @@ int package_install(const char *name_or_url) {
                              "cd \"%s\" && %s 2>&1", pkg_dir, user_cmd);
                 }
 #endif
+                if (build_cmd[0]) {
                 printf("   🔨 ビルド中...\n");
                 FILE *bp = popen(build_cmd, "r");
                 if (bp) {
@@ -738,6 +749,9 @@ int package_install(const char *name_or_url) {
                         }
                     }
                     int bstatus = pclose(bp);
+#ifdef _WIN32
+                    if (orig_dir[0]) _chdir(orig_dir); /* 元ディレクトリに復帰 */
+#endif
                     if (WEXITSTATUS(bstatus) == 0) {
                         printf("   ✅ ビルド成功\n");
                         /* ビルド後に生成された .hjp を再帰検索し hajimu.json の main を更新 */
@@ -758,9 +772,10 @@ int package_install(const char *name_or_url) {
                             printf("   → プラグイン: %s\n", rel);
                         }
                     } else {
-                        printf("   ⚠  ビルドに失敗しました（手動で make を実行してください）\n");
+                        printf("   ⚠  ビルドに失敗しました\n");
                     }
                 }
+                } /* if (build_cmd[0]) */
             } else {
                 printf("   ⚠  .hjp ファイルが見つかりません\n");
                 printf("      パッケージディレクトリで make を実行してください:\n");
