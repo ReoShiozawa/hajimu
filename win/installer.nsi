@@ -14,7 +14,7 @@
 ; ── バージョン情報 ─────────────────────────────────────────────
 !define APP_NAME        "はじむ言語"
 !define APP_NAME_EN     "Hajimu"
-!define APP_VERSION     "1.2.8"
+!define APP_VERSION     "1.2.9"
 !define APP_PUBLISHER   "Reo Shiozawa"
 !define APP_URL         "https://github.com/ReoShiozawa/hajimu"
 !define APP_EXE         "hajimu.exe"
@@ -68,12 +68,8 @@ Section "はじむ言語 (必須)" SecMain
 
     ; ── 依存 DLL ─────────────────────────────────────────────
     File /nonfatal "win\dist\libcurl-x64.dll"
-    File /nonfatal "win\dist\libcurl.dll"
     File /nonfatal "win\dist\libwinpthread-1.dll"
-    File /nonfatal "win\dist\libgcc_s_seh-1.dll"
-    File /nonfatal "win\dist\zlib1.dll"
-    File /nonfatal "win\dist\libssl-3-x64.dll"
-    File /nonfatal "win\dist\libcrypto-3-x64.dll"
+
 
     ; ── レジストリ: インストールパスを保存 ──────────────────
     WriteRegStr ${REG_ROOT} "${REG_APP_PATH}" "InstallDir" "$INSTDIR"
@@ -96,9 +92,9 @@ Section "はじむ言語 (必須)" SecMain
     ; ── システム PATH に追加 (PowerShell 経由) ─────────────
     ; 既に含まれている場合は追加しない
     nsExec::ExecToStack 'powershell -NoProfile -NonInteractive -Command \
-        "$p = [Environment]::GetEnvironmentVariable(\"PATH\", \"Machine\"); \
-         if ($p -notlike \"*$INSTDIR*\") { \
-           [Environment]::SetEnvironmentVariable(\"PATH\", $p + \";$INSTDIR\", \"Machine\") \
+        "$$p = [Environment]::GetEnvironmentVariable(\"PATH\", \"Machine\"); \
+         if ($$p -notlike \"*$INSTDIR*\") { \
+           [Environment]::SetEnvironmentVariable(\"PATH\", $$p + \";$INSTDIR\", \"Machine\") \
          }"'
     Pop $0  ; 戻り値 (0=成功)
     ; PATH 変更を現在のプロセス環境にも反映
@@ -119,12 +115,7 @@ Section "Uninstall"
     ; ── ファイルの削除 ────────────────────────────────────────
     Delete "$INSTDIR\hajimu.exe"
     Delete "$INSTDIR\libcurl-x64.dll"
-    Delete "$INSTDIR\libcurl.dll"
     Delete "$INSTDIR\libwinpthread-1.dll"
-    Delete "$INSTDIR\libgcc_s_seh-1.dll"
-    Delete "$INSTDIR\zlib1.dll"
-    Delete "$INSTDIR\libssl-3-x64.dll"
-    Delete "$INSTDIR\libcrypto-3-x64.dll"
     Delete "$INSTDIR\${UNINSTALLER}"
     RMDir  "$INSTDIR"
 
@@ -139,9 +130,9 @@ Section "Uninstall"
 
     ; ── PATH から削除 (PowerShell 経由) ─────────────────────
     nsExec::ExecToStack 'powershell -NoProfile -NonInteractive -Command \
-        "$p = [Environment]::GetEnvironmentVariable(\"PATH\", \"Machine\"); \
-         $newPath = ($p -split \";\" | Where-Object { $_ -ne \"$INSTDIR\" }) -join \";\"; \
-         [Environment]::SetEnvironmentVariable(\"PATH\", $newPath, \"Machine\")"'
+        "$$p = [Environment]::GetEnvironmentVariable(\"PATH\", \"Machine\"); \
+         $$newPath = ($$p -split \";\" | Where-Object { $$_ -ne \"$INSTDIR\" }) -join \";\"; \
+         [Environment]::SetEnvironmentVariable(\"PATH\", $$newPath, \"Machine\")"'
     Pop $0
     SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
 SectionEnd

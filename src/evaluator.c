@@ -2071,7 +2071,7 @@ static bool normalize_path(const char *path, char *out, int max_len) {
         return true;
     }
     // realpath 失敗時はそのまま
-    snprintf(out, max_len, "%s", path);
+    snprintf(out, max_len, "%.*s", (int)(max_len - 1), path);
     return false;
 }
 
@@ -2156,7 +2156,7 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
         return value_null();
     }
     
-    char resolved_path[1024];
+    char resolved_path[2048];
     bool found = false;
     
     // ============================================================
@@ -2172,7 +2172,7 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
     
     if (is_file_path) {
         // --- ファイルパスモード ---
-        char try_path[1024];
+        char try_path[2048];
         
         // .jp 拡張子がなければ追加
         const char *effective = module_path;

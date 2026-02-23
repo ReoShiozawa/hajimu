@@ -60,7 +60,7 @@ typedef struct {
     
     // エラー情報
     bool had_error;
-    char error_message[512];
+    char error_message[1024];
     int error_line;
     int error_column;
     

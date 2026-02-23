@@ -404,9 +404,9 @@ static void extract_package_name(const char *url, char *name, int max_len) {
     // 最後の / 以降を取得
     const char *last_slash = strrchr(clean_url, '/');
     if (last_slash) {
-        snprintf(name, max_len, "%s", last_slash + 1);
+        snprintf(name, max_len, "%.*s", max_len - 1, last_slash + 1);
     } else {
-        snprintf(name, max_len, "%s", clean_url);
+        snprintf(name, max_len, "%.*s", max_len - 1, clean_url);
     }
 }
 
@@ -528,7 +528,8 @@ int package_init(void) {
     
     PackageManifest manifest;
     memset(&manifest, 0, sizeof(manifest));
-    snprintf(manifest.name, sizeof(manifest.name), "%s", dir_name);
+    snprintf(manifest.name, sizeof(manifest.name), "%.*s",
+             (int)(sizeof(manifest.name) - 1), dir_name);
     strcpy(manifest.version, "1.0.0");
     strcpy(manifest.description, "");
     strcpy(manifest.author, "");
@@ -613,14 +614,14 @@ int package_install(const char *name_or_url) {
     }
     
     // .git ディレクトリを削除（容量削減）
-    char git_dir[PACKAGE_MAX_PATH];
+    char git_dir[PACKAGE_MAX_PATH + 32];
     snprintf(git_dir, sizeof(git_dir), "%s/.git", pkg_dir);
     if (dir_exists(git_dir)) {
         remove_directory(git_dir);
     }
     
     // hajimu.json が存在するか確認
-    char manifest_path[PACKAGE_MAX_PATH];
+    char manifest_path[PACKAGE_MAX_PATH + 32];
     snprintf(manifest_path, sizeof(manifest_path), "%s/%s", pkg_dir, PACKAGE_MANIFEST_FILE);
     
     PackageManifest pkg_manifest;
@@ -681,7 +682,7 @@ int package_install(const char *name_or_url) {
             if (has_manifest && pkg_manifest.build_cmd[0]) {
                 snprintf(user_cmd, sizeof(user_cmd), "%s", pkg_manifest.build_cmd);
             } else {
-                char makefile_path[PACKAGE_MAX_PATH];
+                char makefile_path[PACKAGE_MAX_PATH + 32];
                 snprintf(makefile_path, sizeof(makefile_path), "%s/Makefile", pkg_dir);
                 if (file_exists(makefile_path)) {
 #ifdef _WIN32
@@ -928,7 +929,7 @@ int package_list(void) {
                 struct stat st;
                 if (stat(pkg_dir, &st) == 0 && S_ISDIR(st.st_mode)) {
                     // hajimu.json を読んで情報表示
-                    char manifest_path[PACKAGE_MAX_PATH];
+                    char manifest_path[PACKAGE_MAX_PATH + 32];
                     snprintf(manifest_path, sizeof(manifest_path), 
                              "%s/%s", pkg_dir, PACKAGE_MANIFEST_FILE);
                     
@@ -989,30 +990,30 @@ bool package_resolve(const char *package_name, const char *caller_file,
     }
     
     // 検索パスリスト
-    char search_paths[3][PACKAGE_MAX_PATH];
+    char search_paths[3][PACKAGE_MAX_PATH + PACKAGE_MAX_NAME];
     int search_count = 0;
     
     // 1. 呼び出し元からの相対 hajimu_packages/
     if (base_dir[0]) {
-        snprintf(search_paths[search_count++], PACKAGE_MAX_PATH,
+        snprintf(search_paths[search_count++], PACKAGE_MAX_PATH + PACKAGE_MAX_NAME,
                  "%s%s/%s", base_dir, PACKAGE_LOCAL_DIR, package_name);
     }
     
     // 2. CWDからの hajimu_packages/
-    snprintf(search_paths[search_count++], PACKAGE_MAX_PATH,
+    snprintf(search_paths[search_count++], PACKAGE_MAX_PATH + PACKAGE_MAX_NAME,
              "%s/%s", PACKAGE_LOCAL_DIR, package_name);
     
     // 3. グローバル ~/.hajimu/packages/
     char global_dir[PACKAGE_MAX_PATH];
     get_global_package_dir(global_dir, sizeof(global_dir));
-    snprintf(search_paths[search_count++], PACKAGE_MAX_PATH,
+    snprintf(search_paths[search_count++], PACKAGE_MAX_PATH + PACKAGE_MAX_NAME,
              "%s/%s", global_dir, package_name);
     
     for (int i = 0; i < search_count; i++) {
         if (!dir_exists(search_paths[i])) continue;
         
         // hajimu.json を確認してメインファイルを取得
-        char manifest_path_r[PACKAGE_MAX_PATH];
+        char manifest_path_r[4096];
         snprintf(manifest_path_r, sizeof(manifest_path_r),
                  "%s/%s", search_paths[i], PACKAGE_MANIFEST_FILE);
 

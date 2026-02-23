@@ -51,7 +51,7 @@ typedef struct {
     Value function;             // 実行する関数
     Value *args;                // 引数
     int arg_count;              // 引数数
-    char error_message[256];    // エラーメッセージ
+    char error_message[1024];    // エラーメッセージ
     bool used;                  // 使用中フラグ
     bool use_pool;              // スレッドプール使用フラグ
     

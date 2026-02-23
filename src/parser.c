@@ -17,7 +17,6 @@
 
 static void advance(Parser *parser);
 static bool check(Parser *parser, TokenType type);
-static bool check_keyword(Parser *parser, const char *keyword);
 static bool match(Parser *parser, TokenType type);
 static void consume(Parser *parser, TokenType type, const char *message);
 static void error_at(Parser *parser, Token *token, const char *message);
@@ -112,12 +111,6 @@ static bool check(Parser *parser, TokenType type) {
     return parser->current.type == type;
 }
 
-static bool check_keyword(Parser *parser, const char *keyword) {
-    if (parser->current.type != TOKEN_IDENTIFIER) return false;
-    size_t kw_len = strlen(keyword);
-    return strncmp(parser->current.start, keyword, parser->current.length) == 0 &&
-           kw_len == (size_t)parser->current.length;
-}
 
 static bool match(Parser *parser, TokenType type) {
     if (!check(parser, type)) return false;

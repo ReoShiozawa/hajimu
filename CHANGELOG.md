@@ -2,6 +2,22 @@
 
 すべての注目すべき変更はこのプロジェクトに記録されます。
 
+## [v1.2.9] - 2026-02-24
+
+### 🔧 コンパイラ警告ゼロ化 (macOS + Windows MinGW) + インストーラー修正
+
+#### 修正
+- **async.c**: Winsock `send`/`recv` の `unsigned char*` → `(const char *)` / `(char *)` キャスト — 符号拡張による文字化けを根本修正
+- **async.h**: `AsyncTask.error_message` を 256 → 1024 バイトに拡張
+- **parser.c**: 未使用の `check_keyword` 関数を削除
+- **plugin.c**: `try_path` バッファを 1024 → 2048 バイトに拡張
+- **evaluator.h**: `error_message` を 512 → 1024 バイトに拡張
+- **evaluator.c**: `try_path` を 1024 → 2048 バイトに拡張
+- **package.c**: `git_dir`, `manifest_path`, `makefile_path` を `PACKAGE_MAX_PATH + 32` に拡張
+- **package.c**: `search_paths` を `PACKAGE_MAX_PATH + PACKAGE_MAX_NAME` に拡張
+- **win/installer.nsi**: PowerShell 変数 `$p`/`$newPath`/`$_` を NSIS エスケープ `$$p`/`$$newPath`/`$$_` に修正 — インストール/アンインストール時の PATH 操作が正常動作するように修正
+- **win/installer.nsi**: 静的リンクで生成されない DLL (`libcurl.dll`, `libgcc_s_seh-1.dll`, `zlib1.dll`, `libssl-3-x64.dll`, `libcrypto-3-x64.dll`) を installer から削除 — NSIS ビルド警告ゼロに
+
 ## [v1.2.8] - 2026-02-24
 
 ### 🪟 Windows 互換性強化 (package.c — ビルドコマンド引用符修正)

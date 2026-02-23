@@ -179,7 +179,7 @@ bool plugin_resolve_hjp(const char *name, const char *caller,
     char hjp_name[1024];
     ensure_hjp_extension(name, hjp_name, sizeof(hjp_name));
     
-    char try_path[1024];
+    char try_path[2048];  /* プレフィックス+パッケージ名で1024超えの可能性があるため2048 */
     
     // 1. 呼び出し元ファイルからの相対パス
     if (caller != NULL) {

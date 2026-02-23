@@ -170,7 +170,8 @@ static void process_promise_chain(AsyncTask *task) {
                 next->result = temp.status == TASK_COMPLETED ? temp.result : value_null();
                 next->status = temp.status;
                 if (temp.status == TASK_FAILED) {
-                    strncpy(next->error_message, temp.error_message, sizeof(next->error_message) - 1);
+                    snprintf(next->error_message, sizeof(next->error_message),
+                             "%s", temp.error_message);
                 }
                 // 完了通知
                 pthread_mutex_lock(&next->completion_mutex);
@@ -1965,7 +1966,7 @@ static bool ws_send_frame(int sockfd, const char *data, int len) {
     
     int sent = 0;
     while (sent < offset) {
-        int n = (int)send(sockfd, frame + sent, offset - sent, 0);
+        int n = (int)send(sockfd, (const char *)(frame + sent), offset - sent, 0);
         if (n <= 0) { free(frame); return false; }
         sent += n;
     }
@@ -1987,7 +1988,7 @@ static int ws_recv_frame(int sockfd, char *buffer, int buf_size, double timeout_
 #endif
     
     unsigned char header[2];
-    int n = (int)recv(sockfd, header, 2, 0);
+    int n = (int)recv(sockfd, (char *)header, 2, 0);
     if (n <= 0) return -1;
     
     // opcode確認
@@ -1999,11 +2000,11 @@ static int ws_recv_frame(int sockfd, char *buffer, int buf_size, double timeout_
     
     if (payload_len == 126) {
         unsigned char len16[2];
-        if (recv(sockfd, len16, 2, 0) != 2) return -1;
+        if (recv(sockfd, (char *)len16, 2, 0) != 2) return -1;
         payload_len = (len16[0] << 8) | len16[1];
     } else if (payload_len == 127) {
         unsigned char len64[8];
-        if (recv(sockfd, len64, 8, 0) != 8) return -1;
+        if (recv(sockfd, (char *)len64, 8, 0) != 8) return -1;
         payload_len = 0;
         for (int i = 0; i < 8; i++) {
             payload_len = (payload_len << 8) | len64[i];
@@ -2015,7 +2016,7 @@ static int ws_recv_frame(int sockfd, char *buffer, int buf_size, double timeout_
     // マスクキー
     unsigned char mask[4] = {0};
     if (masked) {
-        if (recv(sockfd, mask, 4, 0) != 4) return -1;
+        if (recv(sockfd, (char *)mask, 4, 0) != 4) return -1;
     }
     
     // ペイロード
@@ -2108,7 +2109,8 @@ Value builtin_ws_connect(int argc, Value *argv) {
     g_ws_connections[slot].connected = true;
     g_ws_connections[slot].used = true;
     g_ws_connections[slot].is_ssl = false;
-    strncpy(g_ws_connections[slot].host, host, sizeof(g_ws_connections[slot].host) - 1);
+    snprintf(g_ws_connections[slot].host, sizeof(g_ws_connections[slot].host),
+             "%s", host);
     g_ws_connections[slot].port = port;
     pthread_mutex_init(&g_ws_connections[slot].mutex, NULL);
     
@@ -2196,7 +2198,7 @@ Value builtin_ws_close(int argc, Value *argv) {
             if (conn->connected) {
                 // Close frame送信
                 unsigned char close_frame[] = {0x88, 0x80, 0x00, 0x00, 0x00, 0x00};
-                send(conn->sockfd, close_frame, sizeof(close_frame), 0);
+                send(conn->sockfd, (const char *)close_frame, sizeof(close_frame), 0);
                 close(conn->sockfd);
                 conn->connected = false;
             }
