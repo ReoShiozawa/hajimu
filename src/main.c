@@ -19,6 +19,7 @@
 #  define TokenType _winnt_TokenType_collision_guard_
 #  include <windows.h>   /* SetConsoleOutputCP, SetConsoleMode, GetStdHandle */
 #  undef TokenType
+#  include <shellapi.h>  /* CommandLineToArgvW */
 #  include <io.h>        /* _setmode, _fileno */
 #  include <fcntl.h>    /* _O_BINARY */
 #endif
@@ -32,7 +33,7 @@
 // バージョン情報
 // =============================================================================
 
-#define VERSION "1.2.3"
+#define VERSION "1.2.6"
 #define AUTHOR "Reo Shiozawa"
 
 // =============================================================================
@@ -231,11 +232,13 @@ static void run_repl(void) {
             break;
         }
         
-        // 改行を削除
+        // 改行を削除（CRLF 対応: \r\n どちらも除去）
         size_t len = strlen(line);
         if (len > 0 && line[len - 1] == '\n') {
-            line[len - 1] = '\0';
-            len--;
+            line[--len] = '\0';
+        }
+        if (len > 0 && line[len - 1] == '\r') {
+            line[--len] = '\0';
         }
         
         // 空行はスキップ（複数行中でなければ）
@@ -462,6 +465,10 @@ int main(int argc, char *argv[]) {
     SetConsoleCP(65001);
     _setmode(_fileno(stdout), _O_BINARY);
     _setmode(_fileno(stderr), _O_BINARY);
+    /* stdin もバイナリモードに切り替え: コンソールCP=65001 なので
+     * fgets がそのまま UTF-8 バイト列を返すようになる。
+     * テキストモードの CRLF→LF 変換は不要（REPL 側で \r を除去）。 */
+    _setmode(_fileno(stdin), _O_BINARY);
     /* ENABLE_VIRTUAL_TERMINAL_PROCESSING (0x0004): ANSIエスケープシーケンスを有効化 */
     HANDLE _hout = GetStdHandle(STD_OUTPUT_HANDLE);
     if (_hout != INVALID_HANDLE_VALUE) {
@@ -474,6 +481,41 @@ int main(int argc, char *argv[]) {
         DWORD _mode = 0;
         if (GetConsoleMode(_herr, &_mode))
             SetConsoleMode(_herr, _mode | 0x0004);
+    }
+    /* ---------------------------------------------------------------
+     * argv を UTF-8 に変換する（最重要）
+     *
+     * Windows では argv[] はシステムの ANSI コードページ（日本語環境では
+     * CP932 = Shift-JIS）でエンコードされている。そのため
+     *   strcmp(argv[1], "パッケージ")  ← UTF-8 リテラル
+     * が日本語入力と一致しない。
+     * GetCommandLineW → CommandLineToArgvW で UTF-16 引数を取得し、
+     * WideCharToMultiByte(CP_UTF8) で UTF-8 に変換してから argc/argv を
+     * 置き換える。これにより hajimu パッケージ 追加 ... が正しく動作する。
+     * --------------------------------------------------------------- */
+    {
+        int _wargc = 0;
+        WCHAR **_wargv = CommandLineToArgvW(GetCommandLineW(), &_wargc);
+        if (_wargv && _wargc > 0) {
+            char **_u8argv = (char **)malloc(sizeof(char *) * (_wargc + 1));
+            if (_u8argv) {
+                for (int _i = 0; _i < _wargc; _i++) {
+                    int _need = WideCharToMultiByte(CP_UTF8, 0,
+                                    _wargv[_i], -1, NULL, 0, NULL, NULL);
+                    _u8argv[_i] = (char *)malloc(_need ? _need : 1);
+                    if (_u8argv[_i]) {
+                        WideCharToMultiByte(CP_UTF8, 0,
+                            _wargv[_i], -1, _u8argv[_i], _need, NULL, NULL);
+                    } else {
+                        _u8argv[_i] = (char *)""; /* フォールバック */
+                    }
+                }
+                _u8argv[_wargc] = NULL;
+                argc = _wargc;
+                argv = _u8argv;
+            }
+            LocalFree(_wargv);
+        }
     }
 #endif
     /* Windows: WSAStartup は http.c / async.c 内の constructor 関数で自動実行済み */

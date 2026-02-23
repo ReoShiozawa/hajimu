@@ -57,7 +57,7 @@ mkdir -p win/build win/dist
 
 CC="x86_64-w64-mingw32-gcc"
 CFLAGS="-Wall -Wextra -std=c11 -O2 -D_WIN32_WINNT=0x0601 -I${CURL_DIR}/include"
-LDFLAGS="-L${CURL_DIR}/lib -lcurl -lws2_32 -lwsock32 -lpthread -lm -static-libgcc"
+LDFLAGS="-L${CURL_DIR}/lib -lcurl -lws2_32 -lwsock32 -lpthread -lshell32 -lm -static-libgcc"
 
 SOURCES=(
     src/main.c
