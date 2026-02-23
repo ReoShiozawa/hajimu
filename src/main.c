@@ -19,6 +19,8 @@
 #  define TokenType _winnt_TokenType_collision_guard_
 #  include <windows.h>   /* SetConsoleOutputCP, SetConsoleMode, GetStdHandle */
 #  undef TokenType
+#  include <io.h>        /* _setmode, _fileno */
+#  include <fcntl.h>    /* _O_BINARY */
 #endif
 #include "lexer.h"
 #include "parser.h"
@@ -30,7 +32,7 @@
 // バージョン情報
 // =============================================================================
 
-#define VERSION "0.1.0"
+#define VERSION "1.2.3"
 #define AUTHOR "Reo Shiozawa"
 
 // =============================================================================
@@ -452,9 +454,14 @@ static void show_ast(const char *source, const char *filename) {
 int main(int argc, char *argv[]) {
 #ifdef _WIN32
     /* コンソールを UTF-8 モードに切り替えて文字化けを防ぐ。
-     * SetConsoleOutputCP/SetConsoleCP を main() 决頭で呼ぶのが最も確実な方法。 */
+     * 1) SetConsoleOutputCP で Win32 コンソールを UTF-8 に設定。
+     * 2) _setmode(_O_BINARY) で C ランタイムの文字コード変換を完全に無効化。
+     *    これをしないと setlocale("") が CP932 ロケールを選択し
+     *    UTF-8 バイト列を Shift-JIS に変換して文字化けが起きる。 */
     SetConsoleOutputCP(65001);   /* CP_UTF8 */
     SetConsoleCP(65001);
+    _setmode(_fileno(stdout), _O_BINARY);
+    _setmode(_fileno(stderr), _O_BINARY);
     /* ENABLE_VIRTUAL_TERMINAL_PROCESSING (0x0004): ANSIエスケープシーケンスを有効化 */
     HANDLE _hout = GetStdHandle(STD_OUTPUT_HANDLE);
     if (_hout != INVALID_HANDLE_VALUE) {
@@ -472,7 +479,14 @@ int main(int argc, char *argv[]) {
     /* Windows: WSAStartup は http.c / async.c 内の constructor 関数で自動実行済み */
 
     // ロケール設定（日本語出力のため）
+#ifdef _WIN32
+    /* Windows では setlocale("") が CP932 を選んで UTF-8 バイトを壊すため
+     * 代わりに ".UTF-8" を指定する（MinGW-w64 GCC 12+ / UCRT でサポート）。
+     * 古いランタイムでは失敗する場合があるが _O_BINARY で対処済みなので問題ない。 */
+    setlocale(LC_ALL, ".UTF-8");
+#else
     setlocale(LC_ALL, "");
+#endif
     
     // パッケージ管理サブコマンド
     if (argc >= 2 && (strcmp(argv[1], "パッケージ") == 0 || strcmp(argv[1], "pkg") == 0)) {
