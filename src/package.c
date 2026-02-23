@@ -683,20 +683,40 @@ int package_install(const char *name_or_url) {
             } else {
                 char makefile_path[PACKAGE_MAX_PATH];
                 snprintf(makefile_path, sizeof(makefile_path), "%s/Makefile", pkg_dir);
-                if (file_exists(makefile_path)) snprintf(user_cmd, sizeof(user_cmd), "make");
+                if (file_exists(makefile_path)) {
+#ifdef _WIN32
+                    /* Windows では MinGW の make は "mingw32-make" という名前で
+                     * インストールされていることが多い。
+                     * まず "make" を試し、なければ "mingw32-make" にフォールバック。 */
+                    FILE *probe = popen("make --version 2>NUL", "r");
+                    if (probe) {
+                        char _tmp[64] = {0};
+                        bool make_ok = fgets(_tmp, sizeof(_tmp), probe) != NULL;
+                        pclose(probe);
+                        snprintf(user_cmd, sizeof(user_cmd),
+                                 make_ok ? "make" : "mingw32-make");
+                    } else {
+                        snprintf(user_cmd, sizeof(user_cmd), "mingw32-make");
+                    }
+#else
+                    snprintf(user_cmd, sizeof(user_cmd), "make");
+#endif
+                }
             }
 
             if (user_cmd[0]) {
 #ifdef _WIN32
                 /* Windows CMD は "VAR=val cmd" 構文をサポートしない。
-                 * _putenv で環境変数を設定してから popen に渡す。 */
+                 * _putenv で環境変数を設定してから cmd /C で実行する。
+                 * cmd /C が必要: popen は CMD を経由するため cd がなければ
+                 * カレントディレクトリが変わらない。 */
                 if (include_dir[0]) {
                     char env_entry[PACKAGE_MAX_PATH + 20];
                     snprintf(env_entry, sizeof(env_entry), "HAJIMU_INCLUDE=%s", include_dir);
                     _putenv(env_entry);
                 }
                 snprintf(build_cmd, sizeof(build_cmd),
-                         "cd /D \"%s\" && %s 2>&1", pkg_dir, user_cmd);
+                         "cmd /C \"cd /D \"%s\" && %s\" 2>&1", pkg_dir, user_cmd);
 #else
                 if (include_dir[0]) {
                     snprintf(build_cmd, sizeof(build_cmd),

@@ -19,8 +19,18 @@
 #ifdef _WIN32
   #include <windows.h>
 
-  static void *platform_dlopen(const char *path) {
-      return (void *)LoadLibraryA(path);
+  /* UTF-8 パス → UTF-16 変換して LoadLibraryW で読み込む。
+   * LoadLibraryA を使うと Windows の ANSI コードページ変換が入り
+   * 日本語パス / スペース含むパスで失敗する。 */
+  static void *platform_dlopen(const char *utf8_path) {
+      WCHAR wpath[4096];
+      int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8_path, -1,
+                                     wpath, (int)(sizeof(wpath)/sizeof(wpath[0])));
+      if (wlen == 0) {
+          /* 変換失敗時はフォールバックとして LoadLibraryA を試みる */
+          return (void *)LoadLibraryA(utf8_path);
+      }
+      return (void *)LoadLibraryW(wpath);
   }
 
   static void *platform_dlsym(void *handle, const char *symbol) {
@@ -32,10 +42,21 @@
   }
 
   static const char *platform_dlerror(void) {
-      static char buf[256];
+      static char buf[512];
+      /* GetLastError() は他の Win32 呼び出しでクリアされるため即座に保存 */
       DWORD err = GetLastError();
       if (err == 0) return NULL;
-      FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, NULL, err, 0, buf, sizeof(buf), NULL);
+      DWORD r = FormatMessageA(
+          FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+          NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+          buf, (DWORD)(sizeof(buf) - 1), NULL);
+      if (r == 0) {
+          snprintf(buf, sizeof(buf), "Win32 error code: %lu", (unsigned long)err);
+      } else {
+          /* 末尾の改行を除去 */
+          size_t blen = strlen(buf);
+          while (blen > 0 && (buf[blen-1] == '\r' || buf[blen-1] == '\n')) buf[--blen] = '\0';
+      }
       return buf;
   }
 
@@ -264,6 +285,21 @@ bool plugin_load(PluginManager *mgr, const char *path, HajimuPluginInfo **info_o
         const char *err = platform_dlerror();
         fprintf(stderr, "エラー: プラグインを読み込めません: %s\n", path);
         if (err) fprintf(stderr, "  詳細: %s\n", err);
+#ifdef _WIN32
+        /* Windows では .hjp は DLL (PE 形式)。macOS/Linux 向けに
+         * ビルドされた .hjp を LoadLibraryW しようとすると
+         * ERROR_BAD_EXE_FORMAT (193) が返る。その場合は案内を出す。 */
+        {
+            DWORD _winerr = GetLastError();
+            if (_winerr == 193 /* ERROR_BAD_EXE_FORMAT */ ||
+                _winerr == 216 /* ERROR_EXE_MACHINE_TYPE_MISMATCH */) {
+                fprintf(stderr, "  ヒント: この .hjp は Windows 用にビルドされていません。\n");
+                fprintf(stderr, "  Windows 上でパッケージを削除して再インストールしてください:\n");
+                fprintf(stderr, "    hajimu pkg remove <パッケージ名>\n");
+                fprintf(stderr, "    hajimu pkg add <ユーザー/リポジトリ>\n");
+            }
+        }
+#endif
         return false;
     }
     

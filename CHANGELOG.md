@@ -2,6 +2,17 @@
 
 すべての注目すべき変更はこのプロジェクトに記録されます。
 
+## [v1.2.7] - 2026-02-11
+
+### 🪟 Windows 互換性強化 (plugin / package / hajimu_discord)
+
+#### 修正
+- **plugin.c**: `LoadLibraryA` → `LoadLibraryW` — 日本語などのUnicodeパスで .hjp のロードが失敗する問題を修正（`MultiByteToWideChar(CP_UTF8)` で変換）
+- **plugin.c**: `GetLastError()` を`LoadLibrary`直後に保存 — 後続 Win32 呼び出しでエラーコードが失われる問題を修正
+- **plugin.c**: `ERROR_BAD_EXE_FORMAT(193)` / `ERROR_EXE_MACHINE_TYPE_MISMATCH(216)` 検出時に「このプラグインは Windows 用にビルドされていません」と明確なヒントを表示
+- **package.c**: Windows で `make` が見つからない場合 `mingw32-make` へ自動フォールバック
+- **package.c**: Windows でのビルドコマンドを `cmd /C "cd /D \"<dir>\" && <cmd>"` でラップ（日本語ディレクトリ名対応）
+
 ## [v1.2.0] - 2026-02-10
 
 ### 🔧 プラグインランタイムコールバック & 言語改善
