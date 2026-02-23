@@ -9,9 +9,17 @@
 #include <string.h>
 #include <locale.h>
 
-/* NOTE: win_compat.h はソケット利用ファイル (http.c / async.c) に包含される。
-         main.c には include しない → lexer.hの TokenType と winnt.h の衆突を回避。
-         WSAStartup は http.c / async.c 内の constructor 関数が自動履行する。 */
+/* Windows: コンソール UTF-8 設定を main() 决と履行するための最小ヘッダー。
+ * windows.h 内の winnt.h が TokenType を enum 値として定義しており lexer.h の
+ * typedef enum と衝突するため、マクロガードで保護してからインクルードする。 */
+#ifdef _WIN32
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  define TokenType _winnt_TokenType_collision_guard_
+#  include <windows.h>   /* SetConsoleOutputCP, SetConsoleMode, GetStdHandle */
+#  undef TokenType
+#endif
 #include "lexer.h"
 #include "parser.h"
 #include "ast.h"
@@ -442,6 +450,25 @@ static void show_ast(const char *source, const char *filename) {
 // =============================================================================
 
 int main(int argc, char *argv[]) {
+#ifdef _WIN32
+    /* コンソールを UTF-8 モードに切り替えて文字化けを防ぐ。
+     * SetConsoleOutputCP/SetConsoleCP を main() 决頭で呼ぶのが最も確実な方法。 */
+    SetConsoleOutputCP(65001);   /* CP_UTF8 */
+    SetConsoleCP(65001);
+    /* ENABLE_VIRTUAL_TERMINAL_PROCESSING (0x0004): ANSIエスケープシーケンスを有効化 */
+    HANDLE _hout = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (_hout != INVALID_HANDLE_VALUE) {
+        DWORD _mode = 0;
+        if (GetConsoleMode(_hout, &_mode))
+            SetConsoleMode(_hout, _mode | 0x0004);
+    }
+    HANDLE _herr = GetStdHandle(STD_ERROR_HANDLE);
+    if (_herr != INVALID_HANDLE_VALUE) {
+        DWORD _mode = 0;
+        if (GetConsoleMode(_herr, &_mode))
+            SetConsoleMode(_herr, _mode | 0x0004);
+    }
+#endif
     /* Windows: WSAStartup は http.c / async.c 内の constructor 関数で自動実行済み */
 
     // ロケール設定（日本語出力のため）
