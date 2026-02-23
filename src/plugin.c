@@ -206,7 +206,21 @@ bool plugin_resolve_hjp(const char *name, const char *caller,
         snprintf(out, out_size, "%s", try_path);
         return true;
     }
-    
+
+    /* ビルド出力サブディレクトリも検索: hajimu_packages/<name>/{build,dist,lib,bin}/<name>.hjp
+     * 多くのパッケージは make の出力先としてこれらのサブディレクトリを使う */
+    {
+        static const char * const build_subdirs[] = {"build", "dist", "lib", "bin", NULL};
+        for (int _sd = 0; build_subdirs[_sd] != NULL; _sd++) {
+            snprintf(try_path, sizeof(try_path), "hajimu_packages/%s/%s/%s",
+                     base_name, build_subdirs[_sd], hjp_name);
+            if (file_exists_plugin(try_path)) {
+                snprintf(out, out_size, "%s", try_path);
+                return true;
+            }
+        }
+    }
+
     // 4. グローバルプラグインディレクトリ: ~/.hajimu/plugins/
     //    ~/.hajimu/plugins/<name>.hjp
     //    ~/.hajimu/plugins/<name>/<name>.hjp

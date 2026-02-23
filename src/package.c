@@ -86,6 +86,44 @@ static bool file_exists(const char *path) {
 }
 
 /**
+ * ディレクトリを再帰的に走査し .hjp ファイルを検索（最大 3 階層）
+ */
+static bool find_hjp_recursive(const char *dir, char *out, int out_size, int depth) {
+    if (depth > 3) return false;
+    DIR *d = opendir(dir);
+    if (!d) return false;
+    /* まずルートの .hjp を探す */
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (ent->d_name[0] == '.') continue;
+        size_t nlen = strlen(ent->d_name);
+        if (nlen > 4 && strcmp(ent->d_name + nlen - 4, ".hjp") == 0) {
+            snprintf(out, out_size, "%s/%s", dir, ent->d_name);
+            closedir(d);
+            return true;
+        }
+    }
+    closedir(d);
+    /* 次にサブディレクトリを再帰探索 */
+    d = opendir(dir);
+    if (!d) return false;
+    while ((ent = readdir(d)) != NULL) {
+        if (ent->d_name[0] == '.') continue;
+        char subpath[PACKAGE_MAX_PATH];
+        snprintf(subpath, sizeof(subpath), "%s/%s", dir, ent->d_name);
+        struct stat st;
+        if (stat(subpath, &st) == 0 && S_ISDIR(st.st_mode)) {
+            if (find_hjp_recursive(subpath, out, out_size, depth + 1)) {
+                closedir(d);
+                return true;
+            }
+        }
+    }
+    closedir(d);
+    return false;
+}
+
+/**
  * ディレクトリを再帰的に削除
  */
 static int remove_directory(const char *path) {
@@ -607,29 +645,16 @@ int package_install(const char *name_or_url) {
     }
     
     // ポストインストールビルド:
-    // .hjp ファイルが存在しない場合、自動的にビルドを試みる
+    // .hjp ファイルが存在しない場合、自動的にビルドを試みる（build/ dist/ lib/ bin/ も再帰検索）
     {
-        // .hjp ファイルを検索
-        bool hjp_found = false;
-        DIR *pkg_dir_handle = opendir(pkg_dir);
-        if (pkg_dir_handle) {
-            struct dirent *ent;
-            while ((ent = readdir(pkg_dir_handle)) != NULL) {
-                size_t nlen = strlen(ent->d_name);
-                if (nlen > 4 && strcmp(ent->d_name + nlen - 4, ".hjp") == 0) {
-                    hjp_found = true;
-                    break;
-                }
-            }
-            closedir(pkg_dir_handle);
-        }
-        
+        char found_hjp[PACKAGE_MAX_PATH] = {0};
+        bool hjp_found = find_hjp_recursive(pkg_dir, found_hjp, sizeof(found_hjp), 0);
+
         if (!hjp_found) {
             // ビルドコマンドを決定（hajimu.json の "ビルド" → Makefile → 自動検出）
             char build_cmd[PACKAGE_MAX_PATH * 2] = {0};
-            
+
             // はじむヘッダーのパスを自動検出
-            // 実行ファイルのディレクトリから include/ を探す
             char include_dir[PACKAGE_MAX_PATH] = {0};
             {
                 char self_path[PACKAGE_MAX_PATH] = {0};
@@ -638,67 +663,80 @@ int package_install(const char *name_or_url) {
                 _NSGetExecutablePath(self_path, &self_size);
                 #elif defined(_WIN32)
                 GetModuleFileNameA(NULL, self_path, (DWORD)sizeof(self_path));
-                /* バックスラッシュをスラッシュに統一 */
                 for (char *p = self_path; *p; p++) { if (*p == '\\') *p = '/'; }
                 #elif defined(__linux__)
                 readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
                 #endif
-                
                 if (self_path[0]) {
                     char *last_slash = strrchr(self_path, '/');
                     if (last_slash) {
                         *last_slash = '\0';
-                        snprintf(include_dir, sizeof(include_dir),
-                                 "%s/include", self_path);
-                        if (!dir_exists(include_dir)) {
-                            include_dir[0] = '\0';
-                        }
+                        snprintf(include_dir, sizeof(include_dir), "%s/include", self_path);
+                        if (!dir_exists(include_dir)) include_dir[0] = '\0';
                     }
                 }
             }
-            
+
+            char user_cmd[PACKAGE_MAX_PATH] = {0};
             if (has_manifest && pkg_manifest.build_cmd[0]) {
-                // hajimu.json にビルドコマンドが指定されている
+                snprintf(user_cmd, sizeof(user_cmd), "%s", pkg_manifest.build_cmd);
+            } else {
+                char makefile_path[PACKAGE_MAX_PATH];
+                snprintf(makefile_path, sizeof(makefile_path), "%s/Makefile", pkg_dir);
+                if (file_exists(makefile_path)) snprintf(user_cmd, sizeof(user_cmd), "make");
+            }
+
+            if (user_cmd[0]) {
+#ifdef _WIN32
+                /* Windows CMD は "VAR=val cmd" 構文をサポートしない。
+                 * _putenv で環境変数を設定してから popen に渡す。 */
+                if (include_dir[0]) {
+                    char env_entry[PACKAGE_MAX_PATH + 20];
+                    snprintf(env_entry, sizeof(env_entry), "HAJIMU_INCLUDE=%s", include_dir);
+                    _putenv(env_entry);
+                }
+                snprintf(build_cmd, sizeof(build_cmd),
+                         "cd /D \"%s\" && %s 2>&1", pkg_dir, user_cmd);
+#else
                 if (include_dir[0]) {
                     snprintf(build_cmd, sizeof(build_cmd),
                              "cd \"%s\" && HAJIMU_INCLUDE=\"%s\" %s 2>&1",
-                             pkg_dir, include_dir, pkg_manifest.build_cmd);
+                             pkg_dir, include_dir, user_cmd);
                 } else {
-                    snprintf(build_cmd, sizeof(build_cmd), "cd \"%s\" && %s 2>&1",
-                             pkg_dir, pkg_manifest.build_cmd);
+                    snprintf(build_cmd, sizeof(build_cmd),
+                             "cd \"%s\" && %s 2>&1", pkg_dir, user_cmd);
                 }
-            } else {
-                // Makefile を検索
-                char makefile_path[PACKAGE_MAX_PATH];
-                snprintf(makefile_path, sizeof(makefile_path), "%s/Makefile", pkg_dir);
-                if (file_exists(makefile_path)) {
-                    if (include_dir[0]) {
-                        snprintf(build_cmd, sizeof(build_cmd),
-                                 "cd \"%s\" && make HAJIMU_INCLUDE=\"%s\" 2>&1",
-                                 pkg_dir, include_dir);
-                    } else {
-                        snprintf(build_cmd, sizeof(build_cmd),
-                                 "cd \"%s\" && make 2>&1", pkg_dir);
-                    }
-                }
-            }
-            
-            if (build_cmd[0]) {
+#endif
                 printf("   🔨 ビルド中...\n");
                 FILE *bp = popen(build_cmd, "r");
                 if (bp) {
                     char line[1024];
                     while (fgets(line, sizeof(line), bp)) {
-                        // エラーや警告を表示
                         if (strstr(line, "error") || strstr(line, "エラー") ||
-                            strstr(line, "warning") || strstr(line, "警告") ||
-                            strstr(line, "✅")) {
+                            strstr(line, "warning") || strstr(line, "警告")) {
                             printf("      %s", line);
                         }
                     }
                     int bstatus = pclose(bp);
                     if (WEXITSTATUS(bstatus) == 0) {
                         printf("   ✅ ビルド成功\n");
+                        /* ビルド後に生成された .hjp を再帰検索し hajimu.json の main を更新 */
+                        char built_hjp[PACKAGE_MAX_PATH] = {0};
+                        if (find_hjp_recursive(pkg_dir, built_hjp, sizeof(built_hjp), 0)) {
+                            /* pkg_dir 相対パスに変換 */
+                            const char *rel = built_hjp;
+                            size_t prefix_len = strlen(pkg_dir);
+                            if (strncmp(built_hjp, pkg_dir, prefix_len) == 0 &&
+                                (built_hjp[prefix_len] == '/' || built_hjp[prefix_len] == '\\')) {
+                                rel = built_hjp + prefix_len + 1;
+                            }
+                            PackageManifest updated_m;
+                            bool got_m = package_read_manifest(manifest_path, &updated_m);
+                            if (!got_m) memcpy(&updated_m, &pkg_manifest, sizeof(pkg_manifest));
+                            snprintf(updated_m.main_file, sizeof(updated_m.main_file), "%s", rel);
+                            write_manifest(manifest_path, &updated_m);
+                            printf("   → プラグイン: %s\n", rel);
+                        }
                     } else {
                         printf("   ⚠  ビルドに失敗しました（手動で make を実行してください）\n");
                     }
@@ -939,24 +977,45 @@ bool package_resolve(const char *package_name, const char *caller_file,
         if (!dir_exists(search_paths[i])) continue;
         
         // hajimu.json を確認してメインファイルを取得
-        char manifest_path[PACKAGE_MAX_PATH];
-        snprintf(manifest_path, sizeof(manifest_path), 
+        char manifest_path_r[PACKAGE_MAX_PATH];
+        snprintf(manifest_path_r, sizeof(manifest_path_r),
                  "%s/%s", search_paths[i], PACKAGE_MANIFEST_FILE);
-        
+
         PackageManifest manifest;
-        if (package_read_manifest(manifest_path, &manifest)) {
-            snprintf(resolved_path, max_len, "%s/%s", 
+        if (package_read_manifest(manifest_path_r, &manifest)) {
+            snprintf(resolved_path, max_len, "%s/%s",
                      search_paths[i], manifest.main_file);
             if (file_exists(resolved_path)) return true;
         }
-        
+
         // main.jp を試す
         snprintf(resolved_path, max_len, "%s/main.jp", search_paths[i]);
         if (file_exists(resolved_path)) return true;
-        
+
         // <パッケージ名>.jp を試す
         snprintf(resolved_path, max_len, "%s/%s.jp", search_paths[i], package_name);
         if (file_exists(resolved_path)) return true;
+
+        /* --- .hjp ファイルのフォールバック検索 ---
+         * hajimu.json の main が未設定 / 検出できなかった場合に
+         * ネイティブプラグインとして利用可能な .hjp を探す。 */
+        // ルートの main.hjp / <name>.hjp
+        snprintf(resolved_path, max_len, "%s/main.hjp", search_paths[i]);
+        if (file_exists(resolved_path)) return true;
+        snprintf(resolved_path, max_len, "%s/%s.hjp", search_paths[i], package_name);
+        if (file_exists(resolved_path)) return true;
+        // ビルド出力サブディレクトリ内の <name>.hjp / main.hjp
+        {
+            static const char * const build_subdirs[] = {"build", "dist", "lib", "bin", NULL};
+            for (int _s = 0; build_subdirs[_s] != NULL; _s++) {
+                snprintf(resolved_path, max_len, "%s/%s/%s.hjp",
+                         search_paths[i], build_subdirs[_s], package_name);
+                if (file_exists(resolved_path)) return true;
+                snprintf(resolved_path, max_len, "%s/%s/main.hjp",
+                         search_paths[i], build_subdirs[_s]);
+                if (file_exists(resolved_path)) return true;
+            }
+        }
     }
     
     return false;
