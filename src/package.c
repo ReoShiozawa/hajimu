@@ -700,25 +700,35 @@ int package_install(const char *name_or_url) {
                 char makefile_path[PACKAGE_MAX_PATH + 32];
                 snprintf(makefile_path, sizeof(makefile_path), "%s/Makefile", pkg_dir);
                 if (file_exists(makefile_path)) {
-#ifdef _WIN32
-                    /* Windows では MinGW の make は "mingw32-make" という名前で
-                     * インストールされていることが多い。
-                     * まず "make" を試し、なければ "mingw32-make" にフォールバック。 */
-                    FILE *probe = popen("make --version 2>NUL", "r");
-                    if (probe) {
-                        char _tmp[64] = {0};
-                        bool make_ok = fgets(_tmp, sizeof(_tmp), probe) != NULL;
-                        pclose(probe);
-                        snprintf(user_cmd, sizeof(user_cmd),
-                                 make_ok ? "make" : "mingw32-make");
-                    } else {
-                        snprintf(user_cmd, sizeof(user_cmd), "mingw32-make");
-                    }
-#else
                     snprintf(user_cmd, sizeof(user_cmd), "make");
-#endif
                 }
             }
+
+#ifdef _WIN32
+            /* Windows: hajimu.json の "ビルド" に書かれた "make ..." も含め
+             * "make" が使えるか確認し、なければ "mingw32-make" に置き換える。 */
+            if (user_cmd[0] &&
+                (strncmp(user_cmd, "make", 4) == 0) &&
+                (user_cmd[4] == '\0' || user_cmd[4] == ' ')) {
+                const char *after_make = user_cmd[4] ? user_cmd + 5 : "";
+                char make_tool[32] = "make";
+                FILE *probe = popen("make --version 2>NUL", "r");
+                if (probe) {
+                    char _tmp[64] = {0};
+                    if (fgets(_tmp, sizeof(_tmp), probe) == NULL) {
+                        strncpy(make_tool, "mingw32-make", sizeof(make_tool) - 1);
+                    }
+                    pclose(probe);
+                } else {
+                    strncpy(make_tool, "mingw32-make", sizeof(make_tool) - 1);
+                }
+                if (after_make[0]) {
+                    snprintf(user_cmd, sizeof(user_cmd), "%s %s", make_tool, after_make);
+                } else {
+                    snprintf(user_cmd, sizeof(user_cmd), "%s", make_tool);
+                }
+            }
+#endif
 
             if (user_cmd[0]) {
 #ifdef _WIN32
@@ -757,12 +767,14 @@ int package_install(const char *name_or_url) {
                 printf("   🔨 ビルド中...\n");
                 FILE *bp = popen(build_cmd, "r");
                 if (bp) {
+                    /* 全出力をバッファリングし、失敗時に全行を表示する */
                     char line[1024];
+                    char *build_log = NULL;
+                    size_t log_len = 0;
                     while (fgets(line, sizeof(line), bp)) {
-                        if (strstr(line, "error") || strstr(line, "エラー") ||
-                            strstr(line, "warning") || strstr(line, "警告")) {
-                            printf("      %s", line);
-                        }
+                        size_t ll = strlen(line);
+                        char *tmp = realloc(build_log, log_len + ll + 1);
+                        if (tmp) { build_log = tmp; memcpy(build_log + log_len, line, ll + 1); log_len += ll; }
                     }
                     int bstatus = pclose(bp);
 #ifdef _WIN32
@@ -789,7 +801,24 @@ int package_install(const char *name_or_url) {
                         }
                     } else {
                         printf("   ⚠  ビルドに失敗しました\n");
+                        if (build_log && log_len > 0) {
+                            printf("   --- ビルドログ ---\n");
+                            /* 行ごとに表示（最大40行）*/
+                            char *p = build_log;
+                            int shown = 0;
+                            while (*p && shown < 40) {
+                                char *nl = strchr(p, '\n');
+                                size_t span = nl ? (size_t)(nl - p + 1) : strlen(p);
+                                printf("      %.*s", (int)span, p);
+                                if (!nl) { printf("\n"); }
+                                p += span;
+                                shown++;
+                            }
+                            if (*p) printf("      ... (省略)\n");
+                            printf("   ------------------\n");
+                        }
                     }
+                    free(build_log);
                 }
                 } /* if (build_cmd[0]) */
             } else {
