@@ -676,6 +676,21 @@ int package_install(const char *name_or_url) {
                         if (!dir_exists(include_dir)) include_dir[0] = '\0';
                     }
                 }
+                /* バイナリ隣に include/ がない場合はシステム標準パスを試す */
+                if (!include_dir[0]) {
+                    const char *fallbacks[] = {
+                        "/usr/local/include/hajimu",
+                        "/usr/include/hajimu",
+                        "/opt/homebrew/include/hajimu",
+                        NULL
+                    };
+                    for (int _fi = 0; fallbacks[_fi]; _fi++) {
+                        if (dir_exists(fallbacks[_fi])) {
+                            snprintf(include_dir, sizeof(include_dir), "%s", fallbacks[_fi]);
+                            break;
+                        }
+                    }
+                }
             }
 
             char user_cmd[PACKAGE_MAX_PATH] = {0};

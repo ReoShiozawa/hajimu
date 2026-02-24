@@ -2,6 +2,22 @@
 
 すべての注目すべき変更はこのプロジェクトに記録されます。
 
+## [v1.2.11] - 2026-02-24
+
+### 🐛 パッケージビルド時の HAJIMU_INCLUDE 自動検出修正
+
+#### 追加
+- **Makefile**: `install` / `uninstall` ターゲットを追加
+  - `sudo make install` で `nihongo` → `/usr/local/bin/hajimu`、`hajimu_plugin.h` → `/usr/local/include/hajimu/` にインストール
+  - `PREFIX` 変数でインストール先を変更可能 (`make install PREFIX=/opt/hajimu`)
+
+#### 修正
+- **package.c**: `hajimu pkg install` 実行時の `HAJIMU_INCLUDE` 自動検出にシステム標準パスのフォールバックを追加
+  - バイナリ随伴 `include/` が見つからない場合、`/usr/local/include/hajimu`、`/usr/include/hajimu`、`/opt/homebrew/include/hajimu` を順に検索
+  - これにより `hajimu pkg install` 実行時に jp ソースツリーがなくても `hajimu_plugin.h` が見つかりパッケージがコンパイルできるように
+
+---
+
 ## [v1.2.10] - 2026-02-24
 
 ### 🐛 Windows CRLF 改行対応 — 字句解析器の空行検出を修正

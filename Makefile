@@ -117,6 +117,8 @@ help:
 	@echo "  release           - リリースビルド"
 	@echo "  windows           - Windows向けクロスコンパイル (hajimu.exe)"
 	@echo "  windows-installer - Windows インストーラー .exe を生成 (NSIS必要)"
+	@echo "  install           - /usr/local/bin/hajimu にインストール (sudo)"
+	@echo "  uninstall         - アンインストール (sudo)"
 	@echo "  help              - このヘルプを表示"
 
 # =============================================================================
@@ -172,5 +174,26 @@ clean-windows:
 	rm -rf $(WIN_BUILD) $(WIN_DIST)
 	@echo "Windows ビルドをクリーンアップ完了"
 
+# インストール先
+PREFIX      ?= /usr/local
+BIN_DIR      = $(PREFIX)/bin
+INCLUDE_DIR  = $(PREFIX)/include/hajimu
+
+# インストール (sudo make install)
+install: $(TARGET)
+	@echo "インストール中 → $(BIN_DIR)/hajimu"
+	@mkdir -p $(BIN_DIR)
+	cp $(TARGET) $(BIN_DIR)/hajimu
+	@echo "ヘッダーをインストール中 → $(INCLUDE_DIR)/"
+	@mkdir -p $(INCLUDE_DIR)
+	cp include/hajimu_plugin.h $(INCLUDE_DIR)/
+	@echo "インストール完了"
+
+# アンインストール (sudo make uninstall)
+uninstall:
+	rm -f $(BIN_DIR)/hajimu
+	rm -rf $(INCLUDE_DIR)
+	@echo "アンインストール完了"
+
 .PHONY: all run hello factorial fibonacci test clean debug release rebuild help \
-        windows windows-installer clean-windows
+        install uninstall windows windows-installer clean-windows
