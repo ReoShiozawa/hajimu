@@ -705,9 +705,7 @@ int package_install(const char *name_or_url) {
             }
 
 #ifdef _WIN32
-            /* make コマンドかどうか判定し、引数部分を保存しておく。
-             * MSYS2 bash 経由でビルドする場合は "make <args>" のまま使うため
-             * mingw32-make への置き換えの前に退避する。 */
+            /* make コマンドかどうか判定し、引数部分を保存する */
             bool is_make_cmd = false;
             char make_args_only[PACKAGE_MAX_PATH] = {0};
             if (user_cmd[0] &&
@@ -718,179 +716,199 @@ int package_install(const char *name_or_url) {
                     strncpy(make_args_only, user_cmd + 5, sizeof(make_args_only) - 1);
                 }
             }
-
-            /* Windows: "make" が使えるか確認し、なければ "mingw32-make" に置き換える。
-             * (MSYS2 bash 経由ビルドに失敗した場合のフォールバック用にも使う) */
-            if (is_make_cmd) {
-                const char *after_make = user_cmd[4] ? user_cmd + 5 : "";
-                char make_tool[32] = "make";
-                FILE *probe = popen("make --version 2>NUL", "r");
-                if (probe) {
-                    char _tmp[64] = {0};
-                    if (fgets(_tmp, sizeof(_tmp), probe) == NULL) {
-                        strncpy(make_tool, "mingw32-make", sizeof(make_tool) - 1);
-                    }
-                    pclose(probe);
-                } else {
-                    strncpy(make_tool, "mingw32-make", sizeof(make_tool) - 1);
-                }
-                if (after_make[0]) {
-                    snprintf(user_cmd, sizeof(user_cmd), "%s %s", make_tool, after_make);
-                } else {
-                    snprintf(user_cmd, sizeof(user_cmd), "%s", make_tool);
-                }
-            }
 #endif
 
             if (user_cmd[0]) {
 #ifdef _WIN32
                 /* ================================================================
-                 * Windows ビルド戦略 (優先順位順):
+                 * Windows ビルド戦略
                  *
-                 * [1] MSYS2 bash --login 経由
-                 *     bash の login シェルは /etc/profile.d/ 以下の sh を実行して
-                 *     /mingw64/bin を PATH に追加するため gcc が確実に見つかる。
-                 *     C:\msys64\usr\bin\bash.exe (または C:\msys2\...) が存在し、
-                 *     かつ make コマンドの場合にこのルートを使う。
+                 * MSYS2 の gcc / sh.exe のパスを動的に発見して PATH に追加し、
+                 * その後 MSYS2 bash --login 経由でビルドする。
+                 * bash が見つからない場合は mingw32-make を直接呼ぶ。
                  *
-                 * [2] フォールバック: SetEnvironmentVariableA + mingw32-make
-                 *     MSYS2 bash が見つからない場合は既存の PATH 補完方式を使う。
+                 * MSYS2 ルートの発見順:
+                 *   1. where.exe で gcc.exe を直接検索
+                 *   2. where.exe で mingw32-make.exe を検索 → 同じ bin ディレクトリ
+                 *   3. where.exe で make.exe を検索 → 同じ bin ディレクトリ
+                 *   4. where.exe で bash.exe / sh.exe を検索 → usr\bin から root を逆算
+                 *   5. 固定パス候補 (C:\msys64, C:\msys2, D:\msys64 等)
+                 *
+                 * 文字化け対策:
+                 *   LANG=C / LC_ALL=C を設定し make/gcc エラーを英語出力にする。
                  * ================================================================ */
 
-                /* Windows パスの / を \ に変換 (_chdir 用) */
+                /* Windows パスの / → \ 変換 */
                 char win_pkg_dir[PACKAGE_MAX_PATH];
                 snprintf(win_pkg_dir, sizeof(win_pkg_dir), "%s", pkg_dir);
-                for (char *p = win_pkg_dir; *p; p++) { if (*p == '/') *p = '\\'; }
-                /* フォールバック時の元ディレクトリ復帰用 (bash ルートでは不使用) */
+                for (char *p = win_pkg_dir; *p; p++) if (*p == '/') *p = '\\';
+
                 char orig_dir[PACKAGE_MAX_PATH] = {0};
                 _getcwd(orig_dir, sizeof(orig_dir));
 
-                /* HAJIMU_INCLUDE も同様に変換 */
                 char win_inc_dir[PACKAGE_MAX_PATH] = {0};
                 if (include_dir[0]) {
                     snprintf(win_inc_dir, sizeof(win_inc_dir), "%s", include_dir);
-                    for (char *p = win_inc_dir; *p; p++) { if (*p == '/') *p = '\\'; }
+                    for (char *p = win_inc_dir; *p; p++) if (*p == '/') *p = '\\';
                 }
 
-                /* [1] MSYS2 bash を探す */
-                char msys2_bash[512] = {0};
-                static const char * const bash_candidates[] = {
-                    "C:\\msys64\\usr\\bin\\bash.exe",
-                    "C:\\msys2\\usr\\bin\\bash.exe",
-                    "D:\\msys64\\usr\\bin\\bash.exe",
-                    "D:\\msys2\\usr\\bin\\bash.exe",
-                    NULL
-                };
-                for (int bi = 0; bash_candidates[bi]; bi++) {
-                    DWORD battr = GetFileAttributesA(bash_candidates[bi]);
-                    if (battr != INVALID_FILE_ATTRIBUTES &&
-                        !(battr & FILE_ATTRIBUTE_DIRECTORY)) {
-                        strncpy(msys2_bash, bash_candidates[bi], sizeof(msys2_bash) - 1);
-                        break;
+                /* ---- STEP 1: gcc の bin ディレクトリを発見 ---- */
+                char gcc_bin_dir[PACKAGE_MAX_PATH] = {0};  /* e.g. C:\msys64\mingw64\bin */
+                char msys2_root[PACKAGE_MAX_PATH]  = {0};  /* e.g. C:\msys64            */
+
+                /* where.exe でコマンドの絶対パスを得てその親ディレクトリを返すヘルパーラムダ */
+#define WIN_WHERE_BINDIR(cmd, out, outsz) do { \
+    FILE *_wh = popen("where " cmd " 2>NUL", "r"); \
+    if (_wh) { \
+        char _wl[PACKAGE_MAX_PATH] = {0}; \
+        if (fgets(_wl, sizeof(_wl), _wh)) { \
+            size_t _l = strlen(_wl); \
+            while (_l > 0 && (_wl[_l-1]=='\n'||_wl[_l-1]=='\r'||_wl[_l-1]==' ')) _wl[--_l]='\0'; \
+            char *_sep = strrchr(_wl, '\\'); \
+            if (!_sep) _sep = strrchr(_wl, '/'); \
+            if (_sep) { *_sep = '\0'; strncpy((out), _wl, (outsz)-1); } \
+        } \
+        pclose(_wh); \
+    } \
+} while(0)
+
+                /* 1a. where gcc */
+                if (!gcc_bin_dir[0]) WIN_WHERE_BINDIR("gcc.exe", gcc_bin_dir, sizeof(gcc_bin_dir));
+                /* 1b. where mingw32-make (gcc は同じ bin にある) */
+                if (!gcc_bin_dir[0]) WIN_WHERE_BINDIR("mingw32-make.exe", gcc_bin_dir, sizeof(gcc_bin_dir));
+                /* 1c. where make */
+                if (!gcc_bin_dir[0]) WIN_WHERE_BINDIR("make.exe", gcc_bin_dir, sizeof(gcc_bin_dir));
+
+                /* ---- STEP 2: MSYS2 ルートを発見して msys2_root を確定 ---- */
+
+                /* gcc_bin_dir が "...\msys64\mingw64\bin" 等なら2段上がると root */
+                if (gcc_bin_dir[0]) {
+                    char tmp[PACKAGE_MAX_PATH];
+                    strncpy(tmp, gcc_bin_dir, sizeof(tmp) - 1);
+                    /* 1段上 (mingw64) */
+                    char *s1 = strrchr(tmp, '\\');
+                    if (s1) { *s1 = '\0';
+                        /* 2段上 (msys64) */
+                        char *s2 = strrchr(tmp, '\\');
+                        if (s2) { *s2 = '\0'; strncpy(msys2_root, tmp, sizeof(msys2_root)-1); }
                     }
                 }
 
-                if (msys2_bash[0] && is_make_cmd) {
-                    /* Windows パス → MSYS2 パス変換: "C:\foo\bar" → "/c/foo/bar" */
+                /* where bash.exe / sh.exe で逆算 */
+                if (!msys2_root[0]) {
+                    char usr_bin[PACKAGE_MAX_PATH] = {0};
+                    WIN_WHERE_BINDIR("bash.exe", usr_bin, sizeof(usr_bin));
+                    if (!usr_bin[0]) WIN_WHERE_BINDIR("sh.exe", usr_bin, sizeof(usr_bin));
+                    if (usr_bin[0]) {
+                        /* usr_bin = "...\msys64\usr\bin" → 2段上がると root */
+                        char tmp[PACKAGE_MAX_PATH];
+                        strncpy(tmp, usr_bin, sizeof(tmp)-1);
+                        char *s1 = strrchr(tmp, '\\');
+                        if (s1) { *s1 = '\0';
+                            char *s2 = strrchr(tmp, '\\');
+                            if (s2) { *s2 = '\0'; strncpy(msys2_root, tmp, sizeof(msys2_root)-1); }
+                        }
+                    }
+                }
+
+                /* 固定候補で補完 */
+                if (!msys2_root[0]) {
+                    static const char * const roots[] = {
+                        "C:\\msys64","C:\\msys2","D:\\msys64","D:\\msys2",
+                        "C:\\tools\\msys64","C:\\tools\\msys2", NULL
+                    };
+                    for (int ri = 0; roots[ri]; ri++) {
+                        char probe[PACKAGE_MAX_PATH + 20];
+                        snprintf(probe, sizeof(probe), "%s\\usr\\bin\\bash.exe", roots[ri]);
+                        if (GetFileAttributesA(probe) != INVALID_FILE_ATTRIBUTES) {
+                            strncpy(msys2_root, roots[ri], sizeof(msys2_root)-1);
+                            break;
+                        }
+                    }
+                }
+
+                /* msys2_root から gcc_bin_dir を補完 */
+                if (msys2_root[0] && !gcc_bin_dir[0]) {
+                    snprintf(gcc_bin_dir, sizeof(gcc_bin_dir), "%s\\mingw64\\bin", msys2_root);
+                }
+
+#undef WIN_WHERE_BINDIR
+
+                /* ---- STEP 3: LANG=C で文字化け防止、PATH に gcc bin を追加 ---- */
+                SetEnvironmentVariableA("LANG", "C");
+                SetEnvironmentVariableA("LC_ALL", "C");
+                if (win_inc_dir[0]) SetEnvironmentVariableA("HAJIMU_INCLUDE", win_inc_dir);
+
+                if (gcc_bin_dir[0]) {
+                    char cur_path[8192] = {0};
+                    GetEnvironmentVariableA("PATH", cur_path, sizeof(cur_path));
+                    char new_path[8192];
+                    if (cur_path[0])
+                        snprintf(new_path, sizeof(new_path), "%s;%s", gcc_bin_dir, cur_path);
+                    else
+                        snprintf(new_path, sizeof(new_path), "%s", gcc_bin_dir);
+                    SetEnvironmentVariableA("PATH", new_path);
+                }
+
+                /* ---- STEP 4: ビルドコマンド構築 ---- */
+                if (msys2_root[0] && is_make_cmd) {
+                    /* bash --login 経由: /etc/profile.d/ が mingw64/bin を PATH に追加 */
+                    char bash_exe[PACKAGE_MAX_PATH];
+                    snprintf(bash_exe, sizeof(bash_exe), "%s\\usr\\bin\\bash.exe", msys2_root);
+
+                    /* Windows パス → MSYS2 POSIX パス変換 (C:\foo → /c/foo) */
                     char msys2_dir[PACKAGE_MAX_PATH] = {0};
                     if (pkg_dir[1] == ':') {
                         msys2_dir[0] = '/';
                         msys2_dir[1] = (char)tolower((unsigned char)pkg_dir[0]);
                         strncpy(msys2_dir + 2, pkg_dir + 2, sizeof(msys2_dir) - 3);
+                        for (char *p = msys2_dir; *p; p++) if (*p == '\\') *p = '/';
                     } else {
-                        strncpy(msys2_dir, pkg_dir, sizeof(msys2_dir) - 1);
-                    }
-                    for (char *p = msys2_dir; *p; p++) if (*p == '\\') *p = '/';
-
-                    /* make コマンド (MSYS2 bash 内では "make" をそのまま使う) */
-                    char make_cmd_bash[PACKAGE_MAX_PATH] = {0};
-                    if (make_args_only[0]) {
-                        snprintf(make_cmd_bash, sizeof(make_cmd_bash), "make %s", make_args_only);
-                    } else {
-                        strncpy(make_cmd_bash, "make", sizeof(make_cmd_bash) - 1);
+                        strncpy(msys2_dir, pkg_dir, sizeof(msys2_dir)-1);
+                        for (char *p = msys2_dir; *p; p++) if (*p == '\\') *p = '/';
                     }
 
+                    const char *make_target = make_args_only[0] ? make_args_only : "";
                     if (win_inc_dir[0]) {
-                        /* HAJIMU_INCLUDE も MSYS2 パスに変換 */
                         char msys2_inc[PACKAGE_MAX_PATH] = {0};
                         if (include_dir[1] == ':') {
                             msys2_inc[0] = '/';
                             msys2_inc[1] = (char)tolower((unsigned char)include_dir[0]);
                             strncpy(msys2_inc + 2, include_dir + 2, sizeof(msys2_inc) - 3);
+                            for (char *p = msys2_inc; *p; p++) if (*p == '\\') *p = '/';
                         } else {
-                            strncpy(msys2_inc, include_dir, sizeof(msys2_inc) - 1);
+                            strncpy(msys2_inc, include_dir, sizeof(msys2_inc)-1);
                         }
-                        for (char *p = msys2_inc; *p; p++) if (*p == '\\') *p = '/';
                         snprintf(build_cmd, sizeof(build_cmd),
-                                 "\"%s\" --login -c \"cd '%s' && HAJIMU_INCLUDE='%s' %s\" 2>&1",
-                                 msys2_bash, msys2_dir, msys2_inc, make_cmd_bash);
+                            "\"%s\" --login -c \"cd '%s' && HAJIMU_INCLUDE='%s' make %s\" 2>&1",
+                            bash_exe, msys2_dir, msys2_inc, make_target);
                     } else {
                         snprintf(build_cmd, sizeof(build_cmd),
-                                 "\"%s\" --login -c \"cd '%s' && %s\" 2>&1",
-                                 msys2_bash, msys2_dir, make_cmd_bash);
+                            "\"%s\" --login -c \"cd '%s' && make %s\" 2>&1",
+                            bash_exe, msys2_dir, make_target);
                     }
                 } else {
-                    /* [2] フォールバック: SetEnvironmentVariableA + PATH 補完 */
-                    if (win_inc_dir[0]) {
-                        SetEnvironmentVariableA("HAJIMU_INCLUDE", win_inc_dir);
+                    /* フォールバック: mingw32-make を直接呼ぶ (PATH は既に補完済み) */
+                    char make_tool[32] = "mingw32-make";
+                    /* make が PATH にあればそちらを優先 */
+                    FILE *gm = popen("make --version 2>NUL", "r");
+                    if (gm) {
+                        char _t[64] = {0};
+                        if (fgets(_t, sizeof(_t), gm)) strncpy(make_tool, "make", sizeof(make_tool)-1);
+                        pclose(gm);
                     }
-
-                    char path_extra[4096] = {0};
-
-                    /* mingw32-make のある場所を where で特定 */
-                    FILE *wh = popen("where mingw32-make 2>NUL", "r");
-                    if (wh) {
-                        char wline[512] = {0};
-                        if (fgets(wline, sizeof(wline), wh)) {
-                            size_t wl = strlen(wline);
-                            while (wl > 0 && (wline[wl-1] == '\n' || wline[wl-1] == '\r' ||
-                                              wline[wl-1] == ' ')) wline[--wl] = '\0';
-                            char *last_sep = strrchr(wline, '\\');
-                            if (!last_sep) last_sep = strrchr(wline, '/');
-                            if (last_sep) {
-                                *last_sep = '\0';
-                                strncat(path_extra, wline, sizeof(path_extra) - strlen(path_extra) - 1);
-                            }
-                        }
-                        pclose(wh);
-                    }
-
-                    /* 一般的な MSYS2 インストールパスを追加 */
-                    static const char * const msys2_bins[] = {
-                        "C:\\msys64\\mingw64\\bin",
-                        "C:\\msys2\\mingw64\\bin",
-                        "D:\\msys64\\mingw64\\bin",
-                        "D:\\msys2\\mingw64\\bin",
-                        "C:\\msys64\\usr\\bin",
-                        "C:\\msys2\\usr\\bin",
-                        NULL
-                    };
-                    for (int mi = 0; msys2_bins[mi]; mi++) {
-                        DWORD attr = GetFileAttributesA(msys2_bins[mi]);
-                        if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
-                            if (!strstr(path_extra, msys2_bins[mi])) {
-                                if (path_extra[0]) strncat(path_extra, ";", sizeof(path_extra) - strlen(path_extra) - 1);
-                                strncat(path_extra, msys2_bins[mi], sizeof(path_extra) - strlen(path_extra) - 1);
-                            }
-                        }
-                    }
-
-                    if (path_extra[0]) {
-                        char cur_path[8192] = {0};
-                        DWORD cp_len = GetEnvironmentVariableA("PATH", cur_path, sizeof(cur_path));
-                        char new_path[8192] = {0};
-                        if (cp_len > 0 && cp_len < sizeof(cur_path)) {
-                            snprintf(new_path, sizeof(new_path), "%s;%s", path_extra, cur_path);
-                        } else {
-                            snprintf(new_path, sizeof(new_path), "%s", path_extra);
-                        }
-                        SetEnvironmentVariableA("PATH", new_path);
-                    }
+                    char final_cmd[PACKAGE_MAX_PATH] = {0};
+                    if (make_args_only[0])
+                        snprintf(final_cmd, sizeof(final_cmd), "%s %s", make_tool, make_args_only);
+                    else if (is_make_cmd)
+                        strncpy(final_cmd, make_tool, sizeof(final_cmd)-1);
+                    else
+                        strncpy(final_cmd, user_cmd, sizeof(final_cmd)-1);
 
                     if (_chdir(win_pkg_dir) != 0) {
                         fprintf(stderr, "   ⚠  ディレクトリ変更失敗: %s\n", win_pkg_dir);
                     } else {
-                        snprintf(build_cmd, sizeof(build_cmd), "%s 2>&1", user_cmd);
+                        snprintf(build_cmd, sizeof(build_cmd), "%s 2>&1", final_cmd);
                     }
                 }
 #else
@@ -904,6 +922,15 @@ int package_install(const char *name_or_url) {
                 }
 #endif
                 if (build_cmd[0]) {
+#ifdef _WIN32
+                /* ビルド環境情報を表示 (デバッグ用) */
+                if (msys2_root[0])
+                    printf("   → MSYS2: %s\n", msys2_root);
+                else if (gcc_bin_dir[0])
+                    printf("   → gcc: %s\n", gcc_bin_dir);
+                else
+                    printf("   ⚠  MSYS2/MinGW が見つかりません。MSYS2 MinGW64 シェルから実行してください。\n");
+#endif
                 printf("   🔨 ビルド中...\n");
                 FILE *bp = popen(build_cmd, "r");
                 if (bp) {
