@@ -705,11 +705,23 @@ int package_install(const char *name_or_url) {
             }
 
 #ifdef _WIN32
-            /* Windows: hajimu.json の "ビルド" に書かれた "make ..." も含め
-             * "make" が使えるか確認し、なければ "mingw32-make" に置き換える。 */
+            /* make コマンドかどうか判定し、引数部分を保存しておく。
+             * MSYS2 bash 経由でビルドする場合は "make <args>" のまま使うため
+             * mingw32-make への置き換えの前に退避する。 */
+            bool is_make_cmd = false;
+            char make_args_only[PACKAGE_MAX_PATH] = {0};
             if (user_cmd[0] &&
-                (strncmp(user_cmd, "make", 4) == 0) &&
+                strncmp(user_cmd, "make", 4) == 0 &&
                 (user_cmd[4] == '\0' || user_cmd[4] == ' ')) {
+                is_make_cmd = true;
+                if (user_cmd[4] == ' ') {
+                    strncpy(make_args_only, user_cmd + 5, sizeof(make_args_only) - 1);
+                }
+            }
+
+            /* Windows: "make" が使えるか確認し、なければ "mingw32-make" に置き換える。
+             * (MSYS2 bash 経由ビルドに失敗した場合のフォールバック用にも使う) */
+            if (is_make_cmd) {
                 const char *after_make = user_cmd[4] ? user_cmd + 5 : "";
                 char make_tool[32] = "make";
                 FILE *probe = popen("make --version 2>NUL", "r");
@@ -732,42 +744,107 @@ int package_install(const char *name_or_url) {
 
             if (user_cmd[0]) {
 #ifdef _WIN32
-                /* Windows CMD は "VAR=val cmd" 構文をサポートしない。
-                 * SetEnvironmentVariableA (Win32 API) で環境変数を設定する。
-                 * _putenv はスタック変数のポインタをそのまま保持する実装があり
-                 * 子プロセスへの伝播が不確実なため使用しない。
-                 * cmd /C "cd /D "path with space" && cmd" はCMDが
-                 * 内側の " を誤解析するため _chdir() でディレクトリ変更する。 */
-                if (include_dir[0]) {
-                    SetEnvironmentVariableA("HAJIMU_INCLUDE", include_dir);
-                }
-                /* カレントディレクトリをパッケージディレクトリに変更 */
-                char orig_dir[PACKAGE_MAX_PATH] = {0};
-                _getcwd(orig_dir, sizeof(orig_dir));
-                /* Windows パスの / を \ に再変換して _chdir に渡す */
+                /* ================================================================
+                 * Windows ビルド戦略 (優先順位順):
+                 *
+                 * [1] MSYS2 bash --login 経由
+                 *     bash の login シェルは /etc/profile.d/ 以下の sh を実行して
+                 *     /mingw64/bin を PATH に追加するため gcc が確実に見つかる。
+                 *     C:\msys64\usr\bin\bash.exe (または C:\msys2\...) が存在し、
+                 *     かつ make コマンドの場合にこのルートを使う。
+                 *
+                 * [2] フォールバック: SetEnvironmentVariableA + mingw32-make
+                 *     MSYS2 bash が見つからない場合は既存の PATH 補完方式を使う。
+                 * ================================================================ */
+
+                /* Windows パスの / を \ に変換 (_chdir 用) */
                 char win_pkg_dir[PACKAGE_MAX_PATH];
                 snprintf(win_pkg_dir, sizeof(win_pkg_dir), "%s", pkg_dir);
                 for (char *p = win_pkg_dir; *p; p++) { if (*p == '/') *p = '\\'; }
+                /* フォールバック時の元ディレクトリ復帰用 (bash ルートでは不使用) */
+                char orig_dir[PACKAGE_MAX_PATH] = {0};
+                _getcwd(orig_dir, sizeof(orig_dir));
 
-                /* ----------------------------------------------------------------
-                 * MSYS2 / MinGW64 の bin を PATH に確実に含める。
-                 * SetEnvironmentVariableA は Win32 API であり、以降に popen で
-                 * 生成される子プロセス (cmd.exe → mingw32-make → gcc) すべてに
-                 * 伝播することが保証されている。
-                 * 優先順位:
-                 *   1. where.exe で mingw32-make の場所を調べ、同じフォルダを追加
-                 *   2. 一般的な MSYS2 インストールパスを候補として追加
-                 * ---------------------------------------------------------------- */
-                {
+                /* HAJIMU_INCLUDE も同様に変換 */
+                char win_inc_dir[PACKAGE_MAX_PATH] = {0};
+                if (include_dir[0]) {
+                    snprintf(win_inc_dir, sizeof(win_inc_dir), "%s", include_dir);
+                    for (char *p = win_inc_dir; *p; p++) { if (*p == '/') *p = '\\'; }
+                }
+
+                /* [1] MSYS2 bash を探す */
+                char msys2_bash[512] = {0};
+                static const char * const bash_candidates[] = {
+                    "C:\\msys64\\usr\\bin\\bash.exe",
+                    "C:\\msys2\\usr\\bin\\bash.exe",
+                    "D:\\msys64\\usr\\bin\\bash.exe",
+                    "D:\\msys2\\usr\\bin\\bash.exe",
+                    NULL
+                };
+                for (int bi = 0; bash_candidates[bi]; bi++) {
+                    DWORD battr = GetFileAttributesA(bash_candidates[bi]);
+                    if (battr != INVALID_FILE_ATTRIBUTES &&
+                        !(battr & FILE_ATTRIBUTE_DIRECTORY)) {
+                        strncpy(msys2_bash, bash_candidates[bi], sizeof(msys2_bash) - 1);
+                        break;
+                    }
+                }
+
+                if (msys2_bash[0] && is_make_cmd) {
+                    /* Windows パス → MSYS2 パス変換: "C:\foo\bar" → "/c/foo/bar" */
+                    char msys2_dir[PACKAGE_MAX_PATH] = {0};
+                    if (pkg_dir[1] == ':') {
+                        msys2_dir[0] = '/';
+                        msys2_dir[1] = (char)tolower((unsigned char)pkg_dir[0]);
+                        strncpy(msys2_dir + 2, pkg_dir + 2, sizeof(msys2_dir) - 3);
+                    } else {
+                        strncpy(msys2_dir, pkg_dir, sizeof(msys2_dir) - 1);
+                    }
+                    for (char *p = msys2_dir; *p; p++) if (*p == '\\') *p = '/';
+
+                    /* make コマンド (MSYS2 bash 内では "make" をそのまま使う) */
+                    char make_cmd_bash[PACKAGE_MAX_PATH] = {0};
+                    if (make_args_only[0]) {
+                        snprintf(make_cmd_bash, sizeof(make_cmd_bash), "make %s", make_args_only);
+                    } else {
+                        strncpy(make_cmd_bash, "make", sizeof(make_cmd_bash) - 1);
+                    }
+
+                    if (win_inc_dir[0]) {
+                        /* HAJIMU_INCLUDE も MSYS2 パスに変換 */
+                        char msys2_inc[PACKAGE_MAX_PATH] = {0};
+                        if (include_dir[1] == ':') {
+                            msys2_inc[0] = '/';
+                            msys2_inc[1] = (char)tolower((unsigned char)include_dir[0]);
+                            strncpy(msys2_inc + 2, include_dir + 2, sizeof(msys2_inc) - 3);
+                        } else {
+                            strncpy(msys2_inc, include_dir, sizeof(msys2_inc) - 1);
+                        }
+                        for (char *p = msys2_inc; *p; p++) if (*p == '\\') *p = '/';
+                        snprintf(build_cmd, sizeof(build_cmd),
+                                 "\"%s\" --login -c \"cd '%s' && HAJIMU_INCLUDE='%s' %s\" 2>&1",
+                                 msys2_bash, msys2_dir, msys2_inc, make_cmd_bash);
+                    } else {
+                        snprintf(build_cmd, sizeof(build_cmd),
+                                 "\"%s\" --login -c \"cd '%s' && %s\" 2>&1",
+                                 msys2_bash, msys2_dir, make_cmd_bash);
+                    }
+                } else {
+                    /* [2] フォールバック: SetEnvironmentVariableA + PATH 補完 */
+                    if (win_inc_dir[0]) {
+                        SetEnvironmentVariableA("HAJIMU_INCLUDE", win_inc_dir);
+                    }
+
                     char path_extra[4096] = {0};
 
-                    /* 1. where mingw32-make でインストール先を特定 */
+                    /* mingw32-make のある場所を where で特定 */
                     FILE *wh = popen("where mingw32-make 2>NUL", "r");
                     if (wh) {
                         char wline[512] = {0};
                         if (fgets(wline, sizeof(wline), wh)) {
                             size_t wl = strlen(wline);
-                            while (wl > 0 && (wline[wl-1] == '\n' || wline[wl-1] == '\r' || wline[wl-1] == ' ')) wline[--wl] = '\0';
+                            while (wl > 0 && (wline[wl-1] == '\n' || wline[wl-1] == '\r' ||
+                                              wline[wl-1] == ' ')) wline[--wl] = '\0';
                             char *last_sep = strrchr(wline, '\\');
                             if (!last_sep) last_sep = strrchr(wline, '/');
                             if (last_sep) {
@@ -778,10 +855,12 @@ int package_install(const char *name_or_url) {
                         pclose(wh);
                     }
 
-                    /* 2. 一般的な MSYS2 インストールパスを候補として追加 */
+                    /* 一般的な MSYS2 インストールパスを追加 */
                     static const char * const msys2_bins[] = {
                         "C:\\msys64\\mingw64\\bin",
                         "C:\\msys2\\mingw64\\bin",
+                        "D:\\msys64\\mingw64\\bin",
+                        "D:\\msys2\\mingw64\\bin",
                         "C:\\msys64\\usr\\bin",
                         "C:\\msys2\\usr\\bin",
                         NULL
@@ -796,7 +875,6 @@ int package_install(const char *name_or_url) {
                         }
                     }
 
-                    /* SetEnvironmentVariableA で PATH を更新 (Win32 API: 子プロセスに確実に伝播) */
                     if (path_extra[0]) {
                         char cur_path[8192] = {0};
                         DWORD cp_len = GetEnvironmentVariableA("PATH", cur_path, sizeof(cur_path));
@@ -808,12 +886,12 @@ int package_install(const char *name_or_url) {
                         }
                         SetEnvironmentVariableA("PATH", new_path);
                     }
-                }
 
-                if (_chdir(win_pkg_dir) != 0) {
-                    fprintf(stderr, "   ⚠  ディレクトリ変更失敗: %s\n", win_pkg_dir);
-                } else {
-                    snprintf(build_cmd, sizeof(build_cmd), "%s 2>&1", user_cmd);
+                    if (_chdir(win_pkg_dir) != 0) {
+                        fprintf(stderr, "   ⚠  ディレクトリ変更失敗: %s\n", win_pkg_dir);
+                    } else {
+                        snprintf(build_cmd, sizeof(build_cmd), "%s 2>&1", user_cmd);
+                    }
                 }
 #else
                 if (include_dir[0]) {
