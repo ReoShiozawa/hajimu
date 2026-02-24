@@ -733,13 +733,13 @@ int package_install(const char *name_or_url) {
             if (user_cmd[0]) {
 #ifdef _WIN32
                 /* Windows CMD は "VAR=val cmd" 構文をサポートしない。
-                 * _putenv で環境変数を設定してから popen で実行する。
+                 * SetEnvironmentVariableA (Win32 API) で環境変数を設定する。
+                 * _putenv はスタック変数のポインタをそのまま保持する実装があり
+                 * 子プロセスへの伝播が不確実なため使用しない。
                  * cmd /C "cd /D "path with space" && cmd" はCMDが
                  * 内側の " を誤解析するため _chdir() でディレクトリ変更する。 */
                 if (include_dir[0]) {
-                    char env_entry[PACKAGE_MAX_PATH + 20];
-                    snprintf(env_entry, sizeof(env_entry), "HAJIMU_INCLUDE=%s", include_dir);
-                    _putenv(env_entry);
+                    SetEnvironmentVariableA("HAJIMU_INCLUDE", include_dir);
                 }
                 /* カレントディレクトリをパッケージディレクトリに変更 */
                 char orig_dir[PACKAGE_MAX_PATH] = {0};
@@ -750,23 +750,24 @@ int package_install(const char *name_or_url) {
                 for (char *p = win_pkg_dir; *p; p++) { if (*p == '/') *p = '\\'; }
 
                 /* ----------------------------------------------------------------
-                 * MSYS2 / MinGW64 の bin が PATH に無い場合に補完する。
+                 * MSYS2 / MinGW64 の bin を PATH に確実に含める。
+                 * SetEnvironmentVariableA は Win32 API であり、以降に popen で
+                 * 生成される子プロセス (cmd.exe → mingw32-make → gcc) すべてに
+                 * 伝播することが保証されている。
                  * 優先順位:
                  *   1. where.exe で mingw32-make の場所を調べ、同じフォルダを追加
                  *   2. 一般的な MSYS2 インストールパスを候補として追加
                  * ---------------------------------------------------------------- */
                 {
-                    char path_extra[2048] = {0};
+                    char path_extra[4096] = {0};
 
                     /* 1. where mingw32-make でインストール先を特定 */
                     FILE *wh = popen("where mingw32-make 2>NUL", "r");
                     if (wh) {
                         char wline[512] = {0};
                         if (fgets(wline, sizeof(wline), wh)) {
-                            /* 末尾の改行・スペースを除去 */
                             size_t wl = strlen(wline);
                             while (wl > 0 && (wline[wl-1] == '\n' || wline[wl-1] == '\r' || wline[wl-1] == ' ')) wline[--wl] = '\0';
-                            /* mingw32-make.exe の親ディレクトリを取得 */
                             char *last_sep = strrchr(wline, '\\');
                             if (!last_sep) last_sep = strrchr(wline, '/');
                             if (last_sep) {
@@ -788,7 +789,6 @@ int package_install(const char *name_or_url) {
                     for (int mi = 0; msys2_bins[mi]; mi++) {
                         DWORD attr = GetFileAttributesA(msys2_bins[mi]);
                         if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
-                            /* 重複チェック: 既に含まれていれば追加しない */
                             if (!strstr(path_extra, msys2_bins[mi])) {
                                 if (path_extra[0]) strncat(path_extra, ";", sizeof(path_extra) - strlen(path_extra) - 1);
                                 strncat(path_extra, msys2_bins[mi], sizeof(path_extra) - strlen(path_extra) - 1);
@@ -796,16 +796,17 @@ int package_install(const char *name_or_url) {
                         }
                     }
 
-                    /* PATH の先頭に追加 */
+                    /* SetEnvironmentVariableA で PATH を更新 (Win32 API: 子プロセスに確実に伝播) */
                     if (path_extra[0]) {
-                        const char *cur_path = getenv("PATH");
-                        char new_path_env[4096] = {0};
-                        if (cur_path) {
-                            snprintf(new_path_env, sizeof(new_path_env), "PATH=%s;%s", path_extra, cur_path);
+                        char cur_path[8192] = {0};
+                        DWORD cp_len = GetEnvironmentVariableA("PATH", cur_path, sizeof(cur_path));
+                        char new_path[8192] = {0};
+                        if (cp_len > 0 && cp_len < sizeof(cur_path)) {
+                            snprintf(new_path, sizeof(new_path), "%s;%s", path_extra, cur_path);
                         } else {
-                            snprintf(new_path_env, sizeof(new_path_env), "PATH=%s", path_extra);
+                            snprintf(new_path, sizeof(new_path), "%s", path_extra);
                         }
-                        _putenv(new_path_env);
+                        SetEnvironmentVariableA("PATH", new_path);
                     }
                 }
 
