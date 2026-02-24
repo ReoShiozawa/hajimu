@@ -748,6 +748,67 @@ int package_install(const char *name_or_url) {
                 char win_pkg_dir[PACKAGE_MAX_PATH];
                 snprintf(win_pkg_dir, sizeof(win_pkg_dir), "%s", pkg_dir);
                 for (char *p = win_pkg_dir; *p; p++) { if (*p == '/') *p = '\\'; }
+
+                /* ----------------------------------------------------------------
+                 * MSYS2 / MinGW64 の bin が PATH に無い場合に補完する。
+                 * 優先順位:
+                 *   1. where.exe で mingw32-make の場所を調べ、同じフォルダを追加
+                 *   2. 一般的な MSYS2 インストールパスを候補として追加
+                 * ---------------------------------------------------------------- */
+                {
+                    char path_extra[2048] = {0};
+
+                    /* 1. where mingw32-make でインストール先を特定 */
+                    FILE *wh = popen("where mingw32-make 2>NUL", "r");
+                    if (wh) {
+                        char wline[512] = {0};
+                        if (fgets(wline, sizeof(wline), wh)) {
+                            /* 末尾の改行・スペースを除去 */
+                            size_t wl = strlen(wline);
+                            while (wl > 0 && (wline[wl-1] == '\n' || wline[wl-1] == '\r' || wline[wl-1] == ' ')) wline[--wl] = '\0';
+                            /* mingw32-make.exe の親ディレクトリを取得 */
+                            char *last_sep = strrchr(wline, '\\');
+                            if (!last_sep) last_sep = strrchr(wline, '/');
+                            if (last_sep) {
+                                *last_sep = '\0';
+                                strncat(path_extra, wline, sizeof(path_extra) - strlen(path_extra) - 1);
+                            }
+                        }
+                        pclose(wh);
+                    }
+
+                    /* 2. 一般的な MSYS2 インストールパスを候補として追加 */
+                    static const char * const msys2_bins[] = {
+                        "C:\\msys64\\mingw64\\bin",
+                        "C:\\msys2\\mingw64\\bin",
+                        "C:\\msys64\\usr\\bin",
+                        "C:\\msys2\\usr\\bin",
+                        NULL
+                    };
+                    for (int mi = 0; msys2_bins[mi]; mi++) {
+                        DWORD attr = GetFileAttributesA(msys2_bins[mi]);
+                        if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                            /* 重複チェック: 既に含まれていれば追加しない */
+                            if (!strstr(path_extra, msys2_bins[mi])) {
+                                if (path_extra[0]) strncat(path_extra, ";", sizeof(path_extra) - strlen(path_extra) - 1);
+                                strncat(path_extra, msys2_bins[mi], sizeof(path_extra) - strlen(path_extra) - 1);
+                            }
+                        }
+                    }
+
+                    /* PATH の先頭に追加 */
+                    if (path_extra[0]) {
+                        const char *cur_path = getenv("PATH");
+                        char new_path_env[4096] = {0};
+                        if (cur_path) {
+                            snprintf(new_path_env, sizeof(new_path_env), "PATH=%s;%s", path_extra, cur_path);
+                        } else {
+                            snprintf(new_path_env, sizeof(new_path_env), "PATH=%s", path_extra);
+                        }
+                        _putenv(new_path_env);
+                    }
+                }
+
                 if (_chdir(win_pkg_dir) != 0) {
                     fprintf(stderr, "   ⚠  ディレクトリ変更失敗: %s\n", win_pkg_dir);
                 } else {
