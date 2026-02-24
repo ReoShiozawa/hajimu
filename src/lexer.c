@@ -668,7 +668,8 @@ Token lexer_next(Lexer *lexer) {
             advance(lexer);
         }
         
-        // 空行またはコメント行の場合
+        // 空行またはコメント行の場合 (\r は CRLF 改行の CR をスキップ)
+        if (*lexer->current == '\r') advance(lexer);  // CRLF 対応
         if (*lexer->current == '\n' || *lexer->current == '#' || *lexer->current == '\0') {
             if (*lexer->current == '\n') {
                 advance(lexer);
