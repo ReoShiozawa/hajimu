@@ -782,6 +782,8 @@ int package_install(const char *name_or_url) {
                 /* ---- STEP 2: MSYS2 ルートを発見して msys2_root を確定 ---- */
 
                 /* gcc_bin_dir が "...\msys64\mingw64\bin" 等なら2段上がると root */
+                /* ただし非MSYS2 gcc (WSL/Git等) を誤検出しないよう、root に    */
+                /* mingw64\bin\gcc.exe が存在するか確認して初めて msys2_root に設定 */
                 if (gcc_bin_dir[0]) {
                     char tmp[PACKAGE_MAX_PATH];
                     strncpy(tmp, gcc_bin_dir, sizeof(tmp) - 1);
@@ -790,11 +792,19 @@ int package_install(const char *name_or_url) {
                     if (s1) { *s1 = '\0';
                         /* 2段上 (msys64) */
                         char *s2 = strrchr(tmp, '\\');
-                        if (s2) { *s2 = '\0'; strncpy(msys2_root, tmp, sizeof(msys2_root)-1); }
+                        if (s2) { *s2 = '\0';
+                            /* 検証: <root>\mingw64\bin\gcc.exe が存在するか */
+                            char verify[PACKAGE_MAX_PATH + 30];
+                            snprintf(verify, sizeof(verify), "%s\\mingw64\\bin\\gcc.exe", tmp);
+                            if (GetFileAttributesA(verify) != INVALID_FILE_ATTRIBUTES) {
+                                strncpy(msys2_root, tmp, sizeof(msys2_root)-1);
+                            }
+                        }
                     }
                 }
 
-                /* where bash.exe / sh.exe で逆算 */
+                /* where bash.exe / sh.exe で逆算 (WSL bash 誤検出を避けるため */
+                /* <root>\mingw64\bin\gcc.exe 存在確認で本物の MSYS2 を検証)    */
                 if (!msys2_root[0]) {
                     char usr_bin[PACKAGE_MAX_PATH] = {0};
                     WIN_WHERE_BINDIR("bash.exe", usr_bin, sizeof(usr_bin));
@@ -806,7 +816,14 @@ int package_install(const char *name_or_url) {
                         char *s1 = strrchr(tmp, '\\');
                         if (s1) { *s1 = '\0';
                             char *s2 = strrchr(tmp, '\\');
-                            if (s2) { *s2 = '\0'; strncpy(msys2_root, tmp, sizeof(msys2_root)-1); }
+                            if (s2) { *s2 = '\0';
+                                /* 検証: <root>\mingw64\bin\gcc.exe が存在するか */
+                                char verify[PACKAGE_MAX_PATH + 30];
+                                snprintf(verify, sizeof(verify), "%s\\mingw64\\bin\\gcc.exe", tmp);
+                                if (GetFileAttributesA(verify) != INVALID_FILE_ATTRIBUTES) {
+                                    strncpy(msys2_root, tmp, sizeof(msys2_root)-1);
+                                }
+                            }
                         }
                     }
                 }
@@ -827,8 +844,9 @@ int package_install(const char *name_or_url) {
                     }
                 }
 
-                /* msys2_root から gcc_bin_dir を補完 */
-                if (msys2_root[0] && !gcc_bin_dir[0]) {
+                /* msys2_root が確定したら gcc_bin_dir を必ず MSYS2 MinGW64 で上書き */
+                /* (where gcc.exe が非MSYS2 gcc を誤検出していた場合も修正される)  */
+                if (msys2_root[0]) {
                     snprintf(gcc_bin_dir, sizeof(gcc_bin_dir), "%s\\mingw64\\bin", msys2_root);
                 }
 
