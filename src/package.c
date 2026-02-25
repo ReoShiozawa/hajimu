@@ -777,6 +777,9 @@ int package_install(const char *name_or_url) {
                             /* 末尾の改行/空白を除去 */
                             size_t ln = strlen(line);
                             while (ln > 0 && (line[ln-1]=='\n'||line[ln-1]=='\r'||line[ln-1]==' ')) line[--ln]='\0';
+                            /* WindowsApps / AppData のスタブ(リパースポイント)は
+                             * GetFileAttributesA が「存在する」と誤判定するためスキップ */
+                            if (strstr(line, "WindowsApps") || strstr(line, "AppData")) continue;
                             /* line = "C:\msys64\mingw64\bin\mingw32-make.exe" */
                             /* 1段上 → bin_dir */
                             char *sep1 = strrchr(line, '\\');
