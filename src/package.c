@@ -286,6 +286,8 @@ bool package_read_manifest(const char *path, PackageManifest *manifest) {
             p = json_parse_string(p, manifest->main_file, sizeof(manifest->main_file));
         } else if (json_key_equals(key, "ビルド") || json_key_equals(key, "build")) {
             p = json_parse_string(p, manifest->build_cmd, sizeof(manifest->build_cmd));
+        } else if (json_key_equals(key, "リリース") || json_key_equals(key, "release")) {
+            p = json_parse_string(p, manifest->release_url, sizeof(manifest->release_url));
         } else if (json_key_equals(key, "依存") || json_key_equals(key, "dependencies")) {
             // 依存オブジェクトをパース
             if (*p != '{') break;
@@ -458,6 +460,35 @@ static void normalize_github_url(const char *input, char *url, int max_len) {
         // パッケージ名のみ → 解決不可
         url[0] = '\0';
     }
+}
+
+/**
+ * URL からファイルをダウンロードして dest_path に保存する
+ * curl コマンドを使用（Windows 10+/macOS/Linux で利用可、MSYS2 usr/bin にも存在）
+ * 成功なら true、失敗（404含む）なら false
+ */
+static bool download_to_file(const char *url, const char *dest_path) {
+    char cmd[PACKAGE_MAX_PATH * 3];
+#ifdef _WIN32
+    snprintf(cmd, sizeof(cmd),
+        "curl -fsSL --max-time 30 -o \"%s\" \"%s\" >NUL 2>&1",
+        dest_path, url);
+#else
+    snprintf(cmd, sizeof(cmd),
+        "curl -fsSL --max-time 30 -o \"%s\" \"%s\" >/dev/null 2>&1",
+        dest_path, url);
+#endif
+    return system(cmd) == 0;
+}
+
+/**
+ * リポジトリURLから GitHub ベースURL（.git なし）を生成
+ * "https://github.com/user/repo.git" → "https://github.com/user/repo"
+ */
+static void repo_base_url(const char *repo_url, char *base, int max_len) {
+    snprintf(base, max_len, "%s", repo_url);
+    char *git_ext = strstr(base, ".git");
+    if (git_ext && strlen(git_ext) == 4) *git_ext = '\0';
 }
 
 /**
@@ -646,10 +677,74 @@ int package_install(const char *name_or_url) {
     }
     
     // ポストインストールビルド:
-    // .hjp ファイルが存在しない場合、自動的にビルドを試みる（build/ dist/ lib/ bin/ も再帰検索）
+    // .hjp ファイルが存在しない場合、GitHub Releases から pre-built を取得するか
+    // ソースからビルドを試みる（build/ dist/ lib/ bin/ も再帰検索）
     {
         char found_hjp[PACKAGE_MAX_PATH] = {0};
         bool hjp_found = find_hjp_recursive(pkg_dir, found_hjp, sizeof(found_hjp), 0);
+
+        /* ---- pre-built .hjp のダウンロードを試みる ---- */
+        if (!hjp_found) {
+            /* GitHub Releases の URL を構築
+             * 優先順位:
+             *   1. hajimu.json の "release" フィールドに指定された URL
+             *   2. <repo>/releases/latest/download/<name>-windows-x64.hjp  (Win)
+             *   3. <repo>/releases/latest/download/<name>-macos.hjp        (Mac)
+             *   4. <repo>/releases/latest/download/<name>-linux-x64.hjp   (Linux)
+             *   5. <repo>/releases/latest/download/<name>.hjp              (共通)
+             */
+            char base_url[PACKAGE_MAX_PATH] = {0};
+            repo_base_url(url, base_url, sizeof(base_url));
+
+            char release_candidates[5][PACKAGE_MAX_PATH];
+            int  n_candidates = 0;
+
+            /* hajimu.json に明示的な release URL があれば最優先 */
+            if (has_manifest && pkg_manifest.release_url[0]) {
+                snprintf(release_candidates[n_candidates++],
+                    PACKAGE_MAX_PATH, "%s", pkg_manifest.release_url);
+            }
+
+            if (base_url[0]) {
+#ifdef _WIN32
+                snprintf(release_candidates[n_candidates++], PACKAGE_MAX_PATH,
+                    "%s/releases/latest/download/%s-windows-x64.hjp", base_url, package_name);
+                snprintf(release_candidates[n_candidates++], PACKAGE_MAX_PATH,
+                    "%s/releases/latest/download/%s-win64.hjp",        base_url, package_name);
+#elif defined(__APPLE__)
+                snprintf(release_candidates[n_candidates++], PACKAGE_MAX_PATH,
+                    "%s/releases/latest/download/%s-macos.hjp",        base_url, package_name);
+                snprintf(release_candidates[n_candidates++], PACKAGE_MAX_PATH,
+                    "%s/releases/latest/download/%s-darwin.hjp",       base_url, package_name);
+#else
+                snprintf(release_candidates[n_candidates++], PACKAGE_MAX_PATH,
+                    "%s/releases/latest/download/%s-linux-x64.hjp",   base_url, package_name);
+#endif
+                snprintf(release_candidates[n_candidates++], PACKAGE_MAX_PATH,
+                    "%s/releases/latest/download/%s.hjp",              base_url, package_name);
+            }
+
+            /* 候補を順に試す */
+            for (int ci = 0; ci < n_candidates && !hjp_found; ci++) {
+                char dest[PACKAGE_MAX_PATH + 32];
+                snprintf(dest, sizeof(dest), "%s/%s.hjp", pkg_dir, package_name);
+                printf("   🌐 ビルド済みバイナリを確認中...\n");
+                if (download_to_file(release_candidates[ci], dest) && file_exists(dest)) {
+                    printf("   ✅ ビルド済みバイナリをダウンロードしました\n");
+                    strncpy(found_hjp, dest, sizeof(found_hjp)-1);
+                    hjp_found = true;
+                    /* main を更新 */
+                    PackageManifest updated_m;
+                    bool got_m = package_read_manifest(manifest_path, &updated_m);
+                    if (!got_m) memcpy(&updated_m, &pkg_manifest, sizeof(pkg_manifest));
+                    snprintf(updated_m.main_file, sizeof(updated_m.main_file),
+                             "%s.hjp", package_name);
+                    write_manifest(manifest_path, &updated_m);
+                    printf("   → プラグイン: %s.hjp\n", package_name);
+                }
+            }
+        }
+        /* ---------------------------------------------------------- */
 
         if (!hjp_found) {
             // ビルドコマンドを決定（hajimu.json の "ビルド" → Makefile → 自動検出）
@@ -870,6 +965,17 @@ int package_install(const char *name_or_url) {
                     SetEnvironmentVariableA("PATH", new_path);
                 }
 
+                /* MSYS2/MinGW が見つからない場合はビルドをスキップ */
+                if (!msys2_root[0] && !gcc_bin_dir[0]) {
+                    printf("   ⚠  MSYS2/MinGW が見つかりません。ソースからのビルドをスキップします。\n");
+                    printf("      MSYS2 をインストールして MSYS2 MinGW64 シェルから再実行してください:\n");
+                    printf("      https://www.msys2.org/\n");
+                    printf("      インストール後: pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-make\n");
+                    if (orig_dir[0]) _chdir(orig_dir);
+                    /* このブロックを抜けるために build_cmd を空のままにして後続処理へ進む */
+                    goto win_build_skip;
+                }
+
                 /* ---- STEP 4: ビルドコマンド構築 ---- */
                 if (msys2_root[0] && is_make_cmd) {
                     /* bash --login 経由: /etc/profile.d/ が mingw64/bin を PATH に追加 */
@@ -943,13 +1049,11 @@ int package_install(const char *name_or_url) {
 #endif
                 if (build_cmd[0]) {
 #ifdef _WIN32
-                /* ビルド環境情報を表示 (デバッグ用) */
+                /* ビルド環境情報を表示 */
                 if (msys2_root[0])
                     printf("   → MSYS2: %s\n", msys2_root);
                 else if (gcc_bin_dir[0])
                     printf("   → gcc: %s\n", gcc_bin_dir);
-                else
-                    printf("   ⚠  MSYS2/MinGW が見つかりません。MSYS2 MinGW64 シェルから実行してください。\n");
 #endif
                 printf("   🔨 ビルド中...\n");
                 FILE *bp = popen(build_cmd, "r");
@@ -1008,6 +1112,9 @@ int package_install(const char *name_or_url) {
                     free(build_log);
                 }
                 } /* if (build_cmd[0]) */
+#ifdef _WIN32
+                win_build_skip:; /* MSYS2/MinGW が見つからない場合の goto 着地点 */
+#endif
             } else {
                 printf("   ⚠  .hjp ファイルが見つかりません\n");
                 printf("      パッケージディレクトリで make を実行してください:\n");
