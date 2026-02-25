@@ -70,6 +70,7 @@ SOURCES=(
     src/diag.c
     src/http.c
     src/async.c
+    src/bytecode.c
     src/package.c
     src/plugin.c
 )

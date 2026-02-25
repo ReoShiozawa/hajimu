@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  # ── macOS ネイティブビルド ─────────────────────────────────
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 依存インストール
+        run: |
+          brew install openssl curl
+          BREW_PREFIX="$(brew --prefix)"
+          echo "PKG_CONFIG_PATH=${BREW_PREFIX}/opt/openssl/lib/pkgconfig:${BREW_PREFIX}/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: ビルド
+        run: make
+
+      - name: バイナリをリネーム
+        run: cp nihongo nihongo-macos
+
+      - name: Releases にアップロード
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: nihongo-macos
+
+  # ── Linux ネイティブビルド ────────────────────────────────
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 依存インストール
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libssl-dev libcurl4-openssl-dev
+
+      - name: ビルド
+        run: make
+
+      - name: バイナリをリネーム
+        run: cp nihongo nihongo-linux-x64
+
+      - name: Releases にアップロード
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: nihongo-linux-x64
+
+  # ── Windows インストーラー (mingw-w64 クロスコンパイル + NSIS) ─
+  build-windows-installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ツールインストール
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            gcc-mingw-w64-x86-64 \
+            nsis \
+            curl \
+            xz-utils
+
+      - name: curl for Windows のセットアップ
+        run: bash win/setup_curl.sh
+
+      - name: hajimu.exe をビルド
+        run: |
+          bash win/build_win.sh
+          echo "--- win/dist の内容 ---"
+          ls -lh win/dist/
+
+      - name: NSIS インストーラーを生成
+        run: |
+          makensis -NOCD win/installer.nsi
+          ls -lh win/dist/hajimu_setup.exe
+
+      - name: Releases にアップロード
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            win/dist/hajimu_setup.exe
+            win/dist/hajimu.exe
+
