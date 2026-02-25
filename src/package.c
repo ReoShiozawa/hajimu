@@ -759,17 +759,58 @@ int package_install(const char *name_or_url) {
                 /*
                  * MSYS2 root の発見戦略:
                  *
-                 *   where gcc.exe / bash.exe は WSL・Microsoft ストアアプリ・Git の
-                 *   スタブ (WindowsApps リパースポイント) を返し、かつ
-                 *   GetFileAttributesA がそれらを「存在する」と誤判定するため廃止。
-                 *
-                 *   STEP 1: mingw32-make.exe (MSYS2 固有) を where で全行走査し、
-                 *            <bindir>\gcc.exe が実在するパスを採用。
-                 *   STEP 2: 固定パス候補を <root>\mingw64\bin\gcc.exe で検証。
+                 *   STEP 1: PATH 環境変数を直接パースし、"mingw" or "msys" を含み
+                 *            gcc.exe が実在するディレクトリを探す。
+                 *            (mingw32-make が PATH にあるなら gcc も同じ bin にある)
+                 *   STEP 2: where mingw32-make.exe の全行走査 (AppData/WindowsApps除外)
+                 *   STEP 3: 固定パス候補を mingw64\bin\gcc.exe で検証。
                  */
 
-                /* ---- STEP 1: where mingw32-make.exe の全行走査 ---- */
+                /* ---- STEP 1: PATH 環境変数から mingw/msys ディレクトリを検索 ---- */
                 {
+                    char path_env[8192] = {0};
+                    GetEnvironmentVariableA("PATH", path_env, sizeof(path_env));
+                    char *tok = path_env;
+                    while (*tok && !msys2_root[0]) {
+                        char *semi = strchr(tok, ';');
+                        char entry[PACKAGE_MAX_PATH] = {0};
+                        size_t elen = semi ? (size_t)(semi - tok) : strlen(tok);
+                        if (elen > 0 && elen < sizeof(entry)) {
+                            memcpy(entry, tok, elen);
+                            entry[elen] = '\0';
+                            /* AppData / WindowsApps のスタブは無視 */
+                            if (!strstr(entry, "WindowsApps") && !strstr(entry, "AppData")) {
+                                /* mingw または msys を含むディレクトリか (大文字小文字不問) */
+                                char lower[PACKAGE_MAX_PATH] = {0};
+                                for (size_t i = 0; i < elen && i < sizeof(lower)-1; i++)
+                                    lower[i] = (char)tolower((unsigned char)entry[i]);
+                                if (strstr(lower, "mingw") || strstr(lower, "msys")) {
+                                    /* gcc.exe が実在するか */
+                                    char probe[PACKAGE_MAX_PATH + 20];
+                                    snprintf(probe, sizeof(probe), "%s\\gcc.exe", entry);
+                                    if (GetFileAttributesA(probe) != INVALID_FILE_ATTRIBUTES) {
+                                        strncpy(gcc_bin_dir, entry, sizeof(gcc_bin_dir)-1);
+                                        /* 2段上がると msys2 root (mingw64\bin → mingw64 → root) */
+                                        char tmp[PACKAGE_MAX_PATH];
+                                        strncpy(tmp, entry, sizeof(tmp)-1);
+                                        char *s1 = strrchr(tmp, '\\');
+                                        if (s1) { *s1 = '\0';
+                                            char *s2 = strrchr(tmp, '\\');
+                                            if (s2) { *s2 = '\0';
+                                                strncpy(msys2_root, tmp, sizeof(msys2_root)-1);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (!semi) break;
+                        tok = semi + 1;
+                    }
+                }
+
+                /* ---- STEP 2: where mingw32-make.exe の全行走査 ---- */
+                if (!msys2_root[0]) {
                     FILE *wh = popen("where mingw32-make.exe 2>NUL", "r");
                     if (wh) {
                         char line[PACKAGE_MAX_PATH];
@@ -777,11 +818,9 @@ int package_install(const char *name_or_url) {
                             /* 末尾の改行/空白を除去 */
                             size_t ln = strlen(line);
                             while (ln > 0 && (line[ln-1]=='\n'||line[ln-1]=='\r'||line[ln-1]==' ')) line[--ln]='\0';
-                            /* WindowsApps / AppData のスタブ(リパースポイント)は
-                             * GetFileAttributesA が「存在する」と誤判定するためスキップ */
+                            /* WindowsApps / AppData のスタブはスキップ */
                             if (strstr(line, "WindowsApps") || strstr(line, "AppData")) continue;
                             /* line = "C:\msys64\mingw64\bin\mingw32-make.exe" */
-                            /* 1段上 → bin_dir */
                             char *sep1 = strrchr(line, '\\');
                             if (!sep1) continue;
                             *sep1 = '\0'; /* line = "...\mingw64\bin" */
@@ -789,11 +828,12 @@ int package_install(const char *name_or_url) {
                             char probe_gcc[PACKAGE_MAX_PATH + 20];
                             snprintf(probe_gcc, sizeof(probe_gcc), "%s\\gcc.exe", line);
                             if (GetFileAttributesA(probe_gcc) == INVALID_FILE_ATTRIBUTES) continue;
-                            /* gcc.exe が実在 → さらに 2段上がって root */
-                            char *sep2 = strrchr(line, '\\'); /* mingw64 の前 */
+                            strncpy(gcc_bin_dir, line, sizeof(gcc_bin_dir)-1);
+                            /* 2段上がって root */
+                            char *sep2 = strrchr(line, '\\');
                             if (!sep2) continue;
                             *sep2 = '\0';
-                            char *sep3 = strrchr(line, '\\'); /* root の前 */
+                            char *sep3 = strrchr(line, '\\');
                             if (!sep3) continue;
                             *sep3 = '\0';
                             strncpy(msys2_root, line, sizeof(msys2_root)-1);
@@ -802,7 +842,7 @@ int package_install(const char *name_or_url) {
                     }
                 }
 
-                /* ---- STEP 2: 固定パス候補を mingw64\bin\gcc.exe で検証 ---- */
+                /* ---- STEP 3: 固定パス候補を mingw64\bin\gcc.exe で検証 ---- */
                 if (!msys2_root[0]) {
                     static const char * const roots[] = {
                         "C:\\msys64", "C:\\msys2",
