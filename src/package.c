@@ -756,101 +756,72 @@ int package_install(const char *name_or_url) {
                 char gcc_bin_dir[PACKAGE_MAX_PATH] = {0};  /* e.g. C:\msys64\mingw64\bin */
                 char msys2_root[PACKAGE_MAX_PATH]  = {0};  /* e.g. C:\msys64            */
 
-                /* where.exe でコマンドの絶対パスを得てその親ディレクトリを返すヘルパーラムダ */
-#define WIN_WHERE_BINDIR(cmd, out, outsz) do { \
-    FILE *_wh = popen("where " cmd " 2>NUL", "r"); \
-    if (_wh) { \
-        char _wl[PACKAGE_MAX_PATH] = {0}; \
-        if (fgets(_wl, sizeof(_wl), _wh)) { \
-            size_t _l = strlen(_wl); \
-            while (_l > 0 && (_wl[_l-1]=='\n'||_wl[_l-1]=='\r'||_wl[_l-1]==' ')) _wl[--_l]='\0'; \
-            char *_sep = strrchr(_wl, '\\'); \
-            if (!_sep) _sep = strrchr(_wl, '/'); \
-            if (_sep) { *_sep = '\0'; strncpy((out), _wl, (outsz)-1); } \
-        } \
-        pclose(_wh); \
-    } \
-} while(0)
+                /*
+                 * MSYS2 root の発見戦略:
+                 *
+                 *   where gcc.exe / bash.exe は WSL・Microsoft ストアアプリ・Git の
+                 *   スタブ (WindowsApps リパースポイント) を返し、かつ
+                 *   GetFileAttributesA がそれらを「存在する」と誤判定するため廃止。
+                 *
+                 *   STEP 1: mingw32-make.exe (MSYS2 固有) を where で全行走査し、
+                 *            <bindir>\gcc.exe が実在するパスを採用。
+                 *   STEP 2: 固定パス候補を <root>\mingw64\bin\gcc.exe で検証。
+                 */
 
-                /* 1a. where gcc */
-                if (!gcc_bin_dir[0]) WIN_WHERE_BINDIR("gcc.exe", gcc_bin_dir, sizeof(gcc_bin_dir));
-                /* 1b. where mingw32-make (gcc は同じ bin にある) */
-                if (!gcc_bin_dir[0]) WIN_WHERE_BINDIR("mingw32-make.exe", gcc_bin_dir, sizeof(gcc_bin_dir));
-                /* 1c. where make */
-                if (!gcc_bin_dir[0]) WIN_WHERE_BINDIR("make.exe", gcc_bin_dir, sizeof(gcc_bin_dir));
-
-                /* ---- STEP 2: MSYS2 ルートを発見して msys2_root を確定 ---- */
-
-                /* gcc_bin_dir が "...\msys64\mingw64\bin" 等なら2段上がると root */
-                /* ただし非MSYS2 gcc (WSL/Git等) を誤検出しないよう、root に    */
-                /* mingw64\bin\gcc.exe が存在するか確認して初めて msys2_root に設定 */
-                if (gcc_bin_dir[0]) {
-                    char tmp[PACKAGE_MAX_PATH];
-                    strncpy(tmp, gcc_bin_dir, sizeof(tmp) - 1);
-                    /* 1段上 (mingw64) */
-                    char *s1 = strrchr(tmp, '\\');
-                    if (s1) { *s1 = '\0';
-                        /* 2段上 (msys64) */
-                        char *s2 = strrchr(tmp, '\\');
-                        if (s2) { *s2 = '\0';
-                            /* 検証: <root>\mingw64\bin\gcc.exe が存在するか */
-                            char verify[PACKAGE_MAX_PATH + 30];
-                            snprintf(verify, sizeof(verify), "%s\\mingw64\\bin\\gcc.exe", tmp);
-                            if (GetFileAttributesA(verify) != INVALID_FILE_ATTRIBUTES) {
-                                strncpy(msys2_root, tmp, sizeof(msys2_root)-1);
-                            }
+                /* ---- STEP 1: where mingw32-make.exe の全行走査 ---- */
+                {
+                    FILE *wh = popen("where mingw32-make.exe 2>NUL", "r");
+                    if (wh) {
+                        char line[PACKAGE_MAX_PATH];
+                        while (!msys2_root[0] && fgets(line, sizeof(line), wh)) {
+                            /* 末尾の改行/空白を除去 */
+                            size_t ln = strlen(line);
+                            while (ln > 0 && (line[ln-1]=='\n'||line[ln-1]=='\r'||line[ln-1]==' ')) line[--ln]='\0';
+                            /* line = "C:\msys64\mingw64\bin\mingw32-make.exe" */
+                            /* 1段上 → bin_dir */
+                            char *sep1 = strrchr(line, '\\');
+                            if (!sep1) continue;
+                            *sep1 = '\0'; /* line = "...\mingw64\bin" */
+                            /* bin_dir に gcc.exe が存在するか確認 */
+                            char probe_gcc[PACKAGE_MAX_PATH + 20];
+                            snprintf(probe_gcc, sizeof(probe_gcc), "%s\\gcc.exe", line);
+                            if (GetFileAttributesA(probe_gcc) == INVALID_FILE_ATTRIBUTES) continue;
+                            /* gcc.exe が実在 → さらに 2段上がって root */
+                            char *sep2 = strrchr(line, '\\'); /* mingw64 の前 */
+                            if (!sep2) continue;
+                            *sep2 = '\0';
+                            char *sep3 = strrchr(line, '\\'); /* root の前 */
+                            if (!sep3) continue;
+                            *sep3 = '\0';
+                            strncpy(msys2_root, line, sizeof(msys2_root)-1);
                         }
+                        pclose(wh);
                     }
                 }
 
-                /* where bash.exe / sh.exe で逆算 (WSL bash 誤検出を避けるため */
-                /* <root>\mingw64\bin\gcc.exe 存在確認で本物の MSYS2 を検証)    */
-                if (!msys2_root[0]) {
-                    char usr_bin[PACKAGE_MAX_PATH] = {0};
-                    WIN_WHERE_BINDIR("bash.exe", usr_bin, sizeof(usr_bin));
-                    if (!usr_bin[0]) WIN_WHERE_BINDIR("sh.exe", usr_bin, sizeof(usr_bin));
-                    if (usr_bin[0]) {
-                        /* usr_bin = "...\msys64\usr\bin" → 2段上がると root */
-                        char tmp[PACKAGE_MAX_PATH];
-                        strncpy(tmp, usr_bin, sizeof(tmp)-1);
-                        char *s1 = strrchr(tmp, '\\');
-                        if (s1) { *s1 = '\0';
-                            char *s2 = strrchr(tmp, '\\');
-                            if (s2) { *s2 = '\0';
-                                /* 検証: <root>\mingw64\bin\gcc.exe が存在するか */
-                                char verify[PACKAGE_MAX_PATH + 30];
-                                snprintf(verify, sizeof(verify), "%s\\mingw64\\bin\\gcc.exe", tmp);
-                                if (GetFileAttributesA(verify) != INVALID_FILE_ATTRIBUTES) {
-                                    strncpy(msys2_root, tmp, sizeof(msys2_root)-1);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                /* 固定候補で補完 */
+                /* ---- STEP 2: 固定パス候補を mingw64\bin\gcc.exe で検証 ---- */
                 if (!msys2_root[0]) {
                     static const char * const roots[] = {
-                        "C:\\msys64","C:\\msys2","D:\\msys64","D:\\msys2",
-                        "C:\\tools\\msys64","C:\\tools\\msys2", NULL
+                        "C:\\msys64", "C:\\msys2",
+                        "D:\\msys64", "D:\\msys2",
+                        "E:\\msys64", "E:\\msys2",
+                        "C:\\tools\\msys64", "C:\\tools\\msys2",
+                        "C:\\ProgramData\\chocolatey\\lib\\msys2\\tools\\msys64",
+                        NULL
                     };
-                    for (int ri = 0; roots[ri]; ri++) {
-                        char probe[PACKAGE_MAX_PATH + 20];
-                        snprintf(probe, sizeof(probe), "%s\\usr\\bin\\bash.exe", roots[ri]);
+                    for (int ri = 0; roots[ri] && !msys2_root[0]; ri++) {
+                        char probe[PACKAGE_MAX_PATH + 30];
+                        snprintf(probe, sizeof(probe), "%s\\mingw64\\bin\\gcc.exe", roots[ri]);
                         if (GetFileAttributesA(probe) != INVALID_FILE_ATTRIBUTES) {
                             strncpy(msys2_root, roots[ri], sizeof(msys2_root)-1);
-                            break;
                         }
                     }
                 }
 
-                /* msys2_root が確定したら gcc_bin_dir を必ず MSYS2 MinGW64 で上書き */
-                /* (where gcc.exe が非MSYS2 gcc を誤検出していた場合も修正される)  */
+                /* msys2_root が確定したら gcc_bin_dir を設定 */
                 if (msys2_root[0]) {
                     snprintf(gcc_bin_dir, sizeof(gcc_bin_dir), "%s\\mingw64\\bin", msys2_root);
                 }
-
-#undef WIN_WHERE_BINDIR
 
                 /* ---- STEP 3: LANG=C で文字化け防止、PATH に gcc bin を追加 ---- */
                 SetEnvironmentVariableA("LANG", "C");
