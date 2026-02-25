@@ -677,9 +677,36 @@ int package_install(const char *name_or_url) {
     }
     
     // ポストインストールビルド:
-    // .hjp ファイルが存在しない場合、GitHub Releases から pre-built を取得するか
-    // ソースからビルドを試みる（build/ dist/ lib/ bin/ も再帰検索）
+    // パッケージの種類に応じて処理を分岐:
+    //   スクリプトパッケージ (.jp): ビルド不要、そのまま使用可能
+    //   バイトコードパッケージ (.hjp HJPB): ビルド済み or 自動コンパイル
+    //   ネイティブ C プラグイン (.hjp DLL/dylib): ビルドまたは pre-built ダウンロード
     {
+        // ── スクリプトパッケージの判定 ──
+        // hajimu.json の "メイン" が .jp ファイルを指し、ビルドコマンドがない場合
+        bool is_script_package = false;
+        if (has_manifest) {
+            const char *mf = pkg_manifest.main_file;
+            size_t mf_len = strlen(mf);
+            bool main_is_jp = (mf_len >= 3 && strcmp(mf + mf_len - 3, ".jp") == 0
+                               && (mf_len < 4 || mf[mf_len - 4] != 'h')); /* .jp but not .hjp */
+            if (main_is_jp && !pkg_manifest.build_cmd[0]) {
+                is_script_package = true;
+            }
+        } else {
+            // hajimu.json がない場合、main.jp / <name>.jp の存在でスクリプトと判定
+            char jp_path[PACKAGE_MAX_PATH + 32];
+            snprintf(jp_path, sizeof(jp_path), "%s/main.jp", pkg_dir);
+            if (file_exists(jp_path)) is_script_package = true;
+        }
+
+        if (is_script_package) {
+            printf("   📜 スクリプトパッケージとして認識しました\n");
+            printf("      ビルド不要・クロスプラットフォームで動作します\n");
+            // pure .jp パッケージはそのまま使用可能 (goto 後の依存追加に進む)
+            goto post_install_done;
+        }
+
         char found_hjp[PACKAGE_MAX_PATH] = {0};
         bool hjp_found = find_hjp_recursive(pkg_dir, found_hjp, sizeof(found_hjp), 0);
 
@@ -1122,7 +1149,9 @@ int package_install(const char *name_or_url) {
             }
         }
     }
-    
+
+    post_install_done:; /* スクリプトパッケージは goto でここにジャンプ */
+
     // プロジェクトの hajimu.json に依存を追加
     PackageManifest project;
     if (package_read_manifest(PACKAGE_MANIFEST_FILE, &project)) {

@@ -27,7 +27,8 @@ SOURCES = $(SRC_DIR)/main.c \
           $(SRC_DIR)/http.c \
           $(SRC_DIR)/async.c \
           $(SRC_DIR)/package.c \
-          $(SRC_DIR)/plugin.c
+          $(SRC_DIR)/plugin.c \
+          $(SRC_DIR)/bytecode.c
 
 # オブジェクトファイル
 OBJECTS = $(SOURCES:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
@@ -64,8 +65,9 @@ $(BUILD_DIR)/http.o: $(SRC_DIR)/http.c $(SRC_DIR)/http.h $(SRC_DIR)/value.h
 $(BUILD_DIR)/async.o: $(SRC_DIR)/async.c $(SRC_DIR)/async.h $(SRC_DIR)/evaluator.h $(SRC_DIR)/value.h
 $(BUILD_DIR)/package.o: $(SRC_DIR)/package.c $(SRC_DIR)/package.h
 $(BUILD_DIR)/plugin.o: $(SRC_DIR)/plugin.c $(SRC_DIR)/plugin.h $(SRC_DIR)/value.h
+$(BUILD_DIR)/bytecode.o: $(SRC_DIR)/bytecode.c $(SRC_DIR)/bytecode.h
 $(BUILD_DIR)/main.o: $(SRC_DIR)/package.h
-$(BUILD_DIR)/evaluator.o: $(SRC_DIR)/package.h $(SRC_DIR)/plugin.h
+$(BUILD_DIR)/evaluator.o: $(SRC_DIR)/package.h $(SRC_DIR)/plugin.h $(SRC_DIR)/bytecode.h
 
 # 実行
 run: $(TARGET)
@@ -88,6 +90,23 @@ test: $(TARGET)
 		echo "テスト: $$file"; \
 		./$(TARGET) $$file; \
 	done
+
+# デュアルモード統合テスト（バイトコード含む）
+test-dual: $(TARGET)
+	@echo "=== デュアルモードシステム統合テスト ==="
+	@echo "--- スクリプトパッケージテスト ---"
+	./$(TARGET) tests/test_dual_mode.jp
+	@echo ""
+	@echo "--- バイトコード構築 ---"
+	./$(TARGET) 構築 tests/lib_math.jp
+	@echo ""
+	@echo "--- バイトコードインポートテスト ---"
+	./$(TARGET) tests/test_bytecode_import.jp
+	@echo ""
+	@echo "--- ネイティブプラグイン後方互換テスト ---"
+	./$(TARGET) examples/test_plugin.jp
+	@echo ""
+	@echo "=== 全テスト完了 ==="
 
 # クリーンアップ
 clean:

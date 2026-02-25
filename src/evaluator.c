@@ -8,6 +8,7 @@
 #include "async.h"
 #include "package.h"
 #include "diag.h"
+#include "bytecode.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -116,6 +117,11 @@ static Value evaluate_for(Evaluator *eval, ASTNode *node);
 static Value evaluate_import(Evaluator *eval, ASTNode *node);
 static Value evaluate_import_plugin(Evaluator *eval, ASTNode *node,
                                      const char *resolved_path);
+static Value evaluate_import_hjpb(Evaluator *eval, ASTNode *node,
+                                   const char *hjp_path);
+static Value evaluate_source_as_module(Evaluator *eval, ASTNode *node,
+                                       const char *source, const char *source_path,
+                                       const char *alias);
 static Value evaluate_class_def(Evaluator *eval, ASTNode *node);
 static Value evaluate_new(Evaluator *eval, ASTNode *node);
 static Value evaluate_try(Evaluator *eval, ASTNode *node);
@@ -2076,6 +2082,128 @@ static bool normalize_path(const char *path, char *out, int max_len) {
 }
 
 // =============================================================================
+// ソース文字列をモジュールとして評価する共通処理
+// .jp スクリプトインポートと HJPB バイトコードインポートの共通基盤
+// =============================================================================
+
+static Value evaluate_source_as_module(Evaluator *eval, ASTNode *node,
+                                       const char *source, const char *source_path,
+                                       const char *alias) {
+    /* ソースを strdup してモジュールとして保存（AST / ソースの寿命を evaluator に渡す）*/
+    char *src_copy = strdup(source);
+    if (!src_copy) return value_null();
+
+    Parser parser;
+    parser_init(&parser, src_copy, source_path ? source_path : "<module>");
+    ASTNode *program = parse_program(&parser);
+
+    if (parser.had_error) {
+        node_free(program);
+        free(src_copy);
+        parser_free(&parser);
+        runtime_error(eval, node->location.line, node->location.column,
+                     "モジュール '%s' のパースに失敗しました",
+                     source_path ? source_path : "<module>");
+        return value_null();
+    }
+    parser_free(&parser);
+
+    /* import 済みモジュールリストに追加 (AST と source の寿命を evaluator に委譲) */
+    if (eval->imported_count >= eval->imported_capacity) {
+        eval->imported_capacity = eval->imported_capacity == 0 ? 4 : eval->imported_capacity * 2;
+        eval->imported_modules = realloc(eval->imported_modules,
+                                         eval->imported_capacity * sizeof(ImportedModule));
+    }
+    eval->imported_modules[eval->imported_count].source = src_copy;
+    eval->imported_modules[eval->imported_count].ast    = program;
+    eval->imported_count++;
+
+    /* current_file を一時的に切り替え（ネストしたインポートの相対パス解決用）*/
+    const char *prev_file = eval->current_file;
+    if (source_path) eval->current_file = source_path;
+
+    if (alias != NULL) {
+        /* 名前空間付きインポート: 新しいスコープでモジュールを評価 → 辞書に変換 */
+        Environment *module_env = env_new(eval->global);
+        Environment *prev = eval->current;
+        eval->current = module_env;
+
+        for (int i = 0; i < program->block.count; i++) {
+            evaluate(eval, program->block.statements[i]);
+            if (eval->had_error) {
+                eval->current = prev;
+                eval->current_file = prev_file;
+                env_release(module_env);
+                return value_null();
+            }
+        }
+
+        eval->current = prev;
+
+        /* モジュール環境の定義を辞書に変換 */
+        Value ns = value_dict();
+        for (int i = 0; i < ENV_HASH_SIZE; i++) {
+            EnvEntry *entry = module_env->table[i];
+            while (entry != NULL) {
+                dict_set(&ns, entry->name, value_copy(entry->value));
+                entry = entry->next;
+            }
+        }
+        env_release(module_env);
+        env_define(eval->current, alias, ns, true);
+    } else {
+        /* 直接インポート: 現在の環境で実行 */
+        for (int i = 0; i < program->block.count; i++) {
+            evaluate(eval, program->block.statements[i]);
+            if (eval->had_error) break;
+        }
+    }
+
+    eval->current_file = prev_file;
+    return value_null();
+}
+
+// =============================================================================
+// HJPB バイトコード .hjp のインポート (クロスプラットフォーム)
+// =============================================================================
+
+static Value evaluate_import_hjpb(Evaluator *eval, ASTNode *node,
+                                   const char *hjp_path) {
+    const char *alias = node->import_stmt.alias;
+
+    HjpbMeta meta  = {0};
+    char    *source = NULL;
+    size_t   src_len = 0;
+
+    if (!hjpb_decode(hjp_path, &meta, &source, &src_len)) {
+        runtime_error(eval, node->location.line, node->location.column,
+                     "バイトコード '%s' の読み込みに失敗しました", hjp_path);
+        return value_null();
+    }
+
+    Value result = evaluate_source_as_module(eval, node, source, hjp_path, alias);
+    free(source);
+    return result;
+}
+
+// =============================================================================
+// .hjp ファイルのディスパッチ: バイトコード or ネイティブ C プラグイン
+// =============================================================================
+
+/**
+ * 解決済み .hjp パスに対して適切なローダーを呼び出す。
+ *  - HJPB マジックバイト "HJPB" → バイトコード → evaluate_import_hjpb
+ *  - それ以外                   → ネイティブ C プラグイン → evaluate_import_plugin
+ */
+static Value dispatch_hjp_import(Evaluator *eval, ASTNode *node,
+                                  const char *resolved_path) {
+    if (hjpb_is_bytecode_file(resolved_path)) {
+        return evaluate_import_hjpb(eval, node, resolved_path);
+    }
+    return evaluate_import_plugin(eval, node, resolved_path);
+}
+
+// =============================================================================
 // ネイティブプラグイン（.hjp）のインポート
 // =============================================================================
 
@@ -2143,13 +2271,14 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
     const char *alias = node->import_stmt.alias;
     
     // ============================================================
-    // 1. 明示的 .hjp 指定 → ネイティブプラグインとして読み込み
+    // 1. 明示的 .hjp 指定 → バイトコードまたはネイティブプラグインとして読み込み
+    //    HJPB マジックがあればバイトコード、なければ dlopen (後方互換)
     // ============================================================
     if (plugin_is_hjp(module_path)) {
         char resolved[1024];
         if (plugin_resolve_hjp(module_path, eval->current_file,
                                resolved, sizeof(resolved))) {
-            return evaluate_import_plugin(eval, node, resolved);
+            return dispatch_hjp_import(eval, node, resolved);
         }
         runtime_error(eval, node->location.line, node->location.column,
                      "プラグイン '%s' が見つかりません", module_path);
@@ -2217,9 +2346,9 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
     if (!found) {
         found = package_resolve(module_path, eval->current_file,
                                 resolved_path, sizeof(resolved_path));
-        // パッケージのメインが .hjp の場合はプラグインとして読み込む
+        // パッケージのメインが .hjp の場合: HJPB バイトコードまたはネイティブプラグイン
         if (found && plugin_is_hjp(resolved_path)) {
-            return evaluate_import_plugin(eval, node, resolved_path);
+            return dispatch_hjp_import(eval, node, resolved_path);
         }
     }
     
@@ -2228,7 +2357,7 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
         char hjp_resolved[1024];
         if (plugin_resolve_hjp(module_path, eval->current_file,
                                hjp_resolved, sizeof(hjp_resolved))) {
-            return evaluate_import_plugin(eval, node, hjp_resolved);
+            return dispatch_hjp_import(eval, node, hjp_resolved);
         }
     }
     
@@ -2266,83 +2395,15 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
     fseek(file, 0, SEEK_SET);
     
     char *source = malloc(size + 1);
-    size_t read = fread(source, 1, size, file);
-    source[read] = '\0';
+    size_t nread = fread(source, 1, size, file);
+    source[nread] = '\0';
     fclose(file);
     
-    // パースと実行
-    Parser parser;
-    parser_init(&parser, source, resolved_path);
-    
-    ASTNode *program = parse_program(&parser);
-    
-    if (parser.had_error) {
-        node_free(program);
-        free(source);
-        runtime_error(eval, node->location.line, node->location.column,
-                     "モジュール '%s' のパースに失敗しました", resolved_path);
-        return value_null();
-    }
-    
-    // モジュールを保存（ASTとソースを解放しないように）
-    if (eval->imported_count >= eval->imported_capacity) {
-        eval->imported_capacity = eval->imported_capacity == 0 ? 4 : eval->imported_capacity * 2;
-        eval->imported_modules = realloc(eval->imported_modules, 
-                                         eval->imported_capacity * sizeof(ImportedModule));
-    }
-    eval->imported_modules[eval->imported_count].source = source;
-    eval->imported_modules[eval->imported_count].ast = program;
-    eval->imported_count++;
-    
-    // current_file を一時的に切り替え（ネストしたインポートの相対パス解決用）
-    const char *prev_file = eval->current_file;
-    eval->current_file = resolved_path;
-    
-    if (alias != NULL) {
-        // 名前空間付きインポート: 新しいスコープでモジュールを評価
-        Environment *module_env = env_new(eval->global);
-        Environment *prev = eval->current;
-        eval->current = module_env;
-        
-        for (int i = 0; i < program->block.count; i++) {
-            evaluate(eval, program->block.statements[i]);
-            if (eval->had_error) {
-                eval->current = prev;
-                eval->current_file = prev_file;
-                env_release(module_env);
-                return value_null();
-            }
-        }
-        
-        eval->current = prev;
-        
-        // モジュール環境の定義を辞書に変換
-        Value ns = value_dict();
-        for (int i = 0; i < ENV_HASH_SIZE; i++) {
-            EnvEntry *entry = module_env->table[i];
-            while (entry != NULL) {
-                dict_set(&ns, entry->name, value_copy(entry->value));
-                entry = entry->next;
-            }
-        }
-        
-        env_release(module_env);
-        
-        // エイリアス名で辞書を定義
-        env_define(eval->current, alias, ns, true);
-    } else {
-        // 従来通り: インポートしたモジュールを現在の環境で評価
-        for (int i = 0; i < program->block.count; i++) {
-            evaluate(eval, program->block.statements[i]);
-            if (eval->had_error) break;
-        }
-    }
-    
-    // current_file を復元
-    eval->current_file = prev_file;
-    
-    // ソースとASTは保持しておく（関数定義で参照されるため）
-    return value_null();
+    // evaluate_source_as_module が strdup してモジュールリストを管理するため
+    // ここでの source はローカルバッファとして扱い最後に解放する
+    Value result = evaluate_source_as_module(eval, node, source, resolved_path, alias);
+    free(source);
+    return result;
 }
 
 static Value evaluate_class_def(Evaluator *eval, ASTNode *node) {

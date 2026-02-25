@@ -28,12 +28,13 @@
 #include "ast.h"
 #include "evaluator.h"
 #include "package.h"
+#include "bytecode.h"
 
 // =============================================================================
 // バージョン情報
 // =============================================================================
 
-#define VERSION "1.2.23"
+#define VERSION "1.3.0"
 #define AUTHOR "Reo Shiozawa"
 
 // =============================================================================
@@ -393,12 +394,20 @@ static void print_usage(const char *program_name) {
     printf("  -t, --tokens   トークンを表示\n");
     printf("  -a, --ast      ASTを表示\n");
     printf("\n");
+    printf("バイトコード (.hjp) 操作:\n");
+    printf("  %s 構築 <ファイル.jp> [出力.hjp]   .jp をクロスプラットフォーム .hjp にコンパイル\n", program_name);
+    printf("  %s 情報 <ファイル.hjp>            .hjp の内容、メタデータを表示\n", program_name);
+    printf("\n");
     printf("パッケージ管理:\n");
     printf("  %s パッケージ 初期化                  プロジェクトを初期化 (hajimu.json作成)\n", program_name);
     printf("  %s パッケージ 追加 <ユーザー/リポ>    パッケージをインストール\n", program_name);
     printf("  %s パッケージ 削除 <パッケージ名>     パッケージを削除\n", program_name);
     printf("  %s パッケージ 一覧                    インストール済みパッケージ一覧\n", program_name);
     printf("  %s パッケージ インストール             全依存パッケージをインストール\n", program_name);
+    printf("\n");
+    printf("デュアルモードパッケージシステム:\n");
+    printf("  スクリプトパッケージ: hajimu.json の \"\u30e1イン\": \"main.jp\" → 純粋 .jp で動作\n");
+    printf("  バイトコードパッケージ: \"\u30e1イン\": \"main.hjp\" → HJPB バイトコード (macOS/Win/Linux 共通)\n");
     printf("\n");
     printf("ファイルを指定しない場合、REPLモードで起動します。\n");
 }
@@ -448,6 +457,91 @@ static void show_ast(const char *source, const char *filename) {
     
     node_free(program);
     parser_free(&parser);
+}
+
+// =============================================================================
+// 構築コマンド: .jp → .hjp バイトコードコンパイル
+// =============================================================================
+
+/**
+ * nihongo 構築 <入力.jp> [出力.hjp]
+ *
+ * .jp ファイルを HJPB バイトコード .hjp にパックする。
+ * まずパースして構文エラーを検出してから書き出す。
+ * 出力先を省略した場合は入力の拡張子を .hjp に変えたファイルを作成する。
+ */
+static int cmd_build(const char *input_jp, const char *output_hjp_arg) {
+    /* ── 出力パスを決定 ── */
+    char out_path[1024];
+    if (output_hjp_arg != NULL) {
+        snprintf(out_path, sizeof(out_path), "%s", output_hjp_arg);
+    } else {
+        /* 入力拡張子を .hjp に置換 */
+        snprintf(out_path, sizeof(out_path), "%s", input_jp);
+        char *dot = strrchr(out_path, '.');
+        if (dot && strcmp(dot, ".jp") == 0) {
+            strcpy(dot, ".hjp");
+        } else {
+            /* .jp でない場合は末尾に .hjp を付加 */
+            strncat(out_path, ".hjp", sizeof(out_path) - strlen(out_path) - 1);
+        }
+    }
+
+    /* ── ソースを読み込む ── */
+    FILE *f = fopen(input_jp, "rb");
+    if (f == NULL) {
+        fprintf(stderr, "エラー: ファイルを開けません: %s\n", input_jp);
+        return 1;
+    }
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    rewind(f);
+    char *source = malloc(sz + 1);
+    if (!source) { fclose(f); return 1; }
+    size_t nr = fread(source, 1, sz, f);
+    source[nr] = '\0';
+    fclose(f);
+
+    /* ── 構文チェック（パース） ── */
+    Parser parser;
+    parser_init(&parser, source, input_jp);
+    ASTNode *program = parse_program(&parser);
+    bool had_error = parser_had_error(&parser);
+    parser_free(&parser);
+    node_free(program);
+
+    if (had_error) {
+        fprintf(stderr, "構築失敗: '%s' に構文エラーがあります\n", input_jp);
+        free(source);
+        return 1;
+    }
+
+    /* ── メタデータを組み立てる ── */
+    HjpbMeta meta = {0};
+    /* 名前: 入力ファイルのベース名 (拡張子なし) */
+    const char *base = strrchr(input_jp, '/');
+#ifdef _WIN32
+    const char *base2 = strrchr(input_jp, '\\');
+    if (base2 > base) base = base2;
+#endif
+    base = base ? base + 1 : input_jp;
+    snprintf(meta.name, sizeof(meta.name), "%s", base);
+    char *edot = strrchr(meta.name, '.');
+    if (edot) *edot = '\0';
+    snprintf(meta.version, sizeof(meta.version), "0.0.0");
+
+    /* ── HJPB ファイルを書き出す ── */
+    if (!hjpb_encode(out_path, &meta, source, (size_t)nr)) {
+        fprintf(stderr, "構築失敗: '%s' への書き込みに失敗しました\n", out_path);
+        free(source);
+        return 1;
+    }
+    free(source);
+
+    printf("構築完了: %s → %s\n", input_jp, out_path);
+    printf("  形式: HJPB v%d.%d (クロスプラットフォームバイトコード)\n",
+           HJPB_VERSION_MAJOR, HJPB_VERSION_MINOR);
+    return 0;
 }
 
 // =============================================================================
@@ -572,7 +666,28 @@ int main(int argc, char *argv[]) {
             return 1;
         }
     }
-    
+
+    // 構築コマンド: nihongo 構築 <入力.jp> [出力.hjp]
+    if (argc >= 3 && (strcmp(argv[1], "構築") == 0 || strcmp(argv[1], "build") == 0)) {
+        const char *out = (argc >= 4) ? argv[3] : NULL;
+        return cmd_build(argv[2], out);
+    }
+    // 省略形: nihongo 構築 <入力.jp>
+    if (argc == 2 && (strcmp(argv[1], "構築") == 0 || strcmp(argv[1], "build") == 0)) {
+        fprintf(stderr, "使用方法: %s 構築 <入力.jp> [出力.hjp]\n", argv[0]);
+        return 1;
+    }
+
+    // 情報コマンド: nihongo 情報 <file.hjp>
+    if (argc >= 3 && (strcmp(argv[1], "情報") == 0 || strcmp(argv[1], "info") == 0)) {
+        hjpb_print_info(argv[2]);
+        return 0;
+    }
+    if (argc == 2 && (strcmp(argv[1], "情報") == 0 || strcmp(argv[1], "info") == 0)) {
+        fprintf(stderr, "使用方法: %s 情報 <ファイル.hjp>\n", argv[0]);
+        return 1;
+    }
+
     // オプション
     bool show_help = false;
     bool show_ver = false;
