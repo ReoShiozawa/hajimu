@@ -1,7 +1,7 @@
 # 日本語プログラミング言語 - Makefile
 
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c11 -g -O2
+CFLAGS = -Wall -Wextra -std=gnu11 -g -O2
 LDFLAGS = -lm -lcurl -lpthread
 
 # Linux では -ldl が必要（macOS では不要）

@@ -48,6 +48,11 @@
 #ifndef HAJIMU_PLUGIN_H
 #define HAJIMU_PLUGIN_H
 
+/* POSIX 関数 (strdup 等) を確実に利用可能にする */
+#if !defined(_GNU_SOURCE) && !defined(_POSIX_C_SOURCE)
+  #define _POSIX_C_SOURCE 200809L
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
