@@ -1,11 +1,8 @@
 name: Release
 
+# [暫定措置] CI 自動ビルドを無効化 — ローカルビルド + gh release 方式に移行
+# 元のトリガー: push(main + tags), pull_request(main), workflow_dispatch
 on:
-  push:
-    branches: [main]
-    tags: ['v*']
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
