@@ -2,7 +2,10 @@ name: Release
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -23,6 +26,12 @@ jobs:
 
       - name: バイナリをリネーム
         run: cp nihongo nihongo-macos
+
+      - name: CI アーティファクト保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: nihongo-macos
+          path: nihongo-macos
 
       - name: Releases にアップロード
         uses: softprops/action-gh-release@v2
@@ -46,6 +55,12 @@ jobs:
 
       - name: バイナリをリネーム
         run: cp nihongo nihongo-linux-x64
+
+      - name: CI アーティファクト保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: nihongo-linux-x64
+          path: nihongo-linux-x64
 
       - name: Releases にアップロード
         uses: softprops/action-gh-release@v2
@@ -81,6 +96,14 @@ jobs:
         run: |
           makensis -NOCD win/installer.nsi
           ls -lh win/dist/hajimu_setup.exe
+
+      - name: CI アーティファクト保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: hajimu-windows
+          path: |
+            win/dist/hajimu_setup.exe
+            win/dist/hajimu.exe
 
       - name: Releases にアップロード
         uses: softprops/action-gh-release@v2
