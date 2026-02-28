@@ -1,5 +1,7 @@
 # はじむ チュートリアル
 
+> 🇺🇸 **English version available:** [TUTORIAL_en.md](TUTORIAL_en.md)
+
 ## はじめに
 
 この言語は、日本語の自然な表現でプログラミングができるように設計されています。

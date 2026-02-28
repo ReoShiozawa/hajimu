@@ -1,5 +1,7 @@
 # はじむ リファレンスマニュアル
 
+> 🇺🇸 **English version available:** [REFERENCE_en.md](REFERENCE_en.md)
+
 ## 概要
 
 はじむは、日本語の自然な表現を活かしたプログラミング言語です。
