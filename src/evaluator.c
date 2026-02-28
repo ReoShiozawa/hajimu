@@ -869,13 +869,13 @@ void register_builtins(Evaluator *eval) {
         env_define(eval->global, "アーキテクチャ",
                    value_string(arch), true);
         env_define(eval->global, "はじむバージョン",
-                   value_string("1.3.0"), true);
+                   value_string("1.3.1"), true);
 
         /* システム辞書: システム["OS"], システム["アーキテクチャ"] 等 */
         Value sys = value_dict();
         dict_set(&sys, "OS",           value_string(os_name));
         dict_set(&sys, "アーキテクチャ",    value_string(arch));
-        dict_set(&sys, "バージョン",       value_string("1.3.0"));
+        dict_set(&sys, "バージョン",       value_string("1.3.1"));
 #if defined(_WIN32)
         dict_set(&sys, "区切り文字",       value_string("\\"));
         dict_set(&sys, "改行",            value_string("\r\n"));
