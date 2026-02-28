@@ -71,6 +71,62 @@
 #endif
 
 // =============================================================================
+// プラットフォーム検出マクロ
+// =============================================================================
+
+/* OS 判定 */
+#if defined(_WIN32)
+  #define HAJIMU_OS_WINDOWS 1
+  #define HAJIMU_OS_NAME    "Windows"
+#elif defined(__APPLE__)
+  #define HAJIMU_OS_MACOS   1
+  #define HAJIMU_OS_NAME    "macOS"
+#elif defined(__linux__)
+  #define HAJIMU_OS_LINUX   1
+  #define HAJIMU_OS_NAME    "Linux"
+#else
+  #define HAJIMU_OS_NAME    "不明"
+#endif
+
+/* アーキテクチャ判定 */
+#if defined(__aarch64__) || defined(__arm64__)
+  #define HAJIMU_ARCH_ARM64 1
+  #define HAJIMU_ARCH_NAME  "arm64"
+#elif defined(__x86_64__) || defined(__amd64__)
+  #define HAJIMU_ARCH_X64   1
+  #define HAJIMU_ARCH_NAME  "x86-64"
+#elif defined(__i386__)
+  #define HAJIMU_ARCH_X86   1
+  #define HAJIMU_ARCH_NAME  "x86"
+#else
+  #define HAJIMU_ARCH_NAME  "不明"
+#endif
+
+/* プラットフォーム別 .hjp 出力ファイル名サフィックス
+ * 例: #define HJPNAME(base) base HAJIMU_HJP_SUFFIX ".hjp"
+ *   → "engine_render-linux-x64.hjp"
+ */
+#if defined(HAJIMU_OS_WINDOWS)
+  #if defined(HAJIMU_ARCH_ARM64)
+    #define HAJIMU_HJP_SUFFIX "-windows-arm64"
+  #else
+    #define HAJIMU_HJP_SUFFIX "-windows-x64"
+  #endif
+#elif defined(HAJIMU_OS_MACOS)
+  #if defined(HAJIMU_ARCH_ARM64)
+    #define HAJIMU_HJP_SUFFIX "-macos-arm64"
+  #else
+    #define HAJIMU_HJP_SUFFIX "-macos"
+  #endif
+#else
+  #if defined(HAJIMU_ARCH_ARM64)
+    #define HAJIMU_HJP_SUFFIX "-linux-arm64"
+  #else
+    #define HAJIMU_HJP_SUFFIX "-linux-x64"
+  #endif
+#endif
+
+// =============================================================================
 // 値の型（value.h と同一定義）
 // =============================================================================
 

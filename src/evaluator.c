@@ -840,7 +840,52 @@ void register_builtins(Evaluator *eval) {
     // 型エイリアス
     env_define(eval->global, "型別名",
                value_builtin(builtin_type_alias, "型別名", 2, 2), true);
-    
+
+    // ── プラットフォーム定数 ──────────────────────────────
+    {
+        /* OS 名 */
+        const char *os_name;
+#if defined(_WIN32)
+        os_name = "Windows";
+#elif defined(__APPLE__)
+        os_name = "macOS";
+#else
+        os_name = "Linux";
+#endif
+        /* CPU アーキテクチャ */
+        const char *arch;
+#if defined(__aarch64__) || defined(__arm64__)
+        arch = "arm64";
+#elif defined(__x86_64__) || defined(__amd64__)
+        arch = "x86-64";
+#elif defined(__i386__)
+        arch = "x86";
+#else
+        arch = "不明";
+#endif
+        /* 個別定数 */
+        env_define(eval->global, "システム名",
+                   value_string(os_name), true);
+        env_define(eval->global, "アーキテクチャ",
+                   value_string(arch), true);
+        env_define(eval->global, "はじむバージョン",
+                   value_string("1.3.0"), true);
+
+        /* システム辞書: システム["OS"], システム["アーキテクチャ"] 等 */
+        Value sys = value_dict();
+        dict_set(&sys, "OS",           value_string(os_name));
+        dict_set(&sys, "アーキテクチャ",    value_string(arch));
+        dict_set(&sys, "バージョン",       value_string("1.3.0"));
+#if defined(_WIN32)
+        dict_set(&sys, "区切り文字",       value_string("\\"));
+        dict_set(&sys, "改行",            value_string("\r\n"));
+#else
+        dict_set(&sys, "区切り文字",       value_string("/"));
+        dict_set(&sys, "改行",            value_string("\n"));
+#endif
+        env_define(eval->global, "システム", sys, true);
+    }
+
     // 非同期ランタイムの初期化
     async_runtime_init();
 }

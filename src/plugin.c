@@ -122,6 +122,54 @@ static void ensure_hjp_extension(const char *name, char *out, int out_size) {
     }
 }
 
+/**
+ * 現在の OS とアーキテクチャに対応するプラットフォームサフィックスを返す
+ * 例: "-macos", "-linux-x64", "-windows-x64"
+ */
+static const char *get_platform_hjp_suffix(void) {
+#if defined(_WIN32)
+  #if defined(__aarch64__) || defined(__arm64__)
+    return "-windows-arm64";
+  #else
+    return "-windows-x64";
+  #endif
+#elif defined(__APPLE__)
+  #if defined(__aarch64__) || defined(__arm64__)
+    return "-macos-arm64";
+  #else
+    return "-macos";
+  #endif
+#else  /* Linux */
+  #if defined(__aarch64__) || defined(__arm64__)
+    return "-linux-arm64";
+  #else
+    return "-linux-x64";
+  #endif
+#endif
+}
+
+/**
+ * 指定ディレクトリ内で <base><plat_suffix>.hjp → <base>.hjp の順に探す
+ * 見つかれば out に書き込み true を返す
+ */
+static bool try_hjp_in_dir(const char *dir, const char *base_name,
+                            const char *plat_suffix, char *out, int out_size) {
+    char try_path[2048];
+    /* プラットフォーム特有: <dir><base><plat_suffix>.hjp */
+    snprintf(try_path, sizeof(try_path), "%s%s%s.hjp", dir, base_name, plat_suffix);
+    if (file_exists_plugin(try_path)) {
+        snprintf(out, out_size, "%s", try_path);
+        return true;
+    }
+    /* 汎用フォールバック: <dir><base>.hjp */
+    snprintf(try_path, sizeof(try_path), "%s%s.hjp", dir, base_name);
+    if (file_exists_plugin(try_path)) {
+        snprintf(out, out_size, "%s", try_path);
+        return true;
+    }
+    return false;
+}
+
 // =============================================================================
 // プラグインマネージャ
 // =============================================================================
@@ -176,11 +224,49 @@ LoadedPlugin *plugin_find(PluginManager *mgr, const char *name) {
 
 bool plugin_resolve_hjp(const char *name, const char *caller,
                         char *out, int out_size) {
-    char hjp_name[1024];
-    ensure_hjp_extension(name, hjp_name, sizeof(hjp_name));
-    
-    char try_path[2048];  /* プレフィックス+パッケージ名で1024超えの可能性があるため2048 */
-    
+    /* 拡張子なしのベース名を取得 */
+    char base_name[256];
+    snprintf(base_name, sizeof(base_name), "%s", name);
+    char *ext_pos = strstr(base_name, HJP_EXTENSION);
+    if (ext_pos) *ext_pos = '\0';
+
+    /* 元の名前が既にプラットフォームサフィックス付きか確認 */
+    const char *plat_suffix = get_platform_hjp_suffix();
+
+    /* 明示的に .hjp が指定された場合はそのまま試す（プラットフォーム解決なし） */
+    if (has_hjp_extension(name)) {
+        char hjp_name[1024];
+        ensure_hjp_extension(name, hjp_name, sizeof(hjp_name));
+
+        /* 1a. 呼び出し元ファイルからの相対パス */
+        if (caller != NULL) {
+            char dir[1024];
+            snprintf(dir, sizeof(dir), "%s", caller);
+            char *sep = strrchr(dir, '/');
+#ifdef _WIN32
+            char *sep2 = strrchr(dir, '\\');
+            if (sep2 > sep) sep = sep2;
+#endif
+            if (sep) {
+                *(sep + 1) = '\0';
+                char try_path[2048];
+                snprintf(try_path, sizeof(try_path), "%s%s", dir, hjp_name);
+                if (file_exists_plugin(try_path)) {
+                    snprintf(out, out_size, "%s", try_path);
+                    return true;
+                }
+            }
+        }
+        /* 1b. CWD */
+        if (file_exists_plugin(hjp_name)) {
+            snprintf(out, out_size, "%s", hjp_name);
+            return true;
+        }
+        return false;
+    }
+
+    /* ── プラットフォーム別解決付き検索 ──────────────── */
+
     // 1. 呼び出し元ファイルからの相対パス
     if (caller != NULL) {
         char dir[1024];
@@ -192,75 +278,48 @@ bool plugin_resolve_hjp(const char *name, const char *caller,
 #endif
         if (sep) {
             *(sep + 1) = '\0';
-            snprintf(try_path, sizeof(try_path), "%s%s", dir, hjp_name);
-            if (file_exists_plugin(try_path)) {
-                snprintf(out, out_size, "%s", try_path);
+            if (try_hjp_in_dir(dir, base_name, plat_suffix, out, out_size))
                 return true;
-            }
         }
-    }
-    
-    // 2. CWD基準
-    if (file_exists_plugin(hjp_name)) {
-        snprintf(out, out_size, "%s", hjp_name);
-        return true;
-    }
-    
-    // 3. hajimu_packages/ 内の .hjp を検索
-    //    hajimu_packages/<name>.hjp
-    //    hajimu_packages/<name>/<name>.hjp
-    snprintf(try_path, sizeof(try_path), "hajimu_packages/%s", hjp_name);
-    if (file_exists_plugin(try_path)) {
-        snprintf(out, out_size, "%s", try_path);
-        return true;
-    }
-    
-    // パッケージ名部分を抽出（拡張子を除く）
-    char base_name[256];
-    snprintf(base_name, sizeof(base_name), "%s", name);
-    // .hjp が付いていたら除去
-    char *ext_pos = strstr(base_name, HJP_EXTENSION);
-    if (ext_pos) *ext_pos = '\0';
-    
-    snprintf(try_path, sizeof(try_path), "hajimu_packages/%s/%s", base_name, hjp_name);
-    if (file_exists_plugin(try_path)) {
-        snprintf(out, out_size, "%s", try_path);
-        return true;
     }
 
-    /* ビルド出力サブディレクトリも検索: hajimu_packages/<name>/{build,dist,lib,bin}/<name>.hjp
-     * 多くのパッケージは make の出力先としてこれらのサブディレクトリを使う */
+    // 2. CWD 基準
+    if (try_hjp_in_dir("", base_name, plat_suffix, out, out_size))
+        return true;
+
+    // 3. hajimu_packages/<basename>/  (サブディレクトリ経由)
     {
-        static const char * const build_subdirs[] = {"build", "dist", "lib", "bin", NULL};
+        char pkg_dir[512];
+        snprintf(pkg_dir, sizeof(pkg_dir), "hajimu_packages/%s/", base_name);
+        if (try_hjp_in_dir(pkg_dir, base_name, plat_suffix, out, out_size))
+            return true;
+
+        /* 3b. ビルド出力サブディレクトリ: build,dist,lib,bin */
+        static const char * const build_subdirs[] = {"dist", "build", "lib", "bin", NULL};
         for (int _sd = 0; build_subdirs[_sd] != NULL; _sd++) {
-            snprintf(try_path, sizeof(try_path), "hajimu_packages/%s/%s/%s",
-                     base_name, build_subdirs[_sd], hjp_name);
-            if (file_exists_plugin(try_path)) {
-                snprintf(out, out_size, "%s", try_path);
+            snprintf(pkg_dir, sizeof(pkg_dir), "hajimu_packages/%s/%s/",
+                     base_name, build_subdirs[_sd]);
+            if (try_hjp_in_dir(pkg_dir, base_name, plat_suffix, out, out_size))
                 return true;
-            }
         }
+
+        /* 3c. hajimu_packages/ 直下 */
+        if (try_hjp_in_dir("hajimu_packages/", base_name, plat_suffix, out, out_size))
+            return true;
     }
 
     // 4. グローバルプラグインディレクトリ: ~/.hajimu/plugins/
-    //    ~/.hajimu/plugins/<name>.hjp
-    //    ~/.hajimu/plugins/<name>/<name>.hjp
     const char *home = get_home_dir_plugin();
     if (home != NULL) {
-        snprintf(try_path, sizeof(try_path), "%s/.hajimu/plugins/%s", home, hjp_name);
-        if (file_exists_plugin(try_path)) {
-            snprintf(out, out_size, "%s", try_path);
+        char global_dir[512];
+        snprintf(global_dir, sizeof(global_dir), "%s/.hajimu/plugins/", home);
+        if (try_hjp_in_dir(global_dir, base_name, plat_suffix, out, out_size))
             return true;
-        }
-        
-        snprintf(try_path, sizeof(try_path), "%s/.hajimu/plugins/%s/%s",
-                 home, base_name, hjp_name);
-        if (file_exists_plugin(try_path)) {
-            snprintf(out, out_size, "%s", try_path);
+        snprintf(global_dir, sizeof(global_dir), "%s/.hajimu/plugins/%s/", home, base_name);
+        if (try_hjp_in_dir(global_dir, base_name, plat_suffix, out, out_size))
             return true;
-        }
     }
-    
+
     return false;
 }
 
