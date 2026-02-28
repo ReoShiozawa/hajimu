@@ -4,7 +4,7 @@
 [![GitHub release](https://img.shields.io/github/release/ReoShiozawa/hajimu.svg)](https://github.com/ReoShiozawa/hajimu/releases)
 [![GitHub stars](https://img.shields.io/github/stars/ReoShiozawa/hajimu.svg)](https://github.com/ReoShiozawa/hajimu/stargazers)
 
-> 🇺🇸 **English documentation available:** [Tutorial](docs/TUTORIAL_en.md) · [Reference](docs/REFERENCE_en.md) · [Plugin Dev Guide](docs/PLUGIN_DEVELOPMENT.md) · [Roadmap](docs/ROADMAP_en.md)
+> 🇺🇸 **English README & documentation:** [README_en.md](README_en.md) · [Tutorial](docs/TUTORIAL_en.md) · [Reference](docs/REFERENCE_en.md) · [Plugin Dev Guide](docs/PLUGIN_DEVELOPMENT.md) · [Roadmap](docs/ROADMAP_en.md)
 
 **日本語で書く、日本語で考える**プログラミング言語
 
@@ -111,6 +111,7 @@ hajimu hello.jp
 
 ### 🇺🇸 English Documentation
 
+- **[README (English)](README_en.md)** - English overview
 - **[Tutorial](docs/TUTORIAL_en.md)** - Step-by-step guide in English
 - **[Reference Manual](docs/REFERENCE_en.md)** - Full language reference in English
 - **[Plugin Development Guide](docs/PLUGIN_DEVELOPMENT.md)** - How to build C extension plugins
