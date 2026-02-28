@@ -4,6 +4,8 @@
 [![GitHub release](https://img.shields.io/github/release/ReoShiozawa/hajimu.svg)](https://github.com/ReoShiozawa/hajimu/releases)
 [![GitHub stars](https://img.shields.io/github/stars/ReoShiozawa/hajimu.svg)](https://github.com/ReoShiozawa/hajimu/stargazers)
 
+> 🇺🇸 **English documentation available:** [Tutorial](docs/TUTORIAL_en.md) · [Reference](docs/REFERENCE_en.md) · [Plugin Dev Guide](docs/PLUGIN_DEVELOPMENT.md) · [Roadmap](docs/ROADMAP_en.md)
+
 **日本語で書く、日本語で考える**プログラミング言語
 
 はじむは、日本語のキーワードと自然な文法を持つプログラミング言語です。教育からプロダクション開発まで、幅広い用途で使える実用的な言語を目指しています。
@@ -106,6 +108,13 @@ hajimu hello.jp
 - **[チュートリアル](docs/TUTORIAL.md)** - ステップバイステップガイド
 - **[コード例](examples/)** - 実践的なサンプルコード
 - **[ロードマップ](docs/ROADMAP.md)** - 開発計画
+
+### 🇺🇸 English Documentation
+
+- **[Tutorial](docs/TUTORIAL_en.md)** - Step-by-step guide in English
+- **[Reference Manual](docs/REFERENCE_en.md)** - Full language reference in English
+- **[Plugin Development Guide](docs/PLUGIN_DEVELOPMENT.md)** - How to build C extension plugins
+- **[Roadmap](docs/ROADMAP_en.md)** - Development roadmap in English
 
 ## 🎯 言語仕様
 
