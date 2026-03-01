@@ -2,6 +2,25 @@
 
 すべての注目すべき変更はこのプロジェクトに記録されます。
 
+## [v1.3.2] - 2026-03-01
+
+### 🐛 Windows 互換性修正
+
+#### jp-discord
+- **TLS 証明書**: Windows 証明書ストアから CA を読み込む `load_windows_ca_store()` を追加し、OpenSSL/curl の SSL 検証が正常に機能するよう修正
+- **ソケットタイムアウト**: `sock_set_timeout` の単位バグ修正 (秒 → ミリ秒 × 1000)
+- **curl REST API**: `CURLSSLOPT_NATIVE_CA` を設定し SSL 検証エラーを解消
+- **stale 接続**: `CURLOPT_FRESH_CONNECT` + `CURLE_SEND_ERROR` 自動リトライでコマンド登録時の HTTP 0 を修正
+- **yt-dlp パイプ**: リダイレクト先を `2>/tmp/...` から `2>NUL` に修正
+- **popen バイナリモード**: `_setmode(_fileno(fp), _O_BINARY)` を追加しテキスト変換を抑止
+
+#### jp-gui
+- **`印刷する` / `印刷プレビュー`**: Unix 専用コマンド (`lpr`、`open /tmp/...`) を `#ifdef _WIN32` で分岐
+  - Windows: `%TEMP%` にファイルを書き出し `ShellExecuteA` で印刷・プレビュー
+  - Linux: `lpr` / `xdg-open` に分岐
+
+---
+
 ## [v1.3.1] - 2026-02-28
 
 ### 🔧 改善・機能追加
