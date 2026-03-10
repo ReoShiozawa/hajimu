@@ -480,7 +480,8 @@ static int cmd_build(const char *input_jp, const char *output_hjp_arg) {
         snprintf(out_path, sizeof(out_path), "%s", input_jp);
         char *dot = strrchr(out_path, '.');
         if (dot && strcmp(dot, ".jp") == 0) {
-            strcpy(dot, ".hjp");
+            ptrdiff_t base_len = dot - out_path;
+            snprintf(out_path + base_len, sizeof(out_path) - base_len, ".hjp");
         } else {
             /* .jp でない場合は末尾に .hjp を付加 */
             strncat(out_path, ".hjp", sizeof(out_path) - strlen(out_path) - 1);

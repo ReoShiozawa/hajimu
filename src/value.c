@@ -711,8 +711,7 @@ char *value_to_string(Value v) {
     
     switch (v.type) {
         case VALUE_NULL:
-            buffer = malloc(5);
-            strcpy(buffer, "null");
+            buffer = strdup("null");
             break;
             
         case VALUE_NUMBER: {
@@ -728,8 +727,7 @@ char *value_to_string(Value v) {
         }
         
         case VALUE_BOOL:
-            buffer = malloc(strlen(v.boolean ? "真" : "偽") + 1);
-            strcpy(buffer, v.boolean ? "真" : "偽");
+            buffer = strdup(v.boolean ? "真" : "偽");
             break;
             
         case VALUE_STRING:

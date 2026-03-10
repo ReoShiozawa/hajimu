@@ -240,8 +240,8 @@ static bool json_key_equals(const char *key, const char *target) {
  */
 bool package_read_manifest(const char *path, PackageManifest *manifest) {
     memset(manifest, 0, sizeof(PackageManifest));
-    strcpy(manifest->main_file, "main.jp"); // デフォルト
-    strcpy(manifest->version, "0.0.0");
+    snprintf(manifest->main_file, sizeof(manifest->main_file), "main.jp");
+    snprintf(manifest->version, sizeof(manifest->version), "0.0.0");
     
     FILE *f = fopen(path, "rb");
     if (!f) return false;
@@ -561,10 +561,10 @@ int package_init(void) {
     memset(&manifest, 0, sizeof(manifest));
     snprintf(manifest.name, sizeof(manifest.name), "%.*s",
              (int)(sizeof(manifest.name) - 1), dir_name);
-    strcpy(manifest.version, "1.0.0");
-    strcpy(manifest.description, "");
-    strcpy(manifest.author, "");
-    strcpy(manifest.main_file, "main.jp");
+    snprintf(manifest.version, sizeof(manifest.version), "1.0.0");
+    manifest.description[0] = '\0';
+    manifest.author[0] = '\0';
+    snprintf(manifest.main_file, sizeof(manifest.main_file), "main.jp");
     manifest.dep_count = 0;
     
     if (!write_manifest(PACKAGE_MANIFEST_FILE, &manifest)) {

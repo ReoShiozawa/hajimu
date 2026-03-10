@@ -1538,14 +1538,18 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
                 for (int j = 0; j < spread_val.array.length; j++) {
                     if (actual_arg_count >= args_capacity) {
                         args_capacity *= 2;
-                        args = realloc(args, sizeof(Value) * args_capacity);
+                        Value *tmp = realloc(args, sizeof(Value) * args_capacity);
+                        if (!tmp) { free(args); return value_null(); }
+                        args = tmp;
                     }
                     args[actual_arg_count++] = value_copy(spread_val.array.elements[j]);
                 }
             } else {
                 if (actual_arg_count >= args_capacity) {
                     args_capacity *= 2;
-                    args = realloc(args, sizeof(Value) * args_capacity);
+                    Value *tmp = realloc(args, sizeof(Value) * args_capacity);
+                    if (!tmp) { free(args); return value_null(); }
+                    args = tmp;
                 }
                 args[actual_arg_count] = evaluate(eval, arg_node);
                 if (eval->had_error) {
@@ -2792,7 +2796,9 @@ static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int
             // エスケープされた{はそのまま
             if (length + 1 >= capacity) {
                 capacity *= 2;
-                result = realloc(result, capacity);
+                char *tmp = realloc(result, capacity);
+                if (!tmp) { free(result); return value_string(""); }
+                result = tmp;
             }
             result[length++] = '{';
             p += 2;
@@ -2846,7 +2852,9 @@ static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int
                     int val_len = strlen(val_str);
                     while (length + val_len + 1 >= capacity) {
                         capacity *= 2;
-                        result = realloc(result, capacity);
+                        char *tmp = realloc(result, capacity);
+                        if (!tmp) { free(result); free(val_str); return value_string(""); }
+                        result = tmp;
                     }
                     memcpy(result + length, val_str, val_len);
                     length += val_len;
@@ -2857,7 +2865,9 @@ static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int
                 int total = 1 + expr_len + 1; // { + 内容 + }
                 while (length + total + 1 >= capacity) {
                     capacity *= 2;
-                    result = realloc(result, capacity);
+                    char *tmp = realloc(result, capacity);
+                    if (!tmp) { free(result); return value_string(""); }
+                    result = tmp;
                 }
                 result[length++] = '{';
                 memcpy(result + length, expr_str, expr_len);
@@ -2874,7 +2884,9 @@ static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int
             if (char_len == 0) char_len = 1;
             while (length + char_len + 1 >= capacity) {
                 capacity *= 2;
-                result = realloc(result, capacity);
+                char *tmp = realloc(result, capacity);
+                if (!tmp) { free(result); return value_string(""); }
+                result = tmp;
             }
             memcpy(result + length, p, char_len);
             length += char_len;
@@ -4106,14 +4118,21 @@ static Value builtin_join(int argc, Value *argv) {
     
     // 結果を構築
     char *buffer = malloc(total_len + 1);
-    buffer[0] = '\0';
-    
+    if (!buffer) return value_string("");
+    size_t offset = 0;
+
     for (int i = 0; i < argv[0].array.length; i++) {
-        if (i > 0) strcat(buffer, argv[1].string.data);
+        if (i > 0) {
+            memcpy(buffer + offset, argv[1].string.data, delim_len);
+            offset += delim_len;
+        }
         char *s = value_to_string(argv[0].array.elements[i]);
-        strcat(buffer, s);
+        size_t slen = strlen(s);
+        memcpy(buffer + offset, s, slen);
+        offset += slen;
         free(s);
     }
+    buffer[offset] = '\0';
     
     Value result = value_string(buffer);
     free(buffer);
@@ -4156,11 +4175,19 @@ static Value builtin_replace(int argc, Value *argv) {
         p += old_len;
     }
     
-    // 結果バッファを確保
-    size_t result_len = strlen(src) + count * (new_len - old_len);
+    // 結果バッファを確保（size_tアンダーフロー防止）
+    size_t src_len = strlen(src);
+    size_t result_len;
+    if (new_len >= old_len) {
+        result_len = src_len + count * (new_len - old_len);
+    } else {
+        size_t shrink = count * (old_len - new_len);
+        result_len = (shrink <= src_len) ? src_len - shrink : 0;
+    }
     char *buffer = malloc(result_len + 1);
+    if (!buffer) return value_string(src);
     char *dst = buffer;
-    
+
     p = src;
     char *q;
     while ((q = strstr(p, old)) != NULL) {
@@ -4171,7 +4198,8 @@ static Value builtin_replace(int argc, Value *argv) {
         dst += new_len;
         p = q + old_len;
     }
-    strcpy(dst, p);
+    size_t remaining = strlen(p);
+    memcpy(dst, p, remaining + 1);
     
     Value result = value_string(buffer);
     free(buffer);
@@ -4612,7 +4640,9 @@ static Value builtin_regex_replace(int argc, Value *argv) {
         int prefix_len = match.rm_so;
         while (buf_len + prefix_len + rep_len + 1 >= buf_capacity) {
             buf_capacity *= 2;
-            buf = realloc(buf, buf_capacity);
+            char *tmp = realloc(buf, buf_capacity);
+            if (!tmp) { free(buf); regfree(&regex); return value_string(""); }
+            buf = tmp;
         }
         memcpy(buf + buf_len, src, prefix_len);
         buf_len += prefix_len;
@@ -4636,7 +4666,9 @@ static Value builtin_regex_replace(int argc, Value *argv) {
     int remaining = strlen(src);
     while (buf_len + remaining + 1 >= buf_capacity) {
         buf_capacity *= 2;
-        buf = realloc(buf, buf_capacity);
+        char *tmp = realloc(buf, buf_capacity);
+        if (!tmp) { free(buf); regfree(&regex); return value_string(""); }
+        buf = tmp;
     }
     memcpy(buf + buf_len, src, remaining);
     buf_len += remaining;
@@ -4683,7 +4715,9 @@ static Value builtin_exec(int argc, Value *argv) {
         int chunk_len = strlen(chunk);
         while (length + chunk_len + 1 >= capacity) {
             capacity *= 2;
-            buffer = realloc(buffer, capacity);
+            char *tmp = realloc(buffer, capacity);
+            if (!tmp) { free(buffer); pclose(pipe); return value_string(""); }
+            buffer = tmp;
         }
         memcpy(buffer + length, chunk, chunk_len);
         length += chunk_len;
