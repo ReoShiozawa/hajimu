@@ -279,7 +279,9 @@ static Parameter *parse_parameters(Parser *parser, int *count) {
     do {
         if (*count >= capacity) {
             capacity *= 2;
-            params = realloc(params, sizeof(Parameter) * capacity);
+            Parameter *tmp = realloc(params, sizeof(Parameter) * capacity);
+            if (!tmp) { free(params); return NULL; }
+            params = tmp;
         }
         
         // 可変長引数（*引数名）
@@ -597,7 +599,9 @@ static ASTNode *var_declaration(Parser *parser, bool is_const) {
                 consume(parser, TOKEN_IDENTIFIER, "変数名が必要です");
                 if (name_count >= name_capacity) {
                     name_capacity *= 2;
-                    names = realloc(names, sizeof(char*) * name_capacity);
+                    char **tmp = realloc(names, sizeof(char*) * name_capacity);
+                    if (!tmp) { free(names); return NULL; }
+                    names = tmp;
                 }
                 names[name_count++] = copy_token_string(&parser->previous);
             } while (match(parser, TOKEN_COMMA));
@@ -945,7 +949,9 @@ static ASTNode *match_statement(Parser *parser) {
         while (match(parser, TOKEN_COMMA)) {
             if (value_count >= value_capacity) {
                 value_capacity *= 2;
-                case_values = realloc(case_values, sizeof(ASTNode *) * value_capacity);
+                ASTNode **tmp = realloc(case_values, sizeof(ASTNode *) * value_capacity);
+                if (!tmp) { free(case_values); return NULL; }
+                case_values = tmp;
             }
             case_values[value_count++] = expression(parser);
         }
@@ -1071,8 +1077,15 @@ static ASTNode *enum_definition(Parser *parser) {
         
         if (count >= capacity) {
             capacity *= 2;
-            keys = realloc(keys, sizeof(char *) * capacity);
-            values = realloc(values, sizeof(ASTNode *) * capacity);
+            char **tmp_k = realloc(keys, sizeof(char *) * capacity);
+            ASTNode **tmp_v = realloc(values, sizeof(ASTNode *) * capacity);
+            if (!tmp_k || !tmp_v) {
+                free(tmp_k ? tmp_k : keys);
+                free(tmp_v ? tmp_v : values);
+                return NULL;
+            }
+            keys = tmp_k;
+            values = tmp_v;
         }
         
         // メンバー名
