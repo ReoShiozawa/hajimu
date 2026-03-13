@@ -223,7 +223,7 @@ static Value process(int argc, Value *argv) {
     double  n   = argv[0].number;           // number
     bool    b   = argv[0].boolean;          // boolean
     char   *s   = argv[0].string.data;      // string data
-    int     len = argv[0].string.length;    // string length
+    int     len = argv[0].string.byte_length;    // string length
 
     // Array elements
     for (int i = 0; i < argv[0].array.length; i++) {

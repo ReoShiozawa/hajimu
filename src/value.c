@@ -52,7 +52,7 @@ Value value_string_n(const char *s, int length) {
     v.is_const = false;
     v.ref_count = 1;
     
-    v.string.length = length;
+    v.string.byte_length = length;
     v.string.capacity = length + 1;
     v.string.data = malloc(v.string.capacity);
     
@@ -220,7 +220,7 @@ Value value_copy(Value v) {
     switch (v.type) {
         case VALUE_STRING:
             copy.string.data = malloc(v.string.capacity);
-            memcpy(copy.string.data, v.string.data, v.string.length + 1);
+            memcpy(copy.string.data, v.string.data, v.string.byte_length + 1);
             copy.ref_count = 1;
             break;
             
@@ -583,17 +583,17 @@ Value string_concat(Value a, Value b) {
         return value_null();
     }
     
-    int new_length = a.string.length + b.string.length;
+    int new_length = a.string.byte_length + b.string.byte_length;
     Value result;
     result.type = VALUE_STRING;
     result.is_const = false;
     result.ref_count = 1;
-    result.string.length = new_length;
+    result.string.byte_length = new_length;
     result.string.capacity = new_length + 1;
     result.string.data = malloc(result.string.capacity);
     
-    memcpy(result.string.data, a.string.data, a.string.length);
-    memcpy(result.string.data + a.string.length, b.string.data, b.string.length);
+    memcpy(result.string.data, a.string.data, a.string.byte_length);
+    memcpy(result.string.data + a.string.byte_length, b.string.data, b.string.byte_length);
     result.string.data[new_length] = '\0';
     
     return result;
@@ -607,7 +607,7 @@ int string_length(Value *s) {
     
     int count = 0;
     const char *p = s->string.data;
-    const char *end = p + s->string.length;
+    const char *end = p + s->string.byte_length;
     
     while (p < end) {
         unsigned char c = (unsigned char)*p;
@@ -633,7 +633,7 @@ Value string_substring(Value *s, int start, int end) {
     
     // UTF-8での文字位置をバイト位置に変換
     const char *p = s->string.data;
-    const char *str_end = p + s->string.length;
+    const char *str_end = p + s->string.byte_length;
     int char_index = 0;
     const char *start_ptr = NULL;
     const char *end_ptr = NULL;
@@ -674,7 +674,7 @@ bool value_is_truthy(Value v) {
         case VALUE_NUMBER:
             return v.number != 0.0 && !isnan(v.number);
         case VALUE_STRING:
-            return v.string.length > 0;
+            return v.string.byte_length > 0;
         case VALUE_ARRAY:
             return v.array.length > 0;
         case VALUE_DICT:
@@ -731,9 +731,9 @@ char *value_to_string(Value v) {
             break;
             
         case VALUE_STRING:
-            buffer = malloc(v.string.length + 1);
-            memcpy(buffer, v.string.data, v.string.length);
-            buffer[v.string.length] = '\0';
+            buffer = malloc(v.string.byte_length + 1);
+            memcpy(buffer, v.string.data, v.string.byte_length);
+            buffer[v.string.byte_length] = '\0';
             break;
             
         case VALUE_ARRAY: {
@@ -890,8 +890,8 @@ bool value_equals(Value a, Value b) {
         case VALUE_BOOL:
             return a.boolean == b.boolean;
         case VALUE_STRING:
-            return a.string.length == b.string.length &&
-                   memcmp(a.string.data, b.string.data, a.string.length) == 0;
+            return a.string.byte_length == b.string.byte_length &&
+                   memcmp(a.string.data, b.string.data, a.string.byte_length) == 0;
         case VALUE_ARRAY:
             if (a.array.length != b.array.length) return false;
             for (int i = 0; i < a.array.length; i++) {

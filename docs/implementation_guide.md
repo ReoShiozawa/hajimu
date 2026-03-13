@@ -195,7 +195,7 @@ bool is_truthy(Value v) {
         case VALUE_NULL: return false;
         case VALUE_BOOL: return v.boolean;
         case VALUE_NUMBER: return v.number != 0;
-        case VALUE_STRING: return v.string.length > 0;
+        case VALUE_STRING: return v.string.byte_length > 0;
         case VALUE_ARRAY: return v.array.count > 0;
         default: return true;
     }
