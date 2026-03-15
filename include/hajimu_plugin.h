@@ -163,7 +163,7 @@ struct Value {
         
         struct {
             char *data;
-            int byte_length;
+            int length;
             int capacity;
         } string;
         
@@ -253,12 +253,12 @@ static inline Value hajimu_string(const char *s) {
     v.ref_count = 0;
     if (s == NULL) {
         v.string.data = strdup("");
-        v.string.byte_length = 0;
+        v.string.length = 0;
     } else {
         v.string.data = strdup(s);
-        v.string.byte_length = (int)strlen(s);
+        v.string.length = (int)strlen(s);
     }
-    v.string.capacity = v.string.byte_length + 1;
+    v.string.capacity = v.string.length + 1;
     return v;
 }
 
