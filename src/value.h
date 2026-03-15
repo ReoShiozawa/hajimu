@@ -67,7 +67,7 @@ struct Value {
         // 文字列
         struct {
             char *data;
-            int length;
+            int byte_length;
             int capacity;
         } string;
         

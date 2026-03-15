@@ -2141,7 +2141,7 @@ Value builtin_ws_send(int argc, Value *argv) {
     if (conn == NULL || !conn->connected) return value_bool(false);
     
     pthread_mutex_lock(&conn->mutex);
-    bool result = ws_send_frame(conn->sockfd, argv[1].string.data, argv[1].string.length);
+    bool result = ws_send_frame(conn->sockfd, argv[1].string.data, argv[1].string.byte_length);
     pthread_mutex_unlock(&conn->mutex);
     
     return value_bool(result);

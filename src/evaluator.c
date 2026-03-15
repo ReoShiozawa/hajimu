@@ -1101,7 +1101,7 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
                 runtime_error(eval, node->location.line, node->location.column,
                              "未定義の変数: %s", node->string_value);
             } else {
-                result = *val;
+                result = value_copy(*val);
             }
             break;
         }
@@ -1715,6 +1715,17 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
             
             // current_instanceを復元
             eval->current_instance = prev_instance;
+
+            // 値セマンティクス維持: メソッド内の変更を呼び出し元レシーバへ反映
+            if (is_method_call && instance_ptr != NULL && !is_super_call) {
+                ASTNode *receiver = node->call.callee->member.object;
+                if (receiver->type == NODE_IDENTIFIER) {
+                    env_set(eval->current, receiver->string_value, *instance_ptr);
+                } else if (receiver->type == NODE_SELF && prev_instance != NULL) {
+                    *prev_instance = *instance_ptr;
+                }
+            }
+
             if (instance_ptr != NULL && !is_super_call) {
                 free(instance_ptr);
             }
@@ -3375,8 +3386,7 @@ static Value builtin_bit_rshift(int argc, Value *argv) {
 static Value builtin_substring(int argc, Value *argv) {
     if (argv[0].type != VALUE_STRING || argv[1].type != VALUE_NUMBER) return value_null();
     
-    const char *str = argv[0].string.data;
-    int len = argv[0].string.length;
+    int len = string_length(&argv[0]);
     int start = (int)argv[1].number;
     
     if (start < 0) start += len;
@@ -3393,7 +3403,7 @@ static Value builtin_substring(int argc, Value *argv) {
     
     if (start + sub_len > len) sub_len = len - start;
     
-    return value_string_n(str + start, sub_len);
+    return string_substring(&argv[0], start, start + sub_len);
 }
 
 // 始まる: 文字列が指定のプレフィックスで始まるか
@@ -3432,21 +3442,38 @@ static Value builtin_char_code(int argc, Value *argv) {
         pos = (int)argv[1].number;
     }
     
-    const unsigned char *str = (const unsigned char *)argv[0].string.data;
-    int len = argv[0].string.length;
-    if (pos < 0 || pos >= len) return value_null();
+    int char_len = string_length(&argv[0]);
+    if (pos < 0 || pos >= char_len) return value_null();
     
+    // 文字インデックスからUTF-8先頭バイト位置へ変換
+    const unsigned char *str = (const unsigned char *)argv[0].string.data;
+    const unsigned char *p = str;
+    int i = 0;
+    while (i < pos && *p) {
+        if (*p < 0x80) p += 1;
+        else if (*p < 0xE0) p += 2;
+        else if (*p < 0xF0) p += 3;
+        else p += 4;
+        i++;
+    }
+
+    int byte_offset = (int)(p - str);
+    int len = argv[0].string.byte_length;
+    if (byte_offset >= len) return value_null();
+
     // UTF-8の先頭バイトからコードポイントを取得
-    unsigned char c = str[pos];
+    unsigned char c = str[byte_offset];
     int code = 0;
     if (c < 0x80) {
         code = c;
-    } else if (c < 0xE0 && pos + 1 < len) {
-        code = ((c & 0x1F) << 6) | (str[pos + 1] & 0x3F);
-    } else if (c < 0xF0 && pos + 2 < len) {
-        code = ((c & 0x0F) << 12) | ((str[pos + 1] & 0x3F) << 6) | (str[pos + 2] & 0x3F);
-    } else if (pos + 3 < len) {
-        code = ((c & 0x07) << 18) | ((str[pos + 1] & 0x3F) << 12) | ((str[pos + 2] & 0x3F) << 6) | (str[pos + 3] & 0x3F);
+    } else if (c < 0xE0 && byte_offset + 1 < len) {
+        code = ((c & 0x1F) << 6) | (str[byte_offset + 1] & 0x3F);
+    } else if (c < 0xF0 && byte_offset + 2 < len) {
+        code = ((c & 0x0F) << 12) | ((str[byte_offset + 1] & 0x3F) << 6) | (str[byte_offset + 2] & 0x3F);
+    } else if (byte_offset + 3 < len) {
+        code = ((c & 0x07) << 18) | ((str[byte_offset + 1] & 0x3F) << 12) | ((str[byte_offset + 2] & 0x3F) << 6) | (str[byte_offset + 3] & 0x3F);
+    } else {
+        return value_null();
     }
     
     return value_number(code);
@@ -4239,7 +4266,7 @@ static Value builtin_trim(int argc, Value *argv) {
     if (argv[0].type != VALUE_STRING) return value_string("");
     
     char *str = argv[0].string.data;
-    int len = argv[0].string.length;
+    int len = argv[0].string.byte_length;
     
     // 先頭の空白をスキップ
     int start = 0;
@@ -4371,10 +4398,10 @@ static Value builtin_file_write(int argc, Value *argv) {
     FILE *file = fopen(argv[0].string.data, "wb");
     if (file == NULL) return value_bool(false);
     
-    size_t written = fwrite(argv[1].string.data, 1, argv[1].string.length, file);
+    size_t written = fwrite(argv[1].string.data, 1, argv[1].string.byte_length, file);
     fclose(file);
     
-    return value_bool(written == (size_t)argv[1].string.length);
+    return value_bool(written == (size_t)argv[1].string.byte_length);
 }
 
 static Value builtin_file_exists(int argc, Value *argv) {
@@ -4626,10 +4653,10 @@ static Value builtin_regex_replace(int argc, Value *argv) {
     
     const char *src = argv[0].string.data;
     const char *replacement = argv[2].string.data;
-    int rep_len = argv[2].string.length;
+    int rep_len = argv[2].string.byte_length;
     
     // 結果バッファ
-    int buf_capacity = argv[0].string.length * 2 + 64;
+    int buf_capacity = argv[0].string.byte_length * 2 + 64;
     char *buf = malloc(buf_capacity);
     int buf_len = 0;
     

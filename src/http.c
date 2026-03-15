@@ -370,7 +370,7 @@ static void json_encode_value(StringBuffer *sb, Value v) {
         }
         
         case VALUE_STRING:
-            json_encode_string(sb, v.string.data, v.string.length);
+            json_encode_string(sb, v.string.data, v.string.byte_length);
             break;
             
         case VALUE_ARRAY:
@@ -432,7 +432,7 @@ Value builtin_json_encode(int argc, Value *argv) {
 Value builtin_json_decode(int argc, Value *argv) {
     (void)argc;
     if (argv[0].type != VALUE_STRING) return value_null();
-    return json_decode(argv[0].string.data, argv[0].string.length);
+    return json_decode(argv[0].string.data, argv[0].string.byte_length);
 }
 
 // =============================================================================
@@ -643,12 +643,12 @@ Value builtin_http_post(int argc, Value *argv) {
     if (argc >= 2) {
         if (argv[1].type == VALUE_STRING) {
             body = argv[1].string.data;
-            body_len = argv[1].string.length;
+            body_len = argv[1].string.byte_length;
         } else if (argv[1].type == VALUE_DICT || argv[1].type == VALUE_ARRAY) {
             // 辞書/配列はJSONに変換
             json_body = json_encode(argv[1]);
             body = json_body.string.data;
-            body_len = json_body.string.length;
+            body_len = json_body.string.byte_length;
         }
     }
     
@@ -682,11 +682,11 @@ Value builtin_http_put(int argc, Value *argv) {
     if (argc >= 2) {
         if (argv[1].type == VALUE_STRING) {
             body = argv[1].string.data;
-            body_len = argv[1].string.length;
+            body_len = argv[1].string.byte_length;
         } else if (argv[1].type == VALUE_DICT || argv[1].type == VALUE_ARRAY) {
             json_body = json_encode(argv[1]);
             body = json_body.string.data;
-            body_len = json_body.string.length;
+            body_len = json_body.string.byte_length;
         }
     }
     
@@ -731,11 +731,11 @@ Value builtin_http_request(int argc, Value *argv) {
     if (argc >= 3 && argv[2].type != VALUE_NULL) {
         if (argv[2].type == VALUE_STRING) {
             body = argv[2].string.data;
-            body_len = argv[2].string.length;
+            body_len = argv[2].string.byte_length;
         } else if (argv[2].type == VALUE_DICT || argv[2].type == VALUE_ARRAY) {
             json_body = json_encode(argv[2]);
             body = json_body.string.data;
-            body_len = json_body.string.length;
+            body_len = json_body.string.byte_length;
         }
     }
     
@@ -1111,7 +1111,7 @@ Value builtin_url_encode(int argc, Value *argv) {
     CURL *curl = curl_easy_init();
     if (!curl) return value_null();
     
-    char *encoded = curl_easy_escape(curl, argv[0].string.data, argv[0].string.length);
+    char *encoded = curl_easy_escape(curl, argv[0].string.data, argv[0].string.byte_length);
     Value result = value_string(encoded);
     curl_free(encoded);
     curl_easy_cleanup(curl);
@@ -1127,7 +1127,7 @@ Value builtin_url_decode(int argc, Value *argv) {
     if (!curl) return value_null();
     
     int out_len = 0;
-    char *decoded = curl_easy_unescape(curl, argv[0].string.data, argv[0].string.length, &out_len);
+    char *decoded = curl_easy_unescape(curl, argv[0].string.data, argv[0].string.byte_length, &out_len);
     Value result = value_string_n(decoded, out_len);
     curl_free(decoded);
     curl_easy_cleanup(curl);
