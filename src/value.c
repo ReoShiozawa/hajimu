@@ -251,8 +251,12 @@ Value value_copy(Value v) {
             break;
         
         case VALUE_CLASS:
-            // クラスもシャロウコピー
+            // クラス名と親クラスをディープコピー
             copy.class_value.name = strdup(v.class_value.name);
+            if (v.class_value.parent != NULL) {
+                copy.class_value.parent = malloc(sizeof(Value));
+                *copy.class_value.parent = value_copy(*v.class_value.parent);
+            }
             copy.ref_count = 1;
             break;
         
@@ -263,6 +267,10 @@ Value value_copy(Value v) {
             for (int i = 0; i < v.instance.field_count; i++) {
                 copy.instance.field_names[i] = strdup(v.instance.field_names[i]);
                 copy.instance.fields[i] = value_copy(v.instance.fields[i]);
+            }
+            if (v.instance.class_ref != NULL) {
+                copy.instance.class_ref = malloc(sizeof(Value));
+                *copy.instance.class_ref = value_copy(*v.instance.class_ref);
             }
             copy.ref_count = 1;
             break;
@@ -321,6 +329,11 @@ void value_free(Value *v) {
                 free(v->class_value.name);
                 v->class_value.name = NULL;
             }
+            if (v->class_value.parent != NULL) {
+                value_free(v->class_value.parent);
+                free(v->class_value.parent);
+                v->class_value.parent = NULL;
+            }
             break;
         
         case VALUE_INSTANCE:
@@ -333,6 +346,11 @@ void value_free(Value *v) {
                 free(v->instance.fields);
                 v->instance.field_names = NULL;
                 v->instance.fields = NULL;
+            }
+            if (v->instance.class_ref != NULL) {
+                value_free(v->instance.class_ref);
+                free(v->instance.class_ref);
+                v->instance.class_ref = NULL;
             }
             break;
         
@@ -373,6 +391,9 @@ void value_retain(Value *v) {
         case VALUE_ARRAY:
         case VALUE_DICT:
         case VALUE_FUNCTION:
+        case VALUE_INSTANCE:
+        case VALUE_CLASS:
+        case VALUE_GENERATOR:
             v->ref_count++;
             break;
         default:
@@ -388,6 +409,9 @@ void value_release(Value *v) {
         case VALUE_ARRAY:
         case VALUE_DICT:
         case VALUE_FUNCTION:
+        case VALUE_INSTANCE:
+        case VALUE_CLASS:
+        case VALUE_GENERATOR:
             v->ref_count--;
             if (v->ref_count <= 0) {
                 value_free(v);
