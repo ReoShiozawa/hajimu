@@ -9,7 +9,7 @@ typedef void (*ClosureVisitor)(Environment *env, void *ctx);
 static bool gc_is_tracked(GC *gc, Environment *env) {
     (void)gc;
     if (env == NULL) return false;
-    return env->gc_node.gc_next != NULL && env->gc_node.gc_prev != NULL;
+    return env->gc_node.gc_tracked;
 }
 
 static void gc_visit_value_closures(Value *v, ClosureVisitor visitor, void *ctx) {
@@ -115,6 +115,12 @@ static void gc_subtract_closure(Environment *closure, void *ctx) {
 static void gc_subtract_internal_refs(GC *gc) {
     for (GCNode *node = gc->head.gc_next; node != &gc->head; node = node->gc_next) {
         Environment *env = (Environment *)node;
+
+        // 親環境への参照も内部参照として減算
+        if (env->parent != NULL && gc_is_tracked(gc, env->parent)) {
+            env->parent->gc_node.gc_refs--;
+        }
+
         for (int i = 0; i < ENV_HASH_SIZE; i++) {
             EnvEntry *entry = env->table[i];
             while (entry != NULL) {
@@ -205,6 +211,35 @@ void gc_init(GC *gc) {
 
 void gc_shutdown(GC *gc) {
     if (gc == NULL) return;
+
+    // 残存する追跡中Environmentを全て解放
+    GCNode *node = gc->head.gc_next;
+    while (node != &gc->head) {
+        Environment *env = (Environment *)node;
+        node = node->gc_next;
+
+        // リストから外す
+        env->gc_node.gc_prev->gc_next = env->gc_node.gc_next;
+        env->gc_node.gc_next->gc_prev = env->gc_node.gc_prev;
+        env->gc_node.gc_next = NULL;
+        env->gc_node.gc_prev = NULL;
+        env->gc_node.gc_tracked = false;
+
+        // エントリを解放
+        for (int j = 0; j < ENV_HASH_SIZE; j++) {
+            EnvEntry *entry = env->table[j];
+            while (entry != NULL) {
+                EnvEntry *next = entry->next;
+                free(entry->name);
+                gc_clear_function_closures(&entry->value);
+                value_free(&entry->value);
+                free(entry);
+                entry = next;
+            }
+        }
+        free(env);
+    }
+
     gc->head.gc_next = &gc->head;
     gc->head.gc_prev = &gc->head;
     gc->tracked_count = 0;
@@ -221,6 +256,7 @@ void gc_track(GC *gc, Environment *env) {
     gc->head.gc_next = node;
     node->gc_refs = 0;
     node->gc_marked = false;
+    node->gc_tracked = true;
     gc->tracked_count++;
 }
 
@@ -235,6 +271,7 @@ void gc_untrack(GC *gc, Environment *env) {
     node->gc_prev = NULL;
     node->gc_refs = 0;
     node->gc_marked = false;
+    node->gc_tracked = false;
     if (gc->tracked_count > 0) {
         gc->tracked_count--;
     }

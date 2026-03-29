@@ -10,6 +10,7 @@ typedef struct GCNode {
     struct GCNode *gc_prev;
     int gc_refs;
     bool gc_marked;
+    bool gc_tracked;    // GCリストに登録済みかどうか
 } GCNode;
 
 typedef struct GC {
