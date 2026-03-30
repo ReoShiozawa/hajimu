@@ -9,6 +9,7 @@
 #include "package.h"
 #include "diag.h"
 #include "bytecode.h"
+#include "gc.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,6 +34,16 @@ static Evaluator *g_eval = NULL;
 
 // 非同期モジュール用のグローバル評価器ポインタ
 Evaluator *g_eval_for_async = NULL;
+
+// グローバルGCインスタンス
+static GC g_gc_state;
+GC *g_gc = &g_gc_state;
+
+static void maybe_collect_gc(void) {
+    if (g_gc != NULL && g_gc->tracked_count > g_gc->threshold) {
+        gc_collect(g_gc);
+    }
+}
 
 // =============================================================================
 // プラグインランタイムコールバック
@@ -90,6 +101,7 @@ static Value plugin_call_function(Value *func, int argc, Value *argv) {
         
         g_eval->current = prev;
         env_release(local);
+        maybe_collect_gc();
         return result;
     }
     return value_null();
@@ -340,6 +352,7 @@ static int g_expect_msg_len = 0;
 
 Evaluator *evaluator_new(void) {
     Evaluator *eval = calloc(1, sizeof(Evaluator));
+    gc_init(g_gc);
     eval->global = env_new(NULL);
     eval->current = eval->global;
     eval->returning = false;
@@ -412,7 +425,9 @@ void evaluator_free(Evaluator *eval) {
     // プラグインマネージャを解放
     plugin_manager_free(&eval->plugin_manager);
     
+    gc_collect(g_gc);
     env_release(eval->global);
+    gc_shutdown(g_gc);
     free(eval);
 }
 
@@ -1747,6 +1762,8 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
     if (args != NULL) {
         free(args);
     }
+
+    maybe_collect_gc();
     
     return result;
 }
@@ -4501,6 +4518,7 @@ static Value call_function_value(Value *func, Value *args, int argc) {
     
     g_eval->current = prev;
     env_release(local);
+    maybe_collect_gc();
     
     return result;
 }

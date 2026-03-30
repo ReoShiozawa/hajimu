@@ -8,6 +8,7 @@
 #define ENVIRONMENT_H
 
 #include "value.h"
+#include "gc.h"
 #include <stdbool.h>
 
 // =============================================================================
@@ -32,6 +33,7 @@ typedef struct EnvEntry {
 // =============================================================================
 
 typedef struct Environment {
+    GCNode gc_node;                 // GC追跡ノード（先頭固定）
     EnvEntry *table[ENV_HASH_SIZE];  // ハッシュテーブル
     struct Environment *parent;       // 親スコープ
     int depth;                        // ネスト深度

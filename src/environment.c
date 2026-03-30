@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+extern GC *g_gc;
+
 // =============================================================================
 // ハッシュ関数
 // =============================================================================
@@ -33,12 +35,20 @@ Environment *env_new(Environment *parent) {
     for (int i = 0; i < ENV_HASH_SIZE; i++) {
         env->table[i] = NULL;
     }
+
+    if (g_gc != NULL) {
+        gc_track(g_gc, env);
+    }
     
     return env;
 }
 
 void env_free(Environment *env) {
     if (env == NULL) return;
+
+    if (g_gc != NULL) {
+        gc_untrack(g_gc, env);
+    }
     
     // エントリを解放
     for (int i = 0; i < ENV_HASH_SIZE; i++) {
