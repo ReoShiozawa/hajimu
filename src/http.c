@@ -5,6 +5,7 @@
  */
 
 #include "http.h"
+#include "array_grow.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -110,14 +111,14 @@ static Value json_parse_string(JsonParser *p) {
                     
                     // UTF-8にエンコード
                     if (codepoint < 0x80) {
-                        if (length + 1 >= capacity) { capacity *= 2; char *tmp = realloc(buffer, capacity); if (!tmp) { free(buffer); return value_null(); } buffer = tmp; }
+                        ARRAY_GROW(buffer, length + 1, capacity, char, free(buffer); return value_null());
                         buffer[length++] = (char)codepoint;
                     } else if (codepoint < 0x800) {
-                        if (length + 2 >= capacity) { capacity *= 2; char *tmp = realloc(buffer, capacity); if (!tmp) { free(buffer); return value_null(); } buffer = tmp; }
+                        ARRAY_GROW(buffer, length + 2, capacity, char, free(buffer); return value_null());
                         buffer[length++] = (char)(0xC0 | (codepoint >> 6));
                         buffer[length++] = (char)(0x80 | (codepoint & 0x3F));
                     } else {
-                        if (length + 3 >= capacity) { capacity *= 2; char *tmp = realloc(buffer, capacity); if (!tmp) { free(buffer); return value_null(); } buffer = tmp; }
+                        ARRAY_GROW(buffer, length + 3, capacity, char, free(buffer); return value_null());
                         buffer[length++] = (char)(0xE0 | (codepoint >> 12));
                         buffer[length++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
                         buffer[length++] = (char)(0x80 | (codepoint & 0x3F));
@@ -129,8 +130,7 @@ static Value json_parse_string(JsonParser *p) {
         }
         
         if (length + 1 >= capacity) {
-            capacity *= 2;
-            buffer = realloc(buffer, capacity);
+            ARRAY_GROW(buffer, length + 1, capacity, char, free(buffer); return value_null());
         }
         buffer[length++] = c;
     }
@@ -298,10 +298,7 @@ static void sb_init(StringBuffer *sb) {
 
 static void sb_append(StringBuffer *sb, const char *str, int len) {
     while (sb->length + len + 1 >= sb->capacity) {
-        sb->capacity *= 2;
-        char *tmp = realloc(sb->data, sb->capacity);
-        if (!tmp) return;
-        sb->data = tmp;
+        ARRAY_GROW(sb->data, sb->length + len + 1, sb->capacity, char, return);
     }
     memcpy(sb->data + sb->length, str, len);
     sb->length += len;
