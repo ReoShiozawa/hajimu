@@ -5,6 +5,7 @@
  */
 
 #include "lexer.h"
+#include "array_grow.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -533,8 +534,7 @@ static Token scan_multiline_string(Lexer *lexer) {
                 case '0': c = '\0'; break;
                 default:
                     if (length + 1 >= capacity) {
-                        capacity *= 2;
-                        buffer = realloc(buffer, capacity);
+                        ARRAY_GROW(buffer, length + 1, capacity, char, abort());
                     }
                     buffer[length++] = '\\';
                     c = next;
@@ -542,8 +542,7 @@ static Token scan_multiline_string(Lexer *lexer) {
         }
         
         if (length + 1 >= capacity) {
-            capacity *= 2;
-            buffer = realloc(buffer, capacity);
+            ARRAY_GROW(buffer, length + 1, capacity, char, abort());
         }
         buffer[length++] = c;
     }
@@ -591,8 +590,7 @@ static Token scan_string(Lexer *lexer) {
                 default:
                     // 不明なエスケープはそのまま
                     if (length + 1 >= capacity) {
-                        capacity *= 2;
-                        buffer = realloc(buffer, capacity);
+                        ARRAY_GROW(buffer, length + 1, capacity, char, abort());
                     }
                     buffer[length++] = '\\';
                     c = next;
@@ -601,8 +599,7 @@ static Token scan_string(Lexer *lexer) {
         
         // バッファに追加
         if (length + 1 >= capacity) {
-            capacity *= 2;
-            buffer = realloc(buffer, capacity);
+            ARRAY_GROW(buffer, length + 1, capacity, char, abort());
         }
         buffer[length++] = c;
     }

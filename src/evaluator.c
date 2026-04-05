@@ -3,6 +3,7 @@
  */
 
 #include "evaluator.h"
+#include "array_grow.h"
 #include "parser.h"
 #include "http.h"
 #include "async.h"
@@ -1552,19 +1553,13 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
                 // 配列の各要素を引数に追加
                 for (int j = 0; j < spread_val.array.length; j++) {
                     if (actual_arg_count >= args_capacity) {
-                        args_capacity *= 2;
-                        Value *tmp = realloc(args, sizeof(Value) * args_capacity);
-                        if (!tmp) { free(args); return value_null(); }
-                        args = tmp;
+                        ARRAY_GROW(args, actual_arg_count, args_capacity, Value, free(args); return value_null());
                     }
                     args[actual_arg_count++] = value_copy(spread_val.array.elements[j]);
                 }
             } else {
                 if (actual_arg_count >= args_capacity) {
-                    args_capacity *= 2;
-                    Value *tmp = realloc(args, sizeof(Value) * args_capacity);
-                    if (!tmp) { free(args); return value_null(); }
-                    args = tmp;
+                    ARRAY_GROW(args, actual_arg_count, args_capacity, Value, free(args); return value_null());
                 }
                 args[actual_arg_count] = evaluate(eval, arg_node);
                 if (eval->had_error) {
@@ -2823,10 +2818,7 @@ static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int
         if (*p == '\\' && *(p + 1) == '{') {
             // エスケープされた{はそのまま
             if (length + 1 >= capacity) {
-                capacity *= 2;
-                char *tmp = realloc(result, capacity);
-                if (!tmp) { free(result); return value_string(""); }
-                result = tmp;
+                ARRAY_GROW(result, length + 1, capacity, char, free(result); return value_string(""));
             }
             result[length++] = '{';
             p += 2;
@@ -2879,10 +2871,7 @@ static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int
                     char *val_str = value_to_string(val);
                     int val_len = strlen(val_str);
                     while (length + val_len + 1 >= capacity) {
-                        capacity *= 2;
-                        char *tmp = realloc(result, capacity);
-                        if (!tmp) { free(result); free(val_str); return value_string(""); }
-                        result = tmp;
+                        ARRAY_GROW(result, length + val_len + 1, capacity, char, free(result); free(val_str); return value_string(""));
                     }
                     memcpy(result + length, val_str, val_len);
                     length += val_len;
@@ -2892,10 +2881,7 @@ static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int
                 // 補間式として無効 → { と内容をリテラルとしてコピー
                 int total = 1 + expr_len + 1; // { + 内容 + }
                 while (length + total + 1 >= capacity) {
-                    capacity *= 2;
-                    char *tmp = realloc(result, capacity);
-                    if (!tmp) { free(result); return value_string(""); }
-                    result = tmp;
+                    ARRAY_GROW(result, length + total + 1, capacity, char, free(result); return value_string(""));
                 }
                 result[length++] = '{';
                 memcpy(result + length, expr_str, expr_len);
@@ -2911,10 +2897,7 @@ static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int
             int char_len = utf8_char_length((unsigned char)*p);
             if (char_len == 0) char_len = 1;
             while (length + char_len + 1 >= capacity) {
-                capacity *= 2;
-                char *tmp = realloc(result, capacity);
-                if (!tmp) { free(result); return value_string(""); }
-                result = tmp;
+                ARRAY_GROW(result, length + char_len + 1, capacity, char, free(result); return value_string(""));
             }
             memcpy(result + length, p, char_len);
             length += char_len;
@@ -4684,10 +4667,7 @@ static Value builtin_regex_replace(int argc, Value *argv) {
         // マッチ前の部分をコピー
         int prefix_len = match.rm_so;
         while (buf_len + prefix_len + rep_len + 1 >= buf_capacity) {
-            buf_capacity *= 2;
-            char *tmp = realloc(buf, buf_capacity);
-            if (!tmp) { free(buf); regfree(&regex); return value_string(""); }
-            buf = tmp;
+            ARRAY_GROW(buf, buf_len + prefix_len + rep_len + 1, buf_capacity, char, free(buf); regfree(&regex); return value_string(""));
         }
         memcpy(buf + buf_len, src, prefix_len);
         buf_len += prefix_len;
@@ -4710,10 +4690,7 @@ static Value builtin_regex_replace(int argc, Value *argv) {
     // 残りの部分をコピー
     int remaining = strlen(src);
     while (buf_len + remaining + 1 >= buf_capacity) {
-        buf_capacity *= 2;
-        char *tmp = realloc(buf, buf_capacity);
-        if (!tmp) { free(buf); regfree(&regex); return value_string(""); }
-        buf = tmp;
+        ARRAY_GROW(buf, buf_len + remaining + 1, buf_capacity, char, free(buf); regfree(&regex); return value_string(""));
     }
     memcpy(buf + buf_len, src, remaining);
     buf_len += remaining;
@@ -4759,10 +4736,7 @@ static Value builtin_exec(int argc, Value *argv) {
     while (fgets(chunk, sizeof(chunk), pipe) != NULL) {
         int chunk_len = strlen(chunk);
         while (length + chunk_len + 1 >= capacity) {
-            capacity *= 2;
-            char *tmp = realloc(buffer, capacity);
-            if (!tmp) { free(buffer); pclose(pipe); return value_string(""); }
-            buffer = tmp;
+            ARRAY_GROW(buffer, length + chunk_len + 1, capacity, char, free(buffer); pclose(pipe); return value_string(""));
         }
         memcpy(buffer + length, chunk, chunk_len);
         length += chunk_len;

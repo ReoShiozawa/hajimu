@@ -5,6 +5,7 @@
  */
 
 #include "parser.h"
+#include "array_grow.h"
 #include "diag.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -278,10 +279,7 @@ static Parameter *parse_parameters(Parser *parser, int *count) {
     
     do {
         if (*count >= capacity) {
-            capacity *= 2;
-            Parameter *tmp = realloc(params, sizeof(Parameter) * capacity);
-            if (!tmp) { free(params); return NULL; }
-            params = tmp;
+            ARRAY_GROW(params, *count, capacity, Parameter, free(params); return NULL);
         }
         
         // 可変長引数（*引数名）
@@ -598,10 +596,7 @@ static ASTNode *var_declaration(Parser *parser, bool is_const) {
             do {
                 consume(parser, TOKEN_IDENTIFIER, "変数名が必要です");
                 if (name_count >= name_capacity) {
-                    name_capacity *= 2;
-                    char **tmp = realloc(names, sizeof(char*) * name_capacity);
-                    if (!tmp) { free(names); return NULL; }
-                    names = tmp;
+                    ARRAY_GROW(names, name_count, name_capacity, char *, free(names); return NULL);
                 }
                 names[name_count++] = copy_token_string(&parser->previous);
             } while (match(parser, TOKEN_COMMA));
@@ -948,10 +943,7 @@ static ASTNode *match_statement(Parser *parser) {
         case_values[value_count++] = expression(parser);
         while (match(parser, TOKEN_COMMA)) {
             if (value_count >= value_capacity) {
-                value_capacity *= 2;
-                ASTNode **tmp = realloc(case_values, sizeof(ASTNode *) * value_capacity);
-                if (!tmp) { free(case_values); return NULL; }
-                case_values = tmp;
+                ARRAY_GROW(case_values, value_count, value_capacity, ASTNode *, free(case_values); return NULL);
             }
             case_values[value_count++] = expression(parser);
         }
@@ -1076,16 +1068,8 @@ static ASTNode *enum_definition(Parser *parser) {
         if (check(parser, TOKEN_END)) break;
         
         if (count >= capacity) {
-            capacity *= 2;
-            char **tmp_k = realloc(keys, sizeof(char *) * capacity);
-            ASTNode **tmp_v = realloc(values, sizeof(ASTNode *) * capacity);
-            if (!tmp_k || !tmp_v) {
-                free(tmp_k ? tmp_k : keys);
-                free(tmp_v ? tmp_v : values);
-                return NULL;
-            }
-            keys = tmp_k;
-            values = tmp_v;
+            ARRAY_GROW(keys, count, capacity, char *, free(keys); free(values); return NULL);
+            ARRAY_GROW(values, count, capacity, ASTNode *, free(keys); free(values); return NULL);
         }
         
         // メンバー名
@@ -1632,8 +1616,7 @@ static ASTNode *finish_call(Parser *parser, ASTNode *callee) {
     if (!check(parser, TOKEN_RPAREN)) {
         do {
             if (arg_count >= capacity) {
-                capacity *= 2;
-                args = realloc(args, sizeof(ASTNode *) * capacity);
+                ARRAY_GROW(args, arg_count, capacity, ASTNode *, abort());
             }
             // スプレッド演算子 ...配列
             if (match(parser, TOKEN_SPREAD)) {
@@ -1770,8 +1753,7 @@ static ASTNode *primary(Parser *parser) {
             
             while (match(parser, TOKEN_COMMA)) {
                 if (count >= capacity) {
-                    capacity *= 2;
-                    elements = realloc(elements, sizeof(ASTNode *) * capacity);
+                    ARRAY_GROW(elements, count, capacity, ASTNode *, abort());
                 }
                 if (check(parser, TOKEN_RBRACKET)) {
                     break;
@@ -1802,9 +1784,8 @@ static ASTNode *primary(Parser *parser) {
         if (!check(parser, TOKEN_RBRACE)) {
             do {
                 if (count >= capacity) {
-                    capacity *= 2;
-                    keys = realloc(keys, sizeof(char *) * capacity);
-                    values = realloc(values, sizeof(ASTNode *) * capacity);
+                    ARRAY_GROW(keys, count, capacity, char *, abort());
+                    ARRAY_GROW(values, count, capacity, ASTNode *, abort());
                 }
                 
                 // キー（文字列または識別子）
@@ -1860,8 +1841,7 @@ static ASTNode *primary(Parser *parser) {
         if (!check(parser, TOKEN_RPAREN)) {
             do {
                 if (count >= capacity) {
-                    capacity *= 2;
-                    args = realloc(args, sizeof(ASTNode *) * capacity);
+                    ARRAY_GROW(args, count, capacity, ASTNode *, abort());
                 }
                 args[count++] = expression(parser);
             } while (match(parser, TOKEN_COMMA));
