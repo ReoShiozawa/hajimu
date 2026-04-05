@@ -162,7 +162,11 @@ static void repl_history_add(const char *line) {
         memmove(repl_history, repl_history + 1, (REPL_HISTORY_MAX - 1) * sizeof(char *));
         repl_history_count--;
     }
-    repl_history[repl_history_count++] = strdup(line);
+    char *history_line = strdup(line);
+    if (history_line == NULL) {
+        return;
+    }
+    repl_history[repl_history_count++] = history_line;
 }
 
 static void repl_history_free(void) {

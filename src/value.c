@@ -3,6 +3,7 @@
  */
 
 #include "value.h"
+#include "array_grow.h"
 #include "environment.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -113,6 +114,9 @@ Value value_class(const char *name, struct ASTNode *definition, Value *parent) {
     v.is_const = true;
     v.ref_count = 1;
     v.class_value.name = strdup(name);
+    if (v.class_value.name == NULL) {
+        return value_null();
+    }
     v.class_value.definition = definition;
     v.class_value.parent = parent;
     return v;
@@ -178,9 +182,13 @@ void instance_set_field(Value *instance, const char *name, Value value) {
         instance->instance.field_capacity = new_cap;
     }
     
-    int idx = instance->instance.field_count++;
+    int idx = instance->instance.field_count;
     instance->instance.field_names[idx] = strdup(name);
+    if (instance->instance.field_names[idx] == NULL) {
+        return;
+    }
     instance->instance.fields[idx] = value_copy(value);
+    instance->instance.field_count++;
 }
 
 Value *instance_get_field(Value *instance, const char *name) {
@@ -237,6 +245,15 @@ Value value_copy(Value v) {
             copy.dict.values = malloc(sizeof(Value) * v.dict.capacity);
             for (int i = 0; i < v.dict.length; i++) {
                 copy.dict.keys[i] = strdup(v.dict.keys[i]);
+                if (copy.dict.keys[i] == NULL) {
+                    for (int j = 0; j < i; j++) {
+                        free(copy.dict.keys[j]);
+                        value_free(&copy.dict.values[j]);
+                    }
+                    free(copy.dict.keys);
+                    free(copy.dict.values);
+                    return value_null();
+                }
                 copy.dict.values[i] = value_copy(v.dict.values[i]);
             }
             copy.ref_count = 1;
@@ -253,6 +270,9 @@ Value value_copy(Value v) {
         case VALUE_CLASS:
             // クラス名と親クラスをディープコピー
             copy.class_value.name = strdup(v.class_value.name);
+            if (copy.class_value.name == NULL) {
+                return value_null();
+            }
             if (v.class_value.parent != NULL) {
                 copy.class_value.parent = malloc(sizeof(Value));
                 *copy.class_value.parent = value_copy(*v.class_value.parent);
@@ -266,6 +286,15 @@ Value value_copy(Value v) {
             copy.instance.fields = malloc(sizeof(Value) * v.instance.field_capacity);
             for (int i = 0; i < v.instance.field_count; i++) {
                 copy.instance.field_names[i] = strdup(v.instance.field_names[i]);
+                if (copy.instance.field_names[i] == NULL) {
+                    for (int j = 0; j < i; j++) {
+                        free(copy.instance.field_names[j]);
+                        value_free(&copy.instance.fields[j]);
+                    }
+                    free(copy.instance.field_names);
+                    free(copy.instance.fields);
+                    return value_null();
+                }
                 copy.instance.fields[i] = value_copy(v.instance.fields[i]);
             }
             if (v.instance.class_ref != NULL) {
@@ -431,10 +460,12 @@ void array_push(Value *array, Value element) {
     
     // 容量が足りなければ拡張
     if (array->array.length >= array->array.capacity) {
-        array->array.capacity *= 2;
-        array->array.elements = realloc(
-            array->array.elements, 
-            sizeof(Value) * array->array.capacity
+        ARRAY_GROW(
+            array->array.elements,
+            array->array.length,
+            array->array.capacity,
+            Value,
+            abort()
         );
     }
     
@@ -512,13 +543,15 @@ bool dict_set(Value *dict, const char *key, Value value) {
     
     // 容量が足りなければ拡張
     if (dict->dict.length >= dict->dict.capacity) {
-        dict->dict.capacity *= 2;
-        dict->dict.keys = realloc(dict->dict.keys, sizeof(char *) * dict->dict.capacity);
-        dict->dict.values = realloc(dict->dict.values, sizeof(Value) * dict->dict.capacity);
+        ARRAY_GROW(dict->dict.keys, dict->dict.length, dict->dict.capacity, char *, abort());
+        ARRAY_GROW(dict->dict.values, dict->dict.length, dict->dict.capacity, Value, abort());
     }
     
     // 新しいキーを追加
     dict->dict.keys[dict->dict.length] = strdup(key);
+    if (dict->dict.keys[dict->dict.length] == NULL) {
+        return false;
+    }
     dict->dict.values[dict->dict.length] = value_copy(value);
     dict->dict.length++;
     
@@ -736,6 +769,9 @@ char *value_to_string(Value v) {
     switch (v.type) {
         case VALUE_NULL:
             buffer = strdup("null");
+            if (buffer == NULL) {
+                return NULL;
+            }
             break;
             
         case VALUE_NUMBER: {
@@ -752,6 +788,9 @@ char *value_to_string(Value v) {
         
         case VALUE_BOOL:
             buffer = strdup(v.boolean ? "真" : "偽");
+            if (buffer == NULL) {
+                return NULL;
+            }
             break;
             
         case VALUE_STRING:
@@ -770,8 +809,7 @@ char *value_to_string(Value v) {
             for (int i = 0; i < v.array.length; i++) {
                 if (i > 0) {
                     if (length + 2 >= capacity) {
-                        capacity *= 2;
-                        buffer = realloc(buffer, capacity);
+                        ARRAY_GROW(buffer, length + 2, capacity, char, abort());
                     }
                     buffer[length++] = ',';
                     buffer[length++] = ' ';
@@ -781,8 +819,7 @@ char *value_to_string(Value v) {
                 size_t elem_len = strlen(elem_str);
                 
                 while (length + elem_len + 2 >= capacity) {
-                    capacity *= 2;
-                    buffer = realloc(buffer, capacity);
+                    ARRAY_GROW(buffer, length + elem_len + 2, capacity, char, abort());
                 }
                 
                 memcpy(buffer + length, elem_str, elem_len);
@@ -805,8 +842,7 @@ char *value_to_string(Value v) {
             for (int i = 0; i < v.dict.length; i++) {
                 if (i > 0) {
                     if (length + 2 >= capacity) {
-                        capacity *= 2;
-                        buffer = realloc(buffer, capacity);
+                        ARRAY_GROW(buffer, length + 2, capacity, char, abort());
                     }
                     buffer[length++] = ',';
                     buffer[length++] = ' ';
@@ -815,8 +851,7 @@ char *value_to_string(Value v) {
                 // キー
                 size_t key_len = strlen(v.dict.keys[i]);
                 while (length + key_len + 5 >= capacity) {
-                    capacity *= 2;
-                    buffer = realloc(buffer, capacity);
+                    ARRAY_GROW(buffer, length + key_len + 5, capacity, char, abort());
                 }
                 buffer[length++] = '"';
                 memcpy(buffer + length, v.dict.keys[i], key_len);
@@ -830,8 +865,7 @@ char *value_to_string(Value v) {
                 size_t val_len = strlen(val_str);
                 
                 while (length + val_len + 2 >= capacity) {
-                    capacity *= 2;
-                    buffer = realloc(buffer, capacity);
+                    ARRAY_GROW(buffer, length + val_len + 2, capacity, char, abort());
                 }
                 
                 memcpy(buffer + length, val_str, val_len);

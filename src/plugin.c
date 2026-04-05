@@ -397,11 +397,23 @@ bool plugin_load(PluginManager *mgr, const char *path, HajimuPluginInfo **info_o
     }
     
     // プラグインを登録
-    LoadedPlugin *p = &mgr->plugins[mgr->count++];
+    LoadedPlugin *p = &mgr->plugins[mgr->count];
     p->path = strdup(path);
+    if (p->path == NULL) {
+        fprintf(stderr, "エラー: メモリを確保できません: %s\n", path);
+        platform_dlclose(handle);
+        return false;
+    }
     p->name = strdup(info->name);
+    if (p->name == NULL) {
+        fprintf(stderr, "エラー: メモリを確保できません: %s\n", info->name);
+        free(p->path);
+        platform_dlclose(handle);
+        return false;
+    }
     p->handle = handle;
     p->info = info;
+    mgr->count++;
     
     if (info_out) *info_out = info;
     
