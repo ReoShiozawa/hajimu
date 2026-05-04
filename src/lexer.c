@@ -20,6 +20,15 @@ typedef struct {
     TokenType type;
 } KeywordEntry;
 
+#define KEYWORD_HASH_TABLE_SIZE 128
+
+typedef struct {
+    const char *keyword;
+    int length;
+    TokenType type;
+    bool occupied;
+} KeywordHashSlot;
+
 static const KeywordEntry keywords[] = {
     // 関数定義
     {"関数", TOKEN_FUNCTION},
@@ -97,6 +106,38 @@ static const KeywordEntry keywords[] = {
     // 終端
     {NULL, TOKEN_EOF}
 };
+
+static KeywordHashSlot keyword_hash_table[KEYWORD_HASH_TABLE_SIZE];
+static bool keyword_hash_initialized = false;
+
+static uint32_t hash_bytes(const char *bytes, int length) {
+    uint32_t hash = 2166136261u;
+    for (int i = 0; i < length; i++) {
+        hash ^= (unsigned char)bytes[i];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+static void init_keyword_hash_table(void) {
+    if (keyword_hash_initialized) return;
+
+    for (int i = 0; keywords[i].keyword != NULL; i++) {
+        int length = (int)strlen(keywords[i].keyword);
+        uint32_t index = hash_bytes(keywords[i].keyword, length) & (KEYWORD_HASH_TABLE_SIZE - 1);
+
+        while (keyword_hash_table[index].occupied) {
+            index = (index + 1) & (KEYWORD_HASH_TABLE_SIZE - 1);
+        }
+
+        keyword_hash_table[index].keyword = keywords[i].keyword;
+        keyword_hash_table[index].length = length;
+        keyword_hash_table[index].type = keywords[i].type;
+        keyword_hash_table[index].occupied = true;
+    }
+
+    keyword_hash_initialized = true;
+}
 
 // =============================================================================
 // トークン種別名テーブル
@@ -392,11 +433,18 @@ static int count_indent(Lexer *lexer) {
 
 // キーワードを検索
 static TokenType check_keyword(const char *start, int length) {
-    for (int i = 0; keywords[i].keyword != NULL; i++) {
-        if ((int)strlen(keywords[i].keyword) == length &&
-            memcmp(start, keywords[i].keyword, length) == 0) {
-            return keywords[i].type;
+    init_keyword_hash_table();
+
+    uint32_t index = hash_bytes(start, length) & (KEYWORD_HASH_TABLE_SIZE - 1);
+    for (int probe = 0; probe < KEYWORD_HASH_TABLE_SIZE; probe++) {
+        KeywordHashSlot *slot = &keyword_hash_table[index];
+        if (!slot->occupied) {
+            return TOKEN_IDENTIFIER;
         }
+        if (slot->length == length && memcmp(start, slot->keyword, length) == 0) {
+            return slot->type;
+        }
+        index = (index + 1) & (KEYWORD_HASH_TABLE_SIZE - 1);
     }
     return TOKEN_IDENTIFIER;
 }
