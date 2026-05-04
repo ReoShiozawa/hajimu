@@ -489,40 +489,46 @@ static Token scan_number(Lexer *lexer) {
     return token;
 }
 
-// 複数行文字列をスキャン（"""..."""）
-static Token scan_multiline_string(Lexer *lexer) {
-    // 開始の """ は既に消費済み
-    
-    size_t capacity = 256;
+static void append_string_char(char **buffer, size_t *length, size_t *capacity, char c) {
+    if (*length + 1 >= *capacity) {
+        ARRAY_GROW(*buffer, *length + 1, *capacity, char, abort());
+    }
+    (*buffer)[(*length)++] = c;
+}
+
+static bool is_multiline_string_end(Lexer *lexer) {
+    if (peek(lexer) != '"') return false;
+    if (strlen(lexer->current) < 3) return false;
+    return lexer->current[1] == '"' && lexer->current[2] == '"';
+}
+
+static void consume_string_end(Lexer *lexer, bool multiline) {
+    advance(lexer);
+    if (multiline) {
+        advance(lexer);
+        advance(lexer);
+    }
+}
+
+static Token scan_string_common(Lexer *lexer, bool multiline) {
+    size_t capacity = multiline ? 256 : 64;
     size_t length = 0;
     char *buffer = malloc(capacity);
     bool closed = false;
     
     while (!is_at_end(lexer)) {
-        char c = peek(lexer);
-        
-        // """ の終端チェック: c == peek == current[0]
-        if (c == '"') {
-            size_t remaining = (lexer->source + strlen(lexer->source)) - lexer->current;
-            if (remaining >= 3 && 
-                lexer->current[1] == '"' && 
-                lexer->current[2] == '"') {
-                // 3つの " を消費して終了
-                advance(lexer);  // 1つ目の "
-                advance(lexer);  // 2つ目の "
-                advance(lexer);  // 3つ目の "
-                closed = true;
-                break;
-            }
+        if (multiline ? is_multiline_string_end(lexer) : peek(lexer) == '"') {
+            consume_string_end(lexer, multiline);
+            closed = true;
+            break;
         }
         
-        c = advance(lexer);
+        char c = advance(lexer);
         if (c == '\n') {
             lexer->line++;
             lexer->column = 1;
         }
         
-        // エスケープシーケンス処理
         if (c == '\\' && !is_at_end(lexer)) {
             char next = advance(lexer);
             switch (next) {
@@ -533,23 +539,19 @@ static Token scan_multiline_string(Lexer *lexer) {
                 case '"': c = '"'; break;
                 case '0': c = '\0'; break;
                 default:
-                    if (length + 1 >= capacity) {
-                        ARRAY_GROW(buffer, length + 1, capacity, char, abort());
-                    }
-                    buffer[length++] = '\\';
+                    append_string_char(&buffer, &length, &capacity, '\\');
                     c = next;
             }
         }
         
-        if (length + 1 >= capacity) {
-            ARRAY_GROW(buffer, length + 1, capacity, char, abort());
-        }
-        buffer[length++] = c;
+        append_string_char(&buffer, &length, &capacity, c);
     }
     
     if (!closed) {
         free(buffer);
-        return error_token(lexer, "複数行文字列が閉じられていません");
+        return error_token(lexer, multiline
+                           ? "複数行文字列が閉じられていません"
+                           : "文字列が閉じられていません");
     }
     
     buffer[length] = '\0';
@@ -560,65 +562,16 @@ static Token scan_multiline_string(Lexer *lexer) {
     return token;
 }
 
+// 複数行文字列をスキャン（"""..."""）
+static Token scan_multiline_string(Lexer *lexer) {
+    // 開始の """ は既に消費済み
+    return scan_string_common(lexer, true);
+}
+
 // 文字列をスキャン
 static Token scan_string(Lexer *lexer) {
     // 開始の " は既に消費済み
-    
-    // 文字列の内容を格納するバッファ
-    size_t capacity = 64;
-    size_t length = 0;
-    char *buffer = malloc(capacity);
-    
-    while (peek(lexer) != '"' && !is_at_end(lexer)) {
-        if (peek(lexer) == '\n') {
-            lexer->line++;
-            lexer->column = 1;
-        }
-        
-        char c = advance(lexer);
-        
-        // エスケープシーケンス処理
-        if (c == '\\' && !is_at_end(lexer)) {
-            char next = advance(lexer);
-            switch (next) {
-                case 'n': c = '\n'; break;
-                case 't': c = '\t'; break;
-                case 'r': c = '\r'; break;
-                case '\\': c = '\\'; break;
-                case '"': c = '"'; break;
-                case '0': c = '\0'; break;
-                default:
-                    // 不明なエスケープはそのまま
-                    if (length + 1 >= capacity) {
-                        ARRAY_GROW(buffer, length + 1, capacity, char, abort());
-                    }
-                    buffer[length++] = '\\';
-                    c = next;
-            }
-        }
-        
-        // バッファに追加
-        if (length + 1 >= capacity) {
-            ARRAY_GROW(buffer, length + 1, capacity, char, abort());
-        }
-        buffer[length++] = c;
-    }
-    
-    if (is_at_end(lexer)) {
-        free(buffer);
-        return error_token(lexer, "文字列が閉じられていません");
-    }
-    
-    // 閉じの " を消費
-    advance(lexer);
-    
-    // NULL終端
-    buffer[length] = '\0';
-    
-    Token token = make_token(lexer, TOKEN_STRING);
-    token.value.string = buffer;  // 呼び出し側で解放が必要
-    
-    return token;
+    return scan_string_common(lexer, false);
 }
 
 // =============================================================================
