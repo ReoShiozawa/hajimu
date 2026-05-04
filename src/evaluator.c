@@ -22,6 +22,7 @@
 #define EVALUATOR_PATH_BUFFER_SIZE 1024
 #define EVALUATOR_LONG_PATH_BUFFER_SIZE 2048
 #define EVALUATOR_INITIAL_IMPORT_CAPACITY 8
+#define EVALUATOR_INITIAL_IMPORT_SET_CAPACITY 16
 #define STRING_INTERPOLATION_INITIAL_CAPACITY 256
 
 /* ── プラットフォーム依存ヘッダー ───────────────────────────── */
@@ -395,6 +396,9 @@ Evaluator *evaluator_new(void) {
     eval->imported_paths = NULL;
     eval->imported_path_count = 0;
     eval->imported_path_capacity = 0;
+    eval->imported_path_entries = NULL;
+    eval->imported_path_entry_count = 0;
+    eval->imported_path_entry_capacity = 0;
     
     // プラグインマネージャの初期化
     plugin_manager_init(&eval->plugin_manager);
@@ -428,6 +432,7 @@ void evaluator_free(Evaluator *eval) {
         free(eval->imported_paths[i]);
     }
     free(eval->imported_paths);
+    free(eval->imported_path_entries);
     
     // プラグインマネージャを解放
     plugin_manager_free(&eval->plugin_manager);
@@ -2121,9 +2126,67 @@ static Value evaluate_for(Evaluator *eval, ASTNode *node) {
 /**
  * インポート済みパスキャッシュにパスが存在するかチェック
  */
+static uint32_t import_path_hash(const char *path) {
+    uint32_t hash = 2166136261u;
+    for (const unsigned char *p = (const unsigned char *)path; *p; p++) {
+        hash ^= *p;
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+static void import_path_set_insert(Evaluator *eval, const char *path);
+
+static void import_path_set_grow(Evaluator *eval) {
+    ImportedPathEntry *old_entries = eval->imported_path_entries;
+    int old_capacity = eval->imported_path_entry_capacity;
+
+    eval->imported_path_entry_capacity = old_capacity == 0
+        ? EVALUATOR_INITIAL_IMPORT_SET_CAPACITY
+        : old_capacity * 2;
+    eval->imported_path_entries = calloc((size_t)eval->imported_path_entry_capacity,
+                                         sizeof(ImportedPathEntry));
+    eval->imported_path_entry_count = 0;
+
+    for (int i = 0; i < old_capacity; i++) {
+        if (old_entries[i].occupied) {
+            import_path_set_insert(eval, old_entries[i].path);
+        }
+    }
+    free(old_entries);
+}
+
+static void import_path_set_insert(Evaluator *eval, const char *path) {
+    if (eval->imported_path_entry_capacity == 0 ||
+        eval->imported_path_entry_count * 2 >= eval->imported_path_entry_capacity) {
+        import_path_set_grow(eval);
+    }
+
+    uint32_t index = import_path_hash(path) & (uint32_t)(eval->imported_path_entry_capacity - 1);
+    for (int probe = 0; probe < eval->imported_path_entry_capacity; probe++) {
+        ImportedPathEntry *entry = &eval->imported_path_entries[index];
+        if (!entry->occupied) {
+            entry->path = path;
+            entry->occupied = true;
+            eval->imported_path_entry_count++;
+            return;
+        }
+        if (strcmp(entry->path, path) == 0) {
+            return;
+        }
+        index = (index + 1) & (uint32_t)(eval->imported_path_entry_capacity - 1);
+    }
+}
+
 static bool is_already_imported(Evaluator *eval, const char *path) {
-    for (int i = 0; i < eval->imported_path_count; i++) {
-        if (strcmp(eval->imported_paths[i], path) == 0) return true;
+    if (eval->imported_path_entry_capacity == 0) return false;
+
+    uint32_t index = import_path_hash(path) & (uint32_t)(eval->imported_path_entry_capacity - 1);
+    for (int probe = 0; probe < eval->imported_path_entry_capacity; probe++) {
+        ImportedPathEntry *entry = &eval->imported_path_entries[index];
+        if (!entry->occupied) return false;
+        if (strcmp(entry->path, path) == 0) return true;
+        index = (index + 1) & (uint32_t)(eval->imported_path_entry_capacity - 1);
     }
     return false;
 }
@@ -2139,7 +2202,10 @@ static void add_imported_path(Evaluator *eval, const char *path) {
         eval->imported_paths = realloc(eval->imported_paths,
                                        eval->imported_path_capacity * sizeof(char *));
     }
-    eval->imported_paths[eval->imported_path_count++] = strdup(path);
+    char *stored_path = strdup(path);
+    if (stored_path == NULL) return;
+    eval->imported_paths[eval->imported_path_count++] = stored_path;
+    import_path_set_insert(eval, stored_path);
 }
 
 /**

@@ -28,6 +28,11 @@ typedef struct {
     ASTNode *ast;       // AST
 } ImportedModule;
 
+typedef struct {
+    const char *path;
+    bool occupied;
+} ImportedPathEntry;
+
 // =============================================================================
 // 評価器構造体
 // =============================================================================
@@ -89,6 +94,9 @@ typedef struct {
     char **imported_paths;
     int imported_path_count;
     int imported_path_capacity;
+    ImportedPathEntry *imported_path_entries;
+    int imported_path_entry_count;
+    int imported_path_entry_capacity;
     
     // C拡張プラグインマネージャ
     PluginManager plugin_manager;
