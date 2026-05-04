@@ -3510,40 +3510,21 @@ static Value builtin_type(int argc, Value *argv) {
 }
 
 // 型チェック関数
-static Value builtin_is_number(int argc, Value *argv) {
-    (void)argc;
-    return value_bool(argv[0].type == VALUE_NUMBER);
-}
+#define DEFINE_TYPE_CHECK_BUILTIN(name, condition) \
+    static Value builtin_is_##name(int argc, Value *argv) { \
+        (void)argc; \
+        return value_bool(condition); \
+    }
 
-static Value builtin_is_string(int argc, Value *argv) {
-    (void)argc;
-    return value_bool(argv[0].type == VALUE_STRING);
-}
+DEFINE_TYPE_CHECK_BUILTIN(number, argv[0].type == VALUE_NUMBER)
+DEFINE_TYPE_CHECK_BUILTIN(string, argv[0].type == VALUE_STRING)
+DEFINE_TYPE_CHECK_BUILTIN(bool, argv[0].type == VALUE_BOOL)
+DEFINE_TYPE_CHECK_BUILTIN(array, argv[0].type == VALUE_ARRAY)
+DEFINE_TYPE_CHECK_BUILTIN(dict, argv[0].type == VALUE_DICT)
+DEFINE_TYPE_CHECK_BUILTIN(function, argv[0].type == VALUE_FUNCTION || argv[0].type == VALUE_BUILTIN)
+DEFINE_TYPE_CHECK_BUILTIN(null, argv[0].type == VALUE_NULL)
 
-static Value builtin_is_bool(int argc, Value *argv) {
-    (void)argc;
-    return value_bool(argv[0].type == VALUE_BOOL);
-}
-
-static Value builtin_is_array(int argc, Value *argv) {
-    (void)argc;
-    return value_bool(argv[0].type == VALUE_ARRAY);
-}
-
-static Value builtin_is_dict(int argc, Value *argv) {
-    (void)argc;
-    return value_bool(argv[0].type == VALUE_DICT);
-}
-
-static Value builtin_is_function(int argc, Value *argv) {
-    (void)argc;
-    return value_bool(argv[0].type == VALUE_FUNCTION || argv[0].type == VALUE_BUILTIN);
-}
-
-static Value builtin_is_null(int argc, Value *argv) {
-    (void)argc;
-    return value_bool(argv[0].type == VALUE_NULL);
-}
+#undef DEFINE_TYPE_CHECK_BUILTIN
 
 // 範囲関数: 範囲(終了) / 範囲(開始, 終了) / 範囲(開始, 終了, ステップ)
 static Value builtin_range(int argc, Value *argv) {
