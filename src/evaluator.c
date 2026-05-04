@@ -146,6 +146,7 @@ static Value evaluate_list_comprehension(Evaluator *eval, ASTNode *node);
 static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int line, int column);
 static Value call_function_value(Value *func, Value *args, int argc);
 static void undefined_variable_error(Evaluator *eval, ASTNode *node, const char *name);
+static bool require_integer_index(Evaluator *eval, ASTNode *node, Value index, const char *target_name);
 static const char *find_similar_dict_key(Value *dict, const char *name);
 static const char *find_similar_instance_member(Value *instance, const char *name);
 static const char *find_similar_class_static_method(ASTNode *class_def, const char *name);
@@ -995,6 +996,23 @@ static void undefined_variable_error(Evaluator *eval, ASTNode *node, const char 
     }
 }
 
+static bool require_integer_index(Evaluator *eval, ASTNode *node, Value index, const char *target_name) {
+    if (index.type != VALUE_NUMBER) {
+        runtime_error(eval, node->location.line, node->location.column,
+                     "%sのインデックスは整数でなければなりません", target_name);
+        return false;
+    }
+
+    if (!index.is_integer) {
+        runtime_error(eval, node->location.line, node->location.column,
+                     "%sのインデックスは整数でなければなりません（渡された値: %g）",
+                     target_name, index.number);
+        return false;
+    }
+
+    return true;
+}
+
 static int eval_min3(int a, int b, int c) {
     int m = a < b ? a : b;
     return m < c ? m : c;
@@ -1680,7 +1698,13 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
                 if (eval->had_error) return value_null();
                 if (index.type != VALUE_NUMBER) {
                     runtime_error(eval, node->location.line, node->location.column,
-                                 "インデックスは数値でなければなりません");
+                                 "インデックスは整数でなければなりません");
+                    return value_null();
+                }
+                if (!index.is_integer) {
+                    runtime_error(eval, node->location.line, node->location.column,
+                                 "インデックスは整数でなければなりません（渡された値: %g）",
+                                 index.number);
                     return value_null();
                 }
                 int idx = (int)index.number;
@@ -1940,9 +1964,7 @@ static Value evaluate_index(Evaluator *eval, ASTNode *node) {
     if (eval->had_error) return value_null();
     
     if (array.type == VALUE_ARRAY) {
-        if (index.type != VALUE_NUMBER) {
-            runtime_error(eval, node->location.line, node->location.column,
-                         "配列のインデックスは数値でなければなりません");
+        if (!require_integer_index(eval, node, index, "配列")) {
             return value_null();
         }
         
@@ -1960,9 +1982,7 @@ static Value evaluate_index(Evaluator *eval, ASTNode *node) {
     }
     
     if (array.type == VALUE_STRING) {
-        if (index.type != VALUE_NUMBER) {
-            runtime_error(eval, node->location.line, node->location.column,
-                         "文字列のインデックスは数値でなければなりません");
+        if (!require_integer_index(eval, node, index, "文字列")) {
             return value_null();
         }
         
@@ -2135,6 +2155,12 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
                     return value_null();
                 }
             } else if (ptr->type == VALUE_ARRAY && idx.type == VALUE_NUMBER) {
+                if (!idx.is_integer) {
+                    runtime_error(eval, node->location.line, node->location.column,
+                                  "配列のインデックスは整数でなければなりません（渡された値: %g）",
+                                  idx.number);
+                    return value_null();
+                }
                 int aidx = (int)idx.number;
                 if (aidx < 0) aidx += ptr->array.length;
                 if (aidx < 0 || aidx >= ptr->array.length) {
@@ -2152,9 +2178,7 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
         Value index = evaluate(eval, chain_nodes[0]->index.index);
         if (eval->had_error) return value_null();
         if (ptr->type == VALUE_ARRAY) {
-            if (index.type != VALUE_NUMBER) {
-                runtime_error(eval, node->location.line, node->location.column,
-                             "配列のインデックスは数値でなければなりません");
+            if (!require_integer_index(eval, node, index, "配列")) {
                 return value_null();
             }
             int idx = (int)index.number;
@@ -3482,7 +3506,7 @@ static Value builtin_remove(int argc, Value *argv) {
 
 static Value builtin_type(int argc, Value *argv) {
     (void)argc;
-    return value_string(value_type_name(argv[0].type));
+    return value_string(value_runtime_type_name(argv[0]));
 }
 
 // 型チェック関数
@@ -4073,6 +4097,8 @@ static Value builtin_typeof_check(int argc, Value *argv) {
         }
     }
     
+    if (strcmp(type_name, "整数") == 0) return value_bool(argv[0].type == VALUE_NUMBER && argv[0].is_integer);
+    if (strcmp(type_name, "小数") == 0) return value_bool(argv[0].type == VALUE_NUMBER && !argv[0].is_integer);
     if (strcmp(type_name, "数値") == 0) return value_bool(argv[0].type == VALUE_NUMBER);
     if (strcmp(type_name, "文字列") == 0) return value_bool(argv[0].type == VALUE_STRING);
     if (strcmp(type_name, "真偽") == 0) return value_bool(argv[0].type == VALUE_BOOL);

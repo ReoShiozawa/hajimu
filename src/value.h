@@ -55,6 +55,7 @@ typedef Value (*BuiltinFn)(int argc, Value *argv);
 struct Value {
     ValueType type;
     bool is_const;      // 定数フラグ
+    bool is_integer;    // VALUE_NUMBER が整数値として扱えるか
     int ref_count;      // 参照カウント
     
     union {
@@ -336,6 +337,12 @@ bool value_is_truthy(Value v);
  * 型名を取得
  */
 const char *value_type_name(ValueType type);
+
+/**
+ * 値の実行時型名を取得。
+ * VALUE_NUMBER は is_integer に応じて「整数」/「数値」を返す。
+ */
+const char *value_runtime_type_name(Value v);
 
 /**
  * 値を文字列に変換

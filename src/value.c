@@ -18,6 +18,7 @@ Value value_null(void) {
     Value v;
     v.type = VALUE_NULL;
     v.is_const = false;
+    v.is_integer = false;
     v.ref_count = 0;
     return v;
 }
@@ -26,6 +27,7 @@ Value value_number(double n) {
     Value v;
     v.type = VALUE_NUMBER;
     v.is_const = false;
+    v.is_integer = isfinite(n) && floor(n) == n;
     v.ref_count = 0;
     v.number = n;
     return v;
@@ -35,6 +37,7 @@ Value value_bool(bool b) {
     Value v;
     v.type = VALUE_BOOL;
     v.is_const = false;
+    v.is_integer = false;
     v.ref_count = 0;
     v.boolean = b;
     return v;
@@ -51,6 +54,7 @@ Value value_string_n(const char *s, int length) {
     Value v;
     v.type = VALUE_STRING;
     v.is_const = false;
+    v.is_integer = false;
     v.ref_count = 1;
     
     v.string.byte_length = length;
@@ -73,6 +77,7 @@ Value value_array_with_capacity(int capacity) {
     Value v;
     v.type = VALUE_ARRAY;
     v.is_const = false;
+    v.is_integer = false;
     v.ref_count = 1;
     
     v.array.length = 0;
@@ -86,6 +91,7 @@ Value value_function(struct ASTNode *definition, struct Environment *closure) {
     Value v;
     v.type = VALUE_FUNCTION;
     v.is_const = false;
+    v.is_integer = false;
     v.ref_count = 1;
     v.function.definition = definition;
     v.function.closure = closure;
@@ -100,6 +106,7 @@ Value value_builtin(BuiltinFn fn, const char *name, int min_args, int max_args) 
     Value v;
     v.type = VALUE_BUILTIN;
     v.is_const = true;
+    v.is_integer = false;
     v.ref_count = 0;  // 組み込みは解放しない
     v.builtin.fn = fn;
     v.builtin.name = name;
@@ -112,6 +119,7 @@ Value value_class(const char *name, struct ASTNode *definition, Value *parent) {
     Value v;
     v.type = VALUE_CLASS;
     v.is_const = true;
+    v.is_integer = false;
     v.ref_count = 1;
     v.class_value.name = strdup(name);
     if (v.class_value.name == NULL) {
@@ -126,6 +134,7 @@ Value value_instance(Value *class_ref) {
     Value v;
     v.type = VALUE_INSTANCE;
     v.is_const = false;
+    v.is_integer = false;
     v.ref_count = 1;
     v.instance.class_ref = class_ref;
     v.instance.field_names = NULL;
@@ -139,6 +148,7 @@ Value value_generator(void) {
     Value v;
     v.type = VALUE_GENERATOR;
     v.is_const = false;
+    v.is_integer = false;
     v.ref_count = 1;
     
     GeneratorState *state = calloc(1, sizeof(GeneratorState));
@@ -208,6 +218,7 @@ Value value_dict_with_capacity(int capacity) {
     Value v;
     v.type = VALUE_DICT;
     v.is_const = false;
+    v.is_integer = false;
     v.ref_count = 1;
     
     v.dict.length = 0;
@@ -761,6 +772,13 @@ const char *value_type_name(ValueType type) {
         case VALUE_GENERATOR: return "ジェネレータ";
     }
     return "不明";
+}
+
+const char *value_runtime_type_name(Value v) {
+    if (v.type == VALUE_NUMBER && v.is_integer) {
+        return "整数";
+    }
+    return value_type_name(v.type);
 }
 
 char *value_to_string(Value v) {

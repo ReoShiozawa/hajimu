@@ -1472,6 +1472,11 @@ Create alternative names for existing types, usable with `型判定`.
 表示(型判定("hello", "テキスト")) // 真
 ```
 
+Integer-like values such as `1` and decimal values such as `1.5` are both stored
+as numeric values internally, but `型判定(value, "整数")` and
+`型判定(value, "小数")` can distinguish them. Array and string indexes must be
+integer-like numeric values.
+
 ---
 
 ## Module Namespaces
