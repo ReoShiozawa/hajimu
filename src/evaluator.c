@@ -441,426 +441,198 @@ void evaluator_free(Evaluator *eval) {
 // 組み込み関数の登録
 // =============================================================================
 
+typedef struct {
+    const char *name;
+    BuiltinFn fn;
+    int min_args;
+    int max_args;
+} BuiltinEntry;
+
+static const BuiltinEntry builtin_entries[] = {
+    {"表示", builtin_print, 0, -1},
+    {"入力", builtin_input, 0, 1},
+    {"長さ", builtin_length, 1, 1},
+    {"追加", builtin_append, 2, 2},
+    {"削除", builtin_remove, 2, 2},
+    {"型", builtin_type, 1, 1},
+    {"数値化", builtin_to_number, 1, 1},
+    {"文字列化", builtin_to_string, 1, 1},
+    {"数値か", builtin_is_number, 1, 1},
+    {"文字列か", builtin_is_string, 1, 1},
+    {"真偽か", builtin_is_bool, 1, 1},
+    {"配列か", builtin_is_array, 1, 1},
+    {"辞書か", builtin_is_dict, 1, 1},
+    {"関数か", builtin_is_function, 1, 1},
+    {"無か", builtin_is_null, 1, 1},
+    {"範囲", builtin_range, 1, 3},
+    {"ビット積", builtin_bit_and, 2, 2},
+    {"ビット和", builtin_bit_or, 2, 2},
+    {"ビット排他", builtin_bit_xor, 2, 2},
+    {"ビット否定", builtin_bit_not, 1, 1},
+    {"左シフト", builtin_bit_lshift, 2, 2},
+    {"右シフト", builtin_bit_rshift, 2, 2},
+    {"部分文字列", builtin_substring, 2, 3},
+    {"始まる", builtin_starts_with, 2, 2},
+    {"終わる", builtin_ends_with, 2, 2},
+    {"文字コード", builtin_char_code, 1, 2},
+    {"コード文字", builtin_from_char_code, 1, 1},
+    {"繰り返し", builtin_string_repeat, 2, 2},
+    {"末尾削除", builtin_pop, 1, 1},
+    {"探す", builtin_find_item, 2, 2},
+    {"全て", builtin_every, 2, 2},
+    {"一つでも", builtin_some, 2, 2},
+    {"一意", builtin_unique, 1, 1},
+    {"圧縮", builtin_zip, 2, 2},
+    {"平坦化", builtin_flat, 1, 1},
+    {"挿入", builtin_insert, 3, 3},
+    {"比較ソート", builtin_sort_by, 2, 2},
+    {"正弦", builtin_sin, 1, 1},
+    {"余弦", builtin_cos, 1, 1},
+    {"正接", builtin_tan, 1, 1},
+    {"対数", builtin_log, 1, 1},
+    {"常用対数", builtin_log10_fn, 1, 1},
+    {"乱数整数", builtin_random_int, 2, 2},
+    {"追記", builtin_file_append, 2, 2},
+    {"ディレクトリ一覧", builtin_dir_list, 1, 1},
+    {"ディレクトリ作成", builtin_dir_create, 1, 1},
+    {"表明", builtin_assert, 1, 2},
+    {"型判定", builtin_typeof_check, 2, 2},
+    {"絶対値", builtin_abs, 1, 1},
+    {"平方根", builtin_sqrt, 1, 1},
+    {"切り捨て", builtin_floor, 1, 1},
+    {"切り上げ", builtin_ceil, 1, 1},
+    {"四捨五入", builtin_round, 1, 1},
+    {"乱数", builtin_random, 0, 0},
+    {"最大", builtin_max, 1, -1},
+    {"最小", builtin_min, 1, -1},
+    {"キー", builtin_dict_keys, 1, 1},
+    {"値一覧", builtin_dict_values, 1, 1},
+    {"含む", builtin_dict_has, 2, 2},
+    {"分割", builtin_split, 2, 2},
+    {"結合", builtin_join, 2, 2},
+    {"検索", builtin_find, 2, 2},
+    {"置換", builtin_replace, 3, 3},
+    {"大文字", builtin_upper, 1, 1},
+    {"小文字", builtin_lower, 1, 1},
+    {"空白除去", builtin_trim, 1, 1},
+    {"ソート", builtin_sort, 1, 1},
+    {"逆順", builtin_reverse, 1, 1},
+    {"スライス", builtin_slice, 2, 3},
+    {"位置", builtin_index_of, 2, 2},
+    {"存在", builtin_contains, 2, 2},
+    {"読み込む", builtin_file_read, 1, 1},
+    {"書き込む", builtin_file_write, 2, 2},
+    {"ファイル存在", builtin_file_exists, 1, 1},
+    {"現在時刻", builtin_now, 0, 0},
+    {"日付", builtin_date, 0, 1},
+    {"時間", builtin_time, 0, 1},
+    {"JSON化", builtin_json_encode, 1, 1},
+    {"JSON解析", builtin_json_decode, 1, 1},
+    {"HTTP取得", builtin_http_get, 1, 2},
+    {"HTTP送信", builtin_http_post, 1, 3},
+    {"HTTP更新", builtin_http_put, 1, 3},
+    {"HTTP削除", builtin_http_delete, 1, 2},
+    {"HTTPリクエスト", builtin_http_request, 2, 4},
+    {"サーバー起動", builtin_http_serve, 1, 2},
+    {"サーバー停止", builtin_http_stop, 0, 0},
+    {"URLエンコード", builtin_url_encode, 1, 1},
+    {"URLデコード", builtin_url_decode, 1, 1},
+    {"変換", builtin_map, 2, 2},
+    {"抽出", builtin_filter, 2, 2},
+    {"集約", builtin_reduce, 3, 3},
+    {"反復", builtin_foreach, 2, 2},
+    {"正規一致", builtin_regex_match, 2, 2},
+    {"正規検索", builtin_regex_search, 2, 2},
+    {"正規置換", builtin_regex_replace, 3, 3},
+    {"待つ", builtin_sleep, 1, 1},
+    {"実行", builtin_exec, 1, 1},
+    {"環境変数", builtin_env_get, 1, 1},
+    {"環境変数設定", builtin_env_set, 2, 2},
+    {"終了", builtin_exit_program, 0, 1},
+    {"非同期実行", builtin_async_run, 1, -1},
+    {"待機", builtin_async_await, 1, 2},
+    {"全待機", builtin_async_await_all, 1, 1},
+    {"タスク状態", builtin_task_status, 1, 1},
+    {"競争待機", builtin_async_race, 1, 1},
+    {"タスクキャンセル", builtin_task_cancel, 1, 1},
+    {"成功時", builtin_then, 2, 2},
+    {"失敗時", builtin_catch, 2, 2},
+    {"プール作成", builtin_pool_create, 0, 1},
+    {"プール情報", builtin_pool_stats, 0, 0},
+    {"並列実行", builtin_parallel_run, 1, 1},
+    {"並列マップ", builtin_parallel_map, 2, 2},
+    {"排他作成", builtin_mutex_create, 0, 0},
+    {"排他実行", builtin_mutex_exec, 2, 2},
+    {"読書ロック作成", builtin_rwlock_create, 0, 0},
+    {"読取実行", builtin_rwlock_read, 2, 2},
+    {"書込実行", builtin_rwlock_write, 2, 2},
+    {"セマフォ作成", builtin_semaphore_create, 1, 1},
+    {"セマフォ獲得", builtin_semaphore_acquire, 1, 1},
+    {"セマフォ解放", builtin_semaphore_release, 1, 1},
+    {"セマフォ実行", builtin_semaphore_exec, 2, 2},
+    {"カウンター作成", builtin_atomic_create, 0, 1},
+    {"カウンター加算", builtin_atomic_add, 1, 2},
+    {"カウンター取得", builtin_atomic_get, 1, 1},
+    {"カウンター設定", builtin_atomic_set, 2, 2},
+    {"チャネル作成", builtin_channel_create, 0, 1},
+    {"チャネル送信", builtin_channel_send, 2, 2},
+    {"チャネル受信", builtin_channel_receive, 1, 1},
+    {"チャネル閉じる", builtin_channel_close, 1, 1},
+    {"チャネル試送信", builtin_channel_try_send, 2, 2},
+    {"チャネル試受信", builtin_channel_try_receive, 1, 1},
+    {"チャネル残量", builtin_channel_count, 1, 1},
+    {"チャネル選択", builtin_channel_select, 1, 2},
+    {"定期実行", builtin_schedule_interval, 2, 2},
+    {"遅延実行", builtin_schedule_delay, 2, 2},
+    {"スケジュール停止", builtin_schedule_stop, 1, 1},
+    {"全スケジュール停止", builtin_schedule_stop_all, 0, 0},
+    {"WS接続", builtin_ws_connect, 1, 1},
+    {"WS送信", builtin_ws_send, 2, 2},
+    {"WS受信", builtin_ws_receive, 1, 2},
+    {"WS切断", builtin_ws_close, 1, 1},
+    {"WS状態", builtin_ws_status, 1, 1},
+    {"次", builtin_generator_next, 1, 1},
+    {"完了", builtin_generator_done, 1, 1},
+    {"全値", builtin_generator_collect, 1, 1},
+    {"パス結合", builtin_path_join, 2, 2},
+    {"ファイル名", builtin_basename, 1, 1},
+    {"ディレクトリ名", builtin_dirname, 1, 1},
+    {"拡張子", builtin_extension, 1, 1},
+    {"Base64エンコード", builtin_base64_encode, 1, 1},
+    {"Base64デコード", builtin_base64_decode, 1, 1},
+    {"集合", builtin_set_create, 0, -1},
+    {"集合追加", builtin_set_add, 2, 2},
+    {"集合削除", builtin_set_remove, 2, 2},
+    {"集合含む", builtin_set_contains, 2, 2},
+    {"和集合", builtin_set_union, 2, 2},
+    {"積集合", builtin_set_intersection, 2, 2},
+    {"差集合", builtin_set_difference, 2, 2},
+    {"テスト", builtin_test_register, 2, 2},
+    {"テスト実行", builtin_test_run, 0, 0},
+    {"期待", builtin_expect, 2, 3},
+    {"期待エラー", builtin_expect_error, 1, 1},
+    {"例外作成", builtin_create_exception, 2, 2},
+    {"文書化", builtin_doc_set, 2, 2},
+    {"文書", builtin_doc_get, 1, 1},
+    {"型別名", builtin_type_alias, 2, 2},
+};
+
+static void register_builtin_table(Evaluator *eval) {
+    size_t count = sizeof(builtin_entries) / sizeof(builtin_entries[0]);
+    for (size_t i = 0; i < count; i++) {
+        const BuiltinEntry *entry = &builtin_entries[i];
+        env_define(eval->global, entry->name,
+                   value_builtin(entry->fn, entry->name, entry->min_args, entry->max_args),
+                   true);
+    }
+}
+
 void register_builtins(Evaluator *eval) {
-    // 入出力
-    env_define(eval->global, "表示", 
-               value_builtin(builtin_print, "表示", 0, -1), true);
-    env_define(eval->global, "入力",
-               value_builtin(builtin_input, "入力", 0, 1), true);
-    
-    // コレクション
-    env_define(eval->global, "長さ",
-               value_builtin(builtin_length, "長さ", 1, 1), true);
-    env_define(eval->global, "追加",
-               value_builtin(builtin_append, "追加", 2, 2), true);
-    env_define(eval->global, "削除",
-               value_builtin(builtin_remove, "削除", 2, 2), true);
-    
-    // 型変換
-    env_define(eval->global, "型",
-               value_builtin(builtin_type, "型", 1, 1), true);
-    env_define(eval->global, "数値化",
-               value_builtin(builtin_to_number, "数値化", 1, 1), true);
-    env_define(eval->global, "文字列化",
-               value_builtin(builtin_to_string, "文字列化", 1, 1), true);
-    
-    // 型チェック関数
-    env_define(eval->global, "数値か",
-               value_builtin(builtin_is_number, "数値か", 1, 1), true);
-    env_define(eval->global, "文字列か",
-               value_builtin(builtin_is_string, "文字列か", 1, 1), true);
-    env_define(eval->global, "真偽か",
-               value_builtin(builtin_is_bool, "真偽か", 1, 1), true);
-    env_define(eval->global, "配列か",
-               value_builtin(builtin_is_array, "配列か", 1, 1), true);
-    env_define(eval->global, "辞書か",
-               value_builtin(builtin_is_dict, "辞書か", 1, 1), true);
-    env_define(eval->global, "関数か",
-               value_builtin(builtin_is_function, "関数か", 1, 1), true);
-    env_define(eval->global, "無か",
-               value_builtin(builtin_is_null, "無か", 1, 1), true);
-    
-    // 範囲関数
-    env_define(eval->global, "範囲",
-               value_builtin(builtin_range, "範囲", 1, 3), true);
-    
-    // ビット演算関数
-    env_define(eval->global, "ビット積",
-               value_builtin(builtin_bit_and, "ビット積", 2, 2), true);
-    env_define(eval->global, "ビット和",
-               value_builtin(builtin_bit_or, "ビット和", 2, 2), true);
-    env_define(eval->global, "ビット排他",
-               value_builtin(builtin_bit_xor, "ビット排他", 2, 2), true);
-    env_define(eval->global, "ビット否定",
-               value_builtin(builtin_bit_not, "ビット否定", 1, 1), true);
-    env_define(eval->global, "左シフト",
-               value_builtin(builtin_bit_lshift, "左シフト", 2, 2), true);
-    env_define(eval->global, "右シフト",
-               value_builtin(builtin_bit_rshift, "右シフト", 2, 2), true);
-    
-    // 追加文字列関数
-    env_define(eval->global, "部分文字列",
-               value_builtin(builtin_substring, "部分文字列", 2, 3), true);
-    env_define(eval->global, "始まる",
-               value_builtin(builtin_starts_with, "始まる", 2, 2), true);
-    env_define(eval->global, "終わる",
-               value_builtin(builtin_ends_with, "終わる", 2, 2), true);
-    env_define(eval->global, "文字コード",
-               value_builtin(builtin_char_code, "文字コード", 1, 2), true);
-    env_define(eval->global, "コード文字",
-               value_builtin(builtin_from_char_code, "コード文字", 1, 1), true);
-    env_define(eval->global, "繰り返し",
-               value_builtin(builtin_string_repeat, "繰り返し", 2, 2), true);
-    
-    // 追加配列関数
-    env_define(eval->global, "末尾削除",
-               value_builtin(builtin_pop, "末尾削除", 1, 1), true);
-    env_define(eval->global, "探す",
-               value_builtin(builtin_find_item, "探す", 2, 2), true);
-    env_define(eval->global, "全て",
-               value_builtin(builtin_every, "全て", 2, 2), true);
-    env_define(eval->global, "一つでも",
-               value_builtin(builtin_some, "一つでも", 2, 2), true);
-    env_define(eval->global, "一意",
-               value_builtin(builtin_unique, "一意", 1, 1), true);
-    env_define(eval->global, "圧縮",
-               value_builtin(builtin_zip, "圧縮", 2, 2), true);
-    env_define(eval->global, "平坦化",
-               value_builtin(builtin_flat, "平坦化", 1, 1), true);
-    env_define(eval->global, "挿入",
-               value_builtin(builtin_insert, "挿入", 3, 3), true);
-    env_define(eval->global, "比較ソート",
-               value_builtin(builtin_sort_by, "比較ソート", 2, 2), true);
-    
-    // 数学関数（拡張）
-    env_define(eval->global, "正弦",
-               value_builtin(builtin_sin, "正弦", 1, 1), true);
-    env_define(eval->global, "余弦",
-               value_builtin(builtin_cos, "余弦", 1, 1), true);
-    env_define(eval->global, "正接",
-               value_builtin(builtin_tan, "正接", 1, 1), true);
-    env_define(eval->global, "対数",
-               value_builtin(builtin_log, "対数", 1, 1), true);
-    env_define(eval->global, "常用対数",
-               value_builtin(builtin_log10_fn, "常用対数", 1, 1), true);
-    env_define(eval->global, "乱数整数",
-               value_builtin(builtin_random_int, "乱数整数", 2, 2), true);
-    
+    register_builtin_table(eval);
+
     // 数学定数
     env_define(eval->global, "円周率", value_number(3.14159265358979323846), true);
     env_define(eval->global, "自然対数の底", value_number(2.71828182845904523536), true);
-    
-    // ファイル・ディレクトリ
-    env_define(eval->global, "追記",
-               value_builtin(builtin_file_append, "追記", 2, 2), true);
-    env_define(eval->global, "ディレクトリ一覧",
-               value_builtin(builtin_dir_list, "ディレクトリ一覧", 1, 1), true);
-    env_define(eval->global, "ディレクトリ作成",
-               value_builtin(builtin_dir_create, "ディレクトリ作成", 1, 1), true);
-    
-    // ユーティリティ
-    env_define(eval->global, "表明",
-               value_builtin(builtin_assert, "表明", 1, 2), true);
-    env_define(eval->global, "型判定",
-               value_builtin(builtin_typeof_check, "型判定", 2, 2), true);
-    
-    // 数学関数
-    env_define(eval->global, "絶対値",
-               value_builtin(builtin_abs, "絶対値", 1, 1), true);
-    env_define(eval->global, "平方根",
-               value_builtin(builtin_sqrt, "平方根", 1, 1), true);
-    env_define(eval->global, "切り捨て",
-               value_builtin(builtin_floor, "切り捨て", 1, 1), true);
-    env_define(eval->global, "切り上げ",
-               value_builtin(builtin_ceil, "切り上げ", 1, 1), true);
-    env_define(eval->global, "四捨五入",
-               value_builtin(builtin_round, "四捨五入", 1, 1), true);
-    env_define(eval->global, "乱数",
-               value_builtin(builtin_random, "乱数", 0, 0), true);
-    env_define(eval->global, "最大",
-               value_builtin(builtin_max, "最大", 1, -1), true);
-    env_define(eval->global, "最小",
-               value_builtin(builtin_min, "最小", 1, -1), true);
-    
-    // 辞書関数
-    env_define(eval->global, "キー",
-               value_builtin(builtin_dict_keys, "キー", 1, 1), true);
-    env_define(eval->global, "値一覧",
-               value_builtin(builtin_dict_values, "値一覧", 1, 1), true);
-    env_define(eval->global, "含む",
-               value_builtin(builtin_dict_has, "含む", 2, 2), true);
-    
-    // 文字列関数
-    env_define(eval->global, "分割",
-               value_builtin(builtin_split, "分割", 2, 2), true);
-    env_define(eval->global, "結合",
-               value_builtin(builtin_join, "結合", 2, 2), true);
-    env_define(eval->global, "検索",
-               value_builtin(builtin_find, "検索", 2, 2), true);
-    env_define(eval->global, "置換",
-               value_builtin(builtin_replace, "置換", 3, 3), true);
-    env_define(eval->global, "大文字",
-               value_builtin(builtin_upper, "大文字", 1, 1), true);
-    env_define(eval->global, "小文字",
-               value_builtin(builtin_lower, "小文字", 1, 1), true);
-    env_define(eval->global, "空白除去",
-               value_builtin(builtin_trim, "空白除去", 1, 1), true);
-    
-    // 配列関数
-    env_define(eval->global, "ソート",
-               value_builtin(builtin_sort, "ソート", 1, 1), true);
-    env_define(eval->global, "逆順",
-               value_builtin(builtin_reverse, "逆順", 1, 1), true);
-    env_define(eval->global, "スライス",
-               value_builtin(builtin_slice, "スライス", 2, 3), true);
-    env_define(eval->global, "位置",
-               value_builtin(builtin_index_of, "位置", 2, 2), true);
-    env_define(eval->global, "存在",
-               value_builtin(builtin_contains, "存在", 2, 2), true);
-    
-    // ファイル関数
-    env_define(eval->global, "読み込む",
-               value_builtin(builtin_file_read, "読み込む", 1, 1), true);
-    env_define(eval->global, "書き込む",
-               value_builtin(builtin_file_write, "書き込む", 2, 2), true);
-    env_define(eval->global, "ファイル存在",
-               value_builtin(builtin_file_exists, "ファイル存在", 1, 1), true);
-    
-    // 日時関数
-    env_define(eval->global, "現在時刻",
-               value_builtin(builtin_now, "現在時刻", 0, 0), true);
-    env_define(eval->global, "日付",
-               value_builtin(builtin_date, "日付", 0, 1), true);
-    env_define(eval->global, "時間",
-               value_builtin(builtin_time, "時間", 0, 1), true);
-    
-    // JSON関数
-    env_define(eval->global, "JSON化",
-               value_builtin(builtin_json_encode, "JSON化", 1, 1), true);
-    env_define(eval->global, "JSON解析",
-               value_builtin(builtin_json_decode, "JSON解析", 1, 1), true);
-    
-    // HTTPクライアント関数
-    env_define(eval->global, "HTTP取得",
-               value_builtin(builtin_http_get, "HTTP取得", 1, 2), true);
-    env_define(eval->global, "HTTP送信",
-               value_builtin(builtin_http_post, "HTTP送信", 1, 3), true);
-    env_define(eval->global, "HTTP更新",
-               value_builtin(builtin_http_put, "HTTP更新", 1, 3), true);
-    env_define(eval->global, "HTTP削除",
-               value_builtin(builtin_http_delete, "HTTP削除", 1, 2), true);
-    env_define(eval->global, "HTTPリクエスト",
-               value_builtin(builtin_http_request, "HTTPリクエスト", 2, 4), true);
-    
-    // HTTPサーバー/Webhook関数
-    env_define(eval->global, "サーバー起動",
-               value_builtin(builtin_http_serve, "サーバー起動", 1, 2), true);
-    env_define(eval->global, "サーバー停止",
-               value_builtin(builtin_http_stop, "サーバー停止", 0, 0), true);
-    
-    // URLエンコード/デコード
-    env_define(eval->global, "URLエンコード",
-               value_builtin(builtin_url_encode, "URLエンコード", 1, 1), true);
-    env_define(eval->global, "URLデコード",
-               value_builtin(builtin_url_decode, "URLデコード", 1, 1), true);
-    
-    // 高階配列関数
-    env_define(eval->global, "変換",
-               value_builtin(builtin_map, "変換", 2, 2), true);
-    env_define(eval->global, "抽出",
-               value_builtin(builtin_filter, "抽出", 2, 2), true);
-    env_define(eval->global, "集約",
-               value_builtin(builtin_reduce, "集約", 3, 3), true);
-    env_define(eval->global, "反復",
-               value_builtin(builtin_foreach, "反復", 2, 2), true);
-    
-    // 正規表現関数
-    env_define(eval->global, "正規一致",
-               value_builtin(builtin_regex_match, "正規一致", 2, 2), true);
-    env_define(eval->global, "正規検索",
-               value_builtin(builtin_regex_search, "正規検索", 2, 2), true);
-    env_define(eval->global, "正規置換",
-               value_builtin(builtin_regex_replace, "正規置換", 3, 3), true);
-    
-    // システムユーティリティ
-    env_define(eval->global, "待つ",
-               value_builtin(builtin_sleep, "待つ", 1, 1), true);
-    env_define(eval->global, "実行",
-               value_builtin(builtin_exec, "実行", 1, 1), true);
-    env_define(eval->global, "環境変数",
-               value_builtin(builtin_env_get, "環境変数", 1, 1), true);
-    env_define(eval->global, "環境変数設定",
-               value_builtin(builtin_env_set, "環境変数設定", 2, 2), true);
-    env_define(eval->global, "終了",
-               value_builtin(builtin_exit_program, "終了", 0, 1), true);
-    
-    // 非同期処理
-    env_define(eval->global, "非同期実行",
-               value_builtin(builtin_async_run, "非同期実行", 1, -1), true);
-    env_define(eval->global, "待機",
-               value_builtin(builtin_async_await, "待機", 1, 2), true);
-    env_define(eval->global, "全待機",
-               value_builtin(builtin_async_await_all, "全待機", 1, 1), true);
-    env_define(eval->global, "タスク状態",
-               value_builtin(builtin_task_status, "タスク状態", 1, 1), true);
-    env_define(eval->global, "競争待機",
-               value_builtin(builtin_async_race, "競争待機", 1, 1), true);
-    env_define(eval->global, "タスクキャンセル",
-               value_builtin(builtin_task_cancel, "タスクキャンセル", 1, 1), true);
-    
-    // Promise チェーン
-    env_define(eval->global, "成功時",
-               value_builtin(builtin_then, "成功時", 2, 2), true);
-    env_define(eval->global, "失敗時",
-               value_builtin(builtin_catch, "失敗時", 2, 2), true);
-    
-    // スレッドプール
-    env_define(eval->global, "プール作成",
-               value_builtin(builtin_pool_create, "プール作成", 0, 1), true);
-    env_define(eval->global, "プール情報",
-               value_builtin(builtin_pool_stats, "プール情報", 0, 0), true);
-    
-    // 並列処理
-    env_define(eval->global, "並列実行",
-               value_builtin(builtin_parallel_run, "並列実行", 1, 1), true);
-    env_define(eval->global, "並列マップ",
-               value_builtin(builtin_parallel_map, "並列マップ", 2, 2), true);
-    env_define(eval->global, "排他作成",
-               value_builtin(builtin_mutex_create, "排他作成", 0, 0), true);
-    env_define(eval->global, "排他実行",
-               value_builtin(builtin_mutex_exec, "排他実行", 2, 2), true);
-    
-    // 読み書きロック
-    env_define(eval->global, "読書ロック作成",
-               value_builtin(builtin_rwlock_create, "読書ロック作成", 0, 0), true);
-    env_define(eval->global, "読取実行",
-               value_builtin(builtin_rwlock_read, "読取実行", 2, 2), true);
-    env_define(eval->global, "書込実行",
-               value_builtin(builtin_rwlock_write, "書込実行", 2, 2), true);
-    
-    // セマフォ
-    env_define(eval->global, "セマフォ作成",
-               value_builtin(builtin_semaphore_create, "セマフォ作成", 1, 1), true);
-    env_define(eval->global, "セマフォ獲得",
-               value_builtin(builtin_semaphore_acquire, "セマフォ獲得", 1, 1), true);
-    env_define(eval->global, "セマフォ解放",
-               value_builtin(builtin_semaphore_release, "セマフォ解放", 1, 1), true);
-    env_define(eval->global, "セマフォ実行",
-               value_builtin(builtin_semaphore_exec, "セマフォ実行", 2, 2), true);
-    
-    // アトミックカウンター
-    env_define(eval->global, "カウンター作成",
-               value_builtin(builtin_atomic_create, "カウンター作成", 0, 1), true);
-    env_define(eval->global, "カウンター加算",
-               value_builtin(builtin_atomic_add, "カウンター加算", 1, 2), true);
-    env_define(eval->global, "カウンター取得",
-               value_builtin(builtin_atomic_get, "カウンター取得", 1, 1), true);
-    env_define(eval->global, "カウンター設定",
-               value_builtin(builtin_atomic_set, "カウンター設定", 2, 2), true);
-    
-    // チャネル（スレッド間通信）
-    env_define(eval->global, "チャネル作成",
-               value_builtin(builtin_channel_create, "チャネル作成", 0, 1), true);
-    env_define(eval->global, "チャネル送信",
-               value_builtin(builtin_channel_send, "チャネル送信", 2, 2), true);
-    env_define(eval->global, "チャネル受信",
-               value_builtin(builtin_channel_receive, "チャネル受信", 1, 1), true);
-    env_define(eval->global, "チャネル閉じる",
-               value_builtin(builtin_channel_close, "チャネル閉じる", 1, 1), true);
-    env_define(eval->global, "チャネル試送信",
-               value_builtin(builtin_channel_try_send, "チャネル試送信", 2, 2), true);
-    env_define(eval->global, "チャネル試受信",
-               value_builtin(builtin_channel_try_receive, "チャネル試受信", 1, 1), true);
-    env_define(eval->global, "チャネル残量",
-               value_builtin(builtin_channel_count, "チャネル残量", 1, 1), true);
-    env_define(eval->global, "チャネル選択",
-               value_builtin(builtin_channel_select, "チャネル選択", 1, 2), true);
-    
-    // スケジューラ
-    env_define(eval->global, "定期実行",
-               value_builtin(builtin_schedule_interval, "定期実行", 2, 2), true);
-    env_define(eval->global, "遅延実行",
-               value_builtin(builtin_schedule_delay, "遅延実行", 2, 2), true);
-    env_define(eval->global, "スケジュール停止",
-               value_builtin(builtin_schedule_stop, "スケジュール停止", 1, 1), true);
-    env_define(eval->global, "全スケジュール停止",
-               value_builtin(builtin_schedule_stop_all, "全スケジュール停止", 0, 0), true);
-    
-    // WebSocket
-    env_define(eval->global, "WS接続",
-               value_builtin(builtin_ws_connect, "WS接続", 1, 1), true);
-    env_define(eval->global, "WS送信",
-               value_builtin(builtin_ws_send, "WS送信", 2, 2), true);
-    env_define(eval->global, "WS受信",
-               value_builtin(builtin_ws_receive, "WS受信", 1, 2), true);
-    env_define(eval->global, "WS切断",
-               value_builtin(builtin_ws_close, "WS切断", 1, 1), true);
-    env_define(eval->global, "WS状態",
-               value_builtin(builtin_ws_status, "WS状態", 1, 1), true);
-    
-    // ジェネレータ関数
-    env_define(eval->global, "次",
-               value_builtin(builtin_generator_next, "次", 1, 1), true);
-    env_define(eval->global, "完了",
-               value_builtin(builtin_generator_done, "完了", 1, 1), true);
-    env_define(eval->global, "全値",
-               value_builtin(builtin_generator_collect, "全値", 1, 1), true);
-    
-    // パス操作関数
-    env_define(eval->global, "パス結合",
-               value_builtin(builtin_path_join, "パス結合", 2, 2), true);
-    env_define(eval->global, "ファイル名",
-               value_builtin(builtin_basename, "ファイル名", 1, 1), true);
-    env_define(eval->global, "ディレクトリ名",
-               value_builtin(builtin_dirname, "ディレクトリ名", 1, 1), true);
-    env_define(eval->global, "拡張子",
-               value_builtin(builtin_extension, "拡張子", 1, 1), true);
-    
-    // Base64関数
-    env_define(eval->global, "Base64エンコード",
-               value_builtin(builtin_base64_encode, "Base64エンコード", 1, 1), true);
-    env_define(eval->global, "Base64デコード",
-               value_builtin(builtin_base64_decode, "Base64デコード", 1, 1), true);
-    
-    // セット（集合）関数
-    env_define(eval->global, "集合",
-               value_builtin(builtin_set_create, "集合", 0, -1), true);
-    env_define(eval->global, "集合追加",
-               value_builtin(builtin_set_add, "集合追加", 2, 2), true);
-    env_define(eval->global, "集合削除",
-               value_builtin(builtin_set_remove, "集合削除", 2, 2), true);
-    env_define(eval->global, "集合含む",
-               value_builtin(builtin_set_contains, "集合含む", 2, 2), true);
-    env_define(eval->global, "和集合",
-               value_builtin(builtin_set_union, "和集合", 2, 2), true);
-    env_define(eval->global, "積集合",
-               value_builtin(builtin_set_intersection, "積集合", 2, 2), true);
-    env_define(eval->global, "差集合",
-               value_builtin(builtin_set_difference, "差集合", 2, 2), true);
-    
-    // テストフレームワーク
-    env_define(eval->global, "テスト",
-               value_builtin(builtin_test_register, "テスト", 2, 2), true);
-    env_define(eval->global, "テスト実行",
-               value_builtin(builtin_test_run, "テスト実行", 0, 0), true);
-    env_define(eval->global, "期待",
-               value_builtin(builtin_expect, "期待", 2, 3), true);
-    env_define(eval->global, "期待エラー",
-               value_builtin(builtin_expect_error, "期待エラー", 1, 1), true);
-    
-    // 例外関数
-    env_define(eval->global, "例外作成",
-               value_builtin(builtin_create_exception, "例外作成", 2, 2), true);
-    
-    // ドキュメントコメント
-    env_define(eval->global, "文書化",
-               value_builtin(builtin_doc_set, "文書化", 2, 2), true);
-    env_define(eval->global, "文書",
-               value_builtin(builtin_doc_get, "文書", 1, 1), true);
-    
-    // 型エイリアス
-    env_define(eval->global, "型別名",
-               value_builtin(builtin_type_alias, "型別名", 2, 2), true);
 
     // ── プラットフォーム定数 ──────────────────────────────
     {
