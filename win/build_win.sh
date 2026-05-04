@@ -66,6 +66,7 @@ SOURCES=(
     src/parser.c
     src/value.c
     src/environment.c
+    src/gc.c
     src/evaluator.c
     src/diag.c
     src/http.c

@@ -158,7 +158,7 @@ WIN_OBJECTS = $(SOURCES:$(SRC_DIR)/%.c=$(WIN_BUILD)/%.o)
 # curl for Windows のパス (win/build_win.sh でセットアップ)
 WIN_CURL_DIR = win/curl-win64
 WIN_CFLAGS  += -I$(WIN_CURL_DIR)/include
-WIN_LDFLAGS  = -L$(WIN_CURL_DIR)/lib -lcurl -lws2_32 -lwsock32 -lpthread -lm
+WIN_LDFLAGS  = -L$(WIN_CURL_DIR)/lib -lcurl -lws2_32 -lwsock32 -lpthread -lshell32 -lm
 
 windows: win/curl-win64 $(WIN_BUILD) $(WIN_DIST) $(WIN_TARGET)
 	@echo "Windows ビルド完了: $(WIN_TARGET)"

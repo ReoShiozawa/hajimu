@@ -593,7 +593,7 @@ Hajimu provides built-in constants to detect the current OS and architecture at 
 ```jp
 表示(システム名)           // → "macOS" / "Linux" / "Windows"
 表示(アーキテクチャ)       // → "arm64" / "x86-64"
-表示(はじむバージョン)     // → "1.3.1"
+表示(はじむバージョン)     // → "1.3.3"
 
 // Detailed info via the システム dictionary
 表示(システム["OS"])        // → "macOS"

@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 extern GC *g_gc;
 
@@ -176,6 +177,105 @@ bool env_is_const(Environment *env, const char *name) {
 
 bool env_exists_local(Environment *env, const char *name) {
     return find_entry_local(env, name) != NULL;
+}
+
+static int min3(int a, int b, int c) {
+    int m = a < b ? a : b;
+    return m < c ? m : c;
+}
+
+static int utf8_char_bytes(unsigned char c) {
+    if (c < 0x80) return 1;
+    if ((c & 0xE0) == 0xC0) return 2;
+    if ((c & 0xF0) == 0xE0) return 3;
+    if ((c & 0xF8) == 0xF0) return 4;
+    return 1;
+}
+
+static int utf8_to_codepoints(const char *s, unsigned int *out, int max_count) {
+    if (!s || !out || max_count <= 0) return 0;
+
+    int count = 0;
+    const unsigned char *p = (const unsigned char *)s;
+    while (*p && count < max_count) {
+        int n = utf8_char_bytes(*p);
+        unsigned int cp = 0;
+
+        if (n == 1 || p[1] == '\0') {
+            cp = *p;
+        } else if (n == 2 && p[1] != '\0') {
+            cp = ((*p & 0x1F) << 6) | (p[1] & 0x3F);
+        } else if (n == 3 && p[1] != '\0' && p[2] != '\0') {
+            cp = ((*p & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F);
+        } else if (n == 4 && p[1] != '\0' && p[2] != '\0' && p[3] != '\0') {
+            cp = ((*p & 0x07) << 18) | ((p[1] & 0x3F) << 12)
+                 | ((p[2] & 0x3F) << 6) | (p[3] & 0x3F);
+        } else {
+            cp = *p;
+            n = 1;
+        }
+
+        out[count++] = cp;
+        p += n;
+    }
+
+    return count;
+}
+
+static int edit_distance(const char *a, const char *b) {
+    if (!a || !b) return INT_MAX;
+
+    unsigned int acp[97];
+    unsigned int bcp[97];
+    int alen = utf8_to_codepoints(a, acp, 97);
+    int blen = utf8_to_codepoints(b, bcp, 97);
+    if (alen == 0) return blen;
+    if (blen == 0) return alen;
+    if (alen > 96 || blen > 96) return INT_MAX;
+
+    int prev[97];
+    int curr[97];
+
+    for (int j = 0; j <= blen; j++) {
+        prev[j] = j;
+    }
+
+    for (int i = 1; i <= alen; i++) {
+        curr[0] = i;
+        for (int j = 1; j <= blen; j++) {
+            int cost = acp[i - 1] == bcp[j - 1] ? 0 : 1;
+            curr[j] = min3(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+        }
+        for (int j = 0; j <= blen; j++) {
+            prev[j] = curr[j];
+        }
+    }
+
+    return prev[blen];
+}
+
+const char *env_find_similar(Environment *env, const char *name) {
+    if (!env || !name || name[0] == '\0') return NULL;
+
+    const char *best = NULL;
+    int best_score = INT_MAX;
+
+    for (Environment *scope = env; scope != NULL; scope = scope->parent) {
+        for (int i = 0; i < ENV_HASH_SIZE; i++) {
+            for (EnvEntry *entry = scope->table[i]; entry != NULL; entry = entry->next) {
+                int score = edit_distance(name, entry->name);
+                if (score < best_score) {
+                    best_score = score;
+                    best = entry->name;
+                }
+            }
+        }
+    }
+
+    unsigned int cp[97];
+    int len = utf8_to_codepoints(name, cp, 97);
+    int threshold = len <= 4 ? 1 : 2;
+    return best_score <= threshold ? best : NULL;
 }
 
 // =============================================================================

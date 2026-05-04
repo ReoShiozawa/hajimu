@@ -19,6 +19,7 @@ practical enough for production development, yet accessible enough for beginners
 - 🔧 **Practical**: 143 built-in functions, HTTP client, async/parallel support
 - 📦 **Package manager**: Built-in manager for external packages
 - 🔌 **C extension plugins**: Cross-platform `.hjp` plugin format — write plugins in C, C++, Rust, Go, or Zig
+- 🧭 **Friendly diagnostics**: Shows causes, fixes, examples, and "did you mean" suggestions
 - 🎓 **Beginner-friendly**: Designed to be easy to learn even for first-time programmers
 - 🚀 **Modern**: Lambda expressions, list comprehensions, async/await, and more
 
@@ -33,6 +34,12 @@ brew tap ReoShiozawa/hajimu
 # Install
 brew install hajimu
 ```
+
+### Windows
+
+Download `hajimu_setup.exe` from GitHub Releases and run it. The installer places `hajimu.exe` and required DLLs, then adds Hajimu to PATH.
+
+For portable use, keep `hajimu.exe`, `libcurl-x64.dll`, and `libwinpthread-1.dll` in the same folder.
 
 ### Build from Source
 
@@ -50,7 +57,7 @@ sudo make install
 
 ### Requirements
 
-- **OS**: macOS 10.13+, Ubuntu 18.04+, Windows (WSL2)
+- **OS**: macOS 10.13+, Ubuntu 18.04+, Windows 10+ / WSL2
 - **Compiler**: GCC 9.0+ or Clang 10.0+
 - **Memory**: 256 MB minimum
 

@@ -166,10 +166,11 @@ static void error_at(Parser *parser, Token *token, const char *message) {
     snprintf(parser->error_message, sizeof(parser->error_message),
              "[%d行目] 構文エラー: %s", token->line, message);
 
-    /* EOF トークンの場合は前トークンの位置でソース行を表示する */
+    /* EOF/改行トークンの場合は前トークンの位置でソース行を表示する */
     Token *display_token = token;
     Token prev_for_eof;
-    if (token->type == TOKEN_EOF && parser->previous.type != TOKEN_EOF) {
+    if ((token->type == TOKEN_EOF || token->type == TOKEN_NEWLINE) &&
+            parser->previous.type != TOKEN_EOF) {
         prev_for_eof = parser->previous;
         display_token = &prev_for_eof;
     }

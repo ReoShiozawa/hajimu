@@ -18,6 +18,7 @@
 - 🔧 **実用的**: 143個の組み込み関数、HTTP通信、非同期処理対応
 - 📦 **パッケージ管理**: 内蔵パッケージマネージャで外部パッケージに対応
 - 🔌 **C拡張プラグイン**: 統一 `.hjp` 形式でクロスプラットフォーム対応、C/C++/Rust等で開発可能
+- 🧭 **親切なエラー表示**: 原因・直し方・例・「もしかして」候補を表示
 - 🎓 **学びやすい**: プログラミング初心者でも理解しやすい設計
 - 🚀 **モダン**: ラムダ式、リスト内包表記、async/awaitなど
 
@@ -32,6 +33,12 @@ brew tap ReoShiozawa/hajimu
 # インストール
 brew install hajimu
 ```
+
+### Windows
+
+GitHub Releases から `hajimu_setup.exe` をダウンロードして実行してください。インストーラーは `hajimu.exe` と必要な DLL を配置し、PATH へ追加します。
+
+ポータブルに使う場合は `hajimu.exe`、`libcurl-x64.dll`、`libwinpthread-1.dll` を同じフォルダーに置いて実行できます。
 
 ### ソースからビルド
 
@@ -49,7 +56,7 @@ sudo make install
 
 ### 動作要件
 
-- **OS**: macOS 10.13+, Ubuntu 18.04+, Windows (WSL2)
+- **OS**: macOS 10.13+, Ubuntu 18.04+, Windows 10+ / WSL2
 - **コンパイラ**: GCC 9.0+ または Clang 10.0+
 - **メモリ**: 最小 256MB
 

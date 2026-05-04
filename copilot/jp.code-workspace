@@ -14,6 +14,42 @@
 		},
 		{
 			"path": "../../jp-discord"
+		},
+		{
+			"path": "../../jp-pack/jp-gui"
+		},
+		{
+			"path": "../../jp-pack/jp-engine_core"
+		},
+		{
+			"path": "../../jp-pack/jp-engine_2d"
+		},
+		{
+			"path": "../../jp-pack/jp-engine_render"
+		},
+		{
+			"path": "../../jp-pack/jp-engine_audio"
+		},
+		{
+			"path": "../../jp-pack/jp-engine_rpg"
+		},
+		{
+			"path": "../../jp-pack/jp-engine_ui"
+		},
+		{
+			"path": "../../jp-pack/jp-engine_3d"
+		},
+		{
+			"path": "../../kaname"
+		},
+		{
+			"path": "../../jp-pack/jp-engine_physics"
+		},
+		{
+			"path": "../../jp-pack/jp-gui-v2"
+		},
+		{
+			"path": "../../jp-edu"
 		}
 	]
 }

@@ -887,7 +887,7 @@ Runs a shell command and returns stdout as a string.
 |---|---|---|
 | `システム名` | OS name | `"macOS"` / `"Linux"` / `"Windows"` |
 | `アーキテクチャ` | CPU architecture | `"arm64"` / `"x86-64"` |
-| `はじむバージョン` | Interpreter version | `"1.3.1"` |
+| `はじむバージョン` | Interpreter version | `"1.3.3"` |
 | `システム["OS"]` | Same as `システム名` | |
 | `システム["区切り文字"]` | Path separator | `/` (Windows: `\`) |
 | `システム["改行"]` | Newline | `\n` (Windows: `\r\n`) |
@@ -1798,5 +1798,5 @@ Hello, World!
 
 ## Version
 
-- Version: 1.3.1
+- Version: 1.3.3
 - Author: Reo Shiozawa

@@ -143,8 +143,12 @@ static Value evaluate_lambda(Evaluator *eval, ASTNode *node);
 static Value evaluate_switch(Evaluator *eval, ASTNode *node);
 static Value evaluate_foreach(Evaluator *eval, ASTNode *node);
 static Value evaluate_list_comprehension(Evaluator *eval, ASTNode *node);
-static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int line);
+static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int line, int column);
 static Value call_function_value(Value *func, Value *args, int argc);
+static void undefined_variable_error(Evaluator *eval, ASTNode *node, const char *name);
+static const char *find_similar_dict_key(Value *dict, const char *name);
+static const char *find_similar_instance_member(Value *instance, const char *name);
+static const char *find_similar_class_static_method(ASTNode *class_def, const char *name);
 
 // =============================================================================
 // 組み込み関数のプロトタイプ
@@ -885,13 +889,13 @@ void register_builtins(Evaluator *eval) {
         env_define(eval->global, "アーキテクチャ",
                    value_string(arch), true);
         env_define(eval->global, "はじむバージョン",
-                   value_string("1.3.1"), true);
+                   value_string("1.3.3"), true);
 
         /* システム辞書: システム["OS"], システム["アーキテクチャ"] 等 */
         Value sys = value_dict();
         dict_set(&sys, "OS",           value_string(os_name));
         dict_set(&sys, "アーキテクチャ",    value_string(arch));
-        dict_set(&sys, "バージョン",       value_string("1.3.1"));
+        dict_set(&sys, "バージョン",       value_string("1.3.3"));
 #if defined(_WIN32)
         dict_set(&sys, "区切り文字",       value_string("\\"));
         dict_set(&sys, "改行",            value_string("\r\n"));
@@ -931,6 +935,10 @@ void runtime_error(Evaluator *eval, int line, int col, const char *format, ...) 
         kind = DIAG_OVERFLOW;
     else if (strstr(message, "ゼロ除算"))
         kind = DIAG_ZERO_DIV;
+    else if (strstr(message, "モジュール") || strstr(message, "プラグイン")
+             || strstr(message, "バイトコード") || strstr(message, "読み込めません")
+             || strstr(message, "読み込みに失敗"))
+        kind = DIAG_VALUE;
     else if (strstr(message, "未定義") || strstr(message, "見つかりません")
              || strstr(message, "定義されていません"))
         kind = DIAG_NAME;
@@ -940,10 +948,11 @@ void runtime_error(Evaluator *eval, int line, int col, const char *format, ...) 
              || strstr(message, "型が"))
         kind = DIAG_TYPE;
     else if (strstr(message, "インデックス") || strstr(message, "範囲外")
-             || strstr(message, "範囲を超え"))
+             || strstr(message, "範囲を超え") || strstr(message, "キーがありません"))
         kind = DIAG_INDEX;
     else if (strstr(message, "メンバー") || strstr(message, "属性")
-             || strstr(message, "プロパティ"))
+             || strstr(message, "プロパティ") || strstr(message, "フィールド")
+             || strstr(message, "静的メソッド") || strstr(message, "親クラス"))
         kind = DIAG_ATTRIBUTE;
 
     /* 視覚的なエラー表示 */
@@ -973,6 +982,165 @@ void runtime_error(Evaluator *eval, int line, int col, const char *format, ...) 
         }
         fputc('\n', stderr);
     }
+}
+
+static void undefined_variable_error(Evaluator *eval, ASTNode *node, const char *name) {
+    const char *similar = env_find_similar(eval->current, name);
+    if (similar != NULL) {
+        runtime_error(eval, node->location.line, node->location.column,
+                      "未定義の変数: %s\n   もしかして: %s", name, similar);
+    } else {
+        runtime_error(eval, node->location.line, node->location.column,
+                      "未定義の変数: %s", name);
+    }
+}
+
+static int eval_min3(int a, int b, int c) {
+    int m = a < b ? a : b;
+    return m < c ? m : c;
+}
+
+static int eval_utf8_char_bytes(unsigned char c) {
+    if (c < 0x80) return 1;
+    if ((c & 0xE0) == 0xC0) return 2;
+    if ((c & 0xF0) == 0xE0) return 3;
+    if ((c & 0xF8) == 0xF0) return 4;
+    return 1;
+}
+
+static int eval_utf8_to_codepoints(const char *s, unsigned int *out, int max_count) {
+    if (!s || !out || max_count <= 0) return 0;
+
+    int count = 0;
+    const unsigned char *p = (const unsigned char *)s;
+    while (*p && count < max_count) {
+        int n = eval_utf8_char_bytes(*p);
+        unsigned int cp = 0;
+
+        if (n == 1 || p[1] == '\0') {
+            cp = *p;
+        } else if (n == 2 && p[1] != '\0') {
+            cp = ((*p & 0x1F) << 6) | (p[1] & 0x3F);
+        } else if (n == 3 && p[1] != '\0' && p[2] != '\0') {
+            cp = ((*p & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F);
+        } else if (n == 4 && p[1] != '\0' && p[2] != '\0' && p[3] != '\0') {
+            cp = ((*p & 0x07) << 18) | ((p[1] & 0x3F) << 12)
+                 | ((p[2] & 0x3F) << 6) | (p[3] & 0x3F);
+        } else {
+            cp = *p;
+            n = 1;
+        }
+
+        out[count++] = cp;
+        p += n;
+    }
+
+    return count;
+}
+
+static int eval_edit_distance(const char *a, const char *b) {
+    unsigned int acp[97];
+    unsigned int bcp[97];
+    int alen = eval_utf8_to_codepoints(a, acp, 97);
+    int blen = eval_utf8_to_codepoints(b, bcp, 97);
+    if (alen == 0) return blen;
+    if (blen == 0) return alen;
+    if (alen > 96 || blen > 96) return 1000000;
+
+    int prev[97];
+    int curr[97];
+    for (int j = 0; j <= blen; j++) prev[j] = j;
+
+    for (int i = 1; i <= alen; i++) {
+        curr[0] = i;
+        for (int j = 1; j <= blen; j++) {
+            int cost = acp[i - 1] == bcp[j - 1] ? 0 : 1;
+            curr[j] = eval_min3(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+        }
+        for (int j = 0; j <= blen; j++) prev[j] = curr[j];
+    }
+
+    return prev[blen];
+}
+
+static bool eval_is_close_name(const char *name, int score) {
+    unsigned int cp[97];
+    int len = eval_utf8_to_codepoints(name, cp, 97);
+    int threshold = len <= 4 ? 1 : 2;
+    return score <= threshold;
+}
+
+static const char *find_similar_dict_key(Value *dict, const char *name) {
+    if (!dict || dict->type != VALUE_DICT || !name) return NULL;
+
+    const char *best = NULL;
+    int best_score = 1000000;
+    for (int i = 0; i < dict->dict.length; i++) {
+        int score = eval_edit_distance(name, dict->dict.keys[i]);
+        if (score < best_score) {
+            best_score = score;
+            best = dict->dict.keys[i];
+        }
+    }
+
+    return eval_is_close_name(name, best_score) ? best : NULL;
+}
+
+static const char *find_similar_instance_member(Value *instance, const char *name) {
+    if (!instance || instance->type != VALUE_INSTANCE || !name) return NULL;
+
+    const char *best = NULL;
+    int best_score = 1000000;
+    for (int i = 0; i < instance->instance.field_count; i++) {
+        int score = eval_edit_distance(name, instance->instance.field_names[i]);
+        if (score < best_score) {
+            best_score = score;
+            best = instance->instance.field_names[i];
+        }
+    }
+
+    Value *class_ref = instance->instance.class_ref;
+    while (class_ref != NULL && class_ref->type == VALUE_CLASS) {
+        ASTNode *class_def = class_ref->class_value.definition;
+        for (int i = 0; i < class_def->class_def.method_count; i++) {
+            const char *method_name = class_def->class_def.methods[i]->method.name;
+            int score = eval_edit_distance(name, method_name);
+            if (score < best_score) {
+                best_score = score;
+                best = method_name;
+            }
+        }
+
+        if (class_def->class_def.parent_name != NULL) {
+            Value *parent = env_get(g_eval ? g_eval->current : NULL, class_def->class_def.parent_name);
+            if (parent != NULL && parent->type == VALUE_CLASS) {
+                class_ref = parent;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    return eval_is_close_name(name, best_score) ? best : NULL;
+}
+
+static const char *find_similar_class_static_method(ASTNode *class_def, const char *name) {
+    if (!class_def || !name) return NULL;
+
+    const char *best = NULL;
+    int best_score = 1000000;
+    for (int i = 0; i < class_def->class_def.static_method_count; i++) {
+        const char *method_name = class_def->class_def.static_methods[i]->method.name;
+        int score = eval_edit_distance(name, method_name);
+        if (score < best_score) {
+            best_score = score;
+            best = method_name;
+        }
+    }
+
+    return eval_is_close_name(name, best_score) ? best : NULL;
 }
 
 bool evaluator_had_error(Evaluator *eval) {
@@ -1100,7 +1268,9 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
             break;
             
         case NODE_STRING:
-            result = evaluate_string_interpolation(eval, node->string_value, node->location.line);
+            result = evaluate_string_interpolation(eval, node->string_value,
+                                                   node->location.line,
+                                                   node->location.column);
             break;
             
         case NODE_BOOL:
@@ -1114,8 +1284,7 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
         case NODE_IDENTIFIER: {
             Value *val = env_get(eval->current, node->string_value);
             if (val == NULL) {
-                runtime_error(eval, node->location.line, node->location.column,
-                             "未定義の変数: %s", node->string_value);
+                undefined_variable_error(eval, node, node->string_value);
             } else {
                 result = value_copy(*val);
             }
@@ -1861,8 +2030,7 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
         if (node->assign.target->type == NODE_IDENTIFIER) {
             Value *ptr = env_get(eval->current, node->assign.target->string_value);
             if (ptr == NULL) {
-                runtime_error(eval, node->location.line, node->location.column,
-                             "未定義の変数: %s", node->assign.target->string_value);
+                undefined_variable_error(eval, node, node->assign.target->string_value);
                 return value_null();
             }
             current = *ptr;
@@ -1930,45 +2098,79 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
         }
     }
     else if (node->assign.target->type == NODE_INDEX) {
-        ASTNode *idx_node = node->assign.target;
-        Value *target_ptr = NULL;
-        
-        if (idx_node->index.array->type == NODE_IDENTIFIER) {
-            target_ptr = env_get(eval->current, idx_node->index.array->string_value);
+        /* ネストしたインデックス代入に対応: a["x"]["y"]["z"] = val */
+        ASTNode *chain_nodes[64];
+        int chain_depth = 0;
+        ASTNode *cur = node->assign.target;
+        while (cur->type == NODE_INDEX && chain_depth < 63) {
+            chain_nodes[chain_depth++] = cur;
+            cur = cur->index.array;
         }
-        
-        if (target_ptr == NULL) {
+        /* chain_nodes[0] が最も内側（最終）のインデックス, chain_nodes[depth-1] が最も外側 */
+        if (cur->type != NODE_IDENTIFIER) {
+            runtime_error(eval, node->location.line, node->location.column, "不正な代入先");
+            return value_null();
+        }
+        Value *ptr = env_get(eval->current, cur->string_value);
+        if (ptr == NULL) {
             runtime_error(eval, node->location.line, node->location.column, "配列または辞書が見つかりません");
             return value_null();
         }
-        
-        Value index = evaluate(eval, idx_node->index.index);
+        /* 外側から depth-1 回ナビゲート（最後の1レベルは実際に代入） */
+        for (int i = chain_depth - 1; i >= 1; i--) {
+            Value idx = evaluate(eval, chain_nodes[i]->index.index);
+            if (eval->had_error) return value_null();
+            if (ptr->type == VALUE_DICT && idx.type == VALUE_STRING) {
+                bool found = false;
+                for (int j = 0; j < ptr->dict.length; j++) {
+                    if (strcmp(ptr->dict.keys[j], idx.string.data) == 0) {
+                        ptr = &ptr->dict.values[j];
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    runtime_error(eval, node->location.line, node->location.column,
+                                  "辞書にキー '%s' が見つかりません", idx.string.data);
+                    return value_null();
+                }
+            } else if (ptr->type == VALUE_ARRAY && idx.type == VALUE_NUMBER) {
+                int aidx = (int)idx.number;
+                if (aidx < 0) aidx += ptr->array.length;
+                if (aidx < 0 || aidx >= ptr->array.length) {
+                    runtime_error(eval, node->location.line, node->location.column,
+                                  "インデックスが範囲外です: %d", aidx);
+                    return value_null();
+                }
+                ptr = &ptr->array.elements[aidx];
+            } else {
+                runtime_error(eval, node->location.line, node->location.column, "配列または辞書が見つかりません");
+                return value_null();
+            }
+        }
+        /* 最終インデックスへ代入 */
+        Value index = evaluate(eval, chain_nodes[0]->index.index);
         if (eval->had_error) return value_null();
-        
-        if (target_ptr->type == VALUE_ARRAY) {
-            // 配列の場合
+        if (ptr->type == VALUE_ARRAY) {
             if (index.type != VALUE_NUMBER) {
                 runtime_error(eval, node->location.line, node->location.column,
                              "配列のインデックスは数値でなければなりません");
                 return value_null();
             }
-            
             int idx = (int)index.number;
-            if (!array_set(target_ptr, idx, value)) {
+            if (!array_set(ptr, idx, value)) {
                 runtime_error(eval, node->location.line, node->location.column,
                              "インデックスが範囲外です: %d", idx);
                 return value_null();
             }
         }
-        else if (target_ptr->type == VALUE_DICT) {
-            // 辞書の場合
+        else if (ptr->type == VALUE_DICT) {
             if (index.type != VALUE_STRING) {
                 runtime_error(eval, node->location.line, node->location.column,
                              "辞書のキーは文字列でなければなりません");
                 return value_null();
             }
-            
-            dict_set(target_ptr, index.string.data, value);
+            dict_set(ptr, index.string.data, value);
         }
         else {
             runtime_error(eval, node->location.line, node->location.column, "配列または辞書が見つかりません");
@@ -2694,9 +2896,17 @@ static Value evaluate_member(Evaluator *eval, ASTNode *node) {
             }
         }
         
-        runtime_error(eval, node->location.line, node->location.column,
-                     "インスタンスに '%s' というフィールドまたはメソッドがありません",
-                     member_name);
+        const char *similar = find_similar_instance_member(&object, member_name);
+        if (similar != NULL) {
+            runtime_error(eval, node->location.line, node->location.column,
+                         "インスタンスに '%s' というフィールドまたはメソッドがありません\n"
+                         "   もしかして: %s",
+                         member_name, similar);
+        } else {
+            runtime_error(eval, node->location.line, node->location.column,
+                         "インスタンスに '%s' というフィールドまたはメソッドがありません",
+                         member_name);
+        }
         return value_null();
     }
     
@@ -2706,8 +2916,16 @@ static Value evaluate_member(Evaluator *eval, ASTNode *node) {
         if (val.type != VALUE_NULL) {
             return value_copy(val);
         }
-        runtime_error(eval, node->location.line, node->location.column,
-                     "辞書に '%s' というキーがありません", member_name);
+        const char *similar = find_similar_dict_key(&object, member_name);
+        if (similar != NULL) {
+            runtime_error(eval, node->location.line, node->location.column,
+                         "辞書に '%s' というキーがありません\n"
+                         "   もしかして: %s",
+                         member_name, similar);
+        } else {
+            runtime_error(eval, node->location.line, node->location.column,
+                         "辞書に '%s' というキーがありません", member_name);
+        }
         return value_null();
     }
     
@@ -2720,9 +2938,17 @@ static Value evaluate_member(Evaluator *eval, ASTNode *node) {
                 return value_function(method, eval->current);
             }
         }
-        runtime_error(eval, node->location.line, node->location.column,
-                     "クラス '%s' に静的メソッド '%s' がありません",
-                     class_def->class_def.name, member_name);
+        const char *similar = find_similar_class_static_method(class_def, member_name);
+        if (similar != NULL) {
+            runtime_error(eval, node->location.line, node->location.column,
+                         "クラス '%s' に静的メソッド '%s' がありません\n"
+                         "   もしかして: %s",
+                         class_def->class_def.name, member_name, similar);
+        } else {
+            runtime_error(eval, node->location.line, node->location.column,
+                         "クラス '%s' に静的メソッド '%s' がありません",
+                         class_def->class_def.name, member_name);
+        }
         return value_null();
     }
     
@@ -2802,7 +3028,7 @@ static Value evaluate_throw(Evaluator *eval, ASTNode *node) {
 }
 
 // 文字列補間: "こんにちは{名前}さん" → 式を評価して埋め込む
-static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int line) {
+static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int line, int column) {
     // {を含まない場合はそのまま返す
     if (strchr(str, '{') == NULL) {
         return value_string(str);
@@ -2823,6 +3049,7 @@ static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int
             result[length++] = '{';
             p += 2;
         } else if (*p == '{') {
+            int brace_col = column + 1 + diag_utf8_strlen(str, (int)(p - str));
             p++;  // { をスキップ
             
             // } までの式を取得
@@ -2845,7 +3072,7 @@ static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int
             }
             
             if (brace_depth != 0) {
-                runtime_error(eval, line, 0, "文字列補間の '}' が閉じられていません");
+                runtime_error(eval, line, brace_col, "文字列補間の '}' が閉じられていません");
                 free(result);
                 return value_null();
             }

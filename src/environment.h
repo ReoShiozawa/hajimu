@@ -124,6 +124,16 @@ bool env_is_const(Environment *env, const char *name);
  */
 bool env_exists_local(Environment *env, const char *name);
 
+/**
+ * 近い名前の変数・関数を探す。
+ * 未定義識別子エラーで「もしかして」を出すために使う。
+ *
+ * @param env 環境
+ * @param name 探したい名前
+ * @return 近い名前。見つからなければ NULL
+ */
+const char *env_find_similar(Environment *env, const char *name);
+
 // =============================================================================
 // デバッグ
 // =============================================================================
