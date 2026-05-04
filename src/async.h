@@ -18,6 +18,7 @@
 // =============================================================================
 
 #define MAX_ASYNC_TASKS 4096
+#define ASYNC_TASK_INDEX_SIZE (MAX_ASYNC_TASKS * 2)
 #define MAX_SCHEDULED_TASKS 256
 #define MAX_CHANNELS 256
 
@@ -65,6 +66,13 @@ typedef struct {
     Value catch_fn;             // 失敗時コールバック
     int   chain_next_id;        // チェーン先タスクID（-1 = なし）
 } AsyncTask;
+
+typedef struct {
+    int task_id;
+    AsyncTask *task;
+    bool occupied;
+    bool deleted;
+} AsyncTaskIndexEntry;
 
 // =============================================================================
 // スレッドプール
@@ -159,6 +167,7 @@ typedef struct {
 typedef struct {
     // 非同期タスク管理
     AsyncTask tasks[MAX_ASYNC_TASKS];
+    AsyncTaskIndexEntry task_index[ASYNC_TASK_INDEX_SIZE];
     int next_task_id;
     pthread_mutex_t task_mutex;
     

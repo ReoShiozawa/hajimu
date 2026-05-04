@@ -70,12 +70,67 @@ static pthread_mutex_t g_ws_mutex = PTHREAD_MUTEX_INITIALIZER;
 // スレッドプール - 内部実装
 // =============================================================================
 
+static int task_index_for_id(int task_id) {
+    return ((unsigned int)task_id * 2654435761u) & (ASYNC_TASK_INDEX_SIZE - 1);
+}
+
+static void task_index_insert_locked(AsyncTask *task) {
+    int index = task_index_for_id(task->id);
+    int tombstone = -1;
+
+    for (int probe = 0; probe < ASYNC_TASK_INDEX_SIZE; probe++) {
+        AsyncTaskIndexEntry *entry = &g_runtime.task_index[index];
+        if (!entry->occupied) {
+            if (entry->deleted && tombstone < 0) tombstone = index;
+            if (!entry->deleted) {
+                AsyncTaskIndexEntry *target = tombstone >= 0 ? &g_runtime.task_index[tombstone] : entry;
+                target->task_id = task->id;
+                target->task = task;
+                target->occupied = true;
+                target->deleted = false;
+                return;
+            }
+        } else if (entry->task_id == task->id) {
+            entry->task = task;
+            return;
+        }
+        index = (index + 1) & (ASYNC_TASK_INDEX_SIZE - 1);
+    }
+
+    if (tombstone >= 0) {
+        AsyncTaskIndexEntry *target = &g_runtime.task_index[tombstone];
+        target->task_id = task->id;
+        target->task = task;
+        target->occupied = true;
+        target->deleted = false;
+    }
+}
+
+static void task_index_remove_locked(int task_id) {
+    int index = task_index_for_id(task_id);
+    for (int probe = 0; probe < ASYNC_TASK_INDEX_SIZE; probe++) {
+        AsyncTaskIndexEntry *entry = &g_runtime.task_index[index];
+        if (!entry->occupied && !entry->deleted) return;
+        if (entry->occupied && entry->task_id == task_id) {
+            entry->task = NULL;
+            entry->occupied = false;
+            entry->deleted = true;
+            return;
+        }
+        index = (index + 1) & (ASYNC_TASK_INDEX_SIZE - 1);
+    }
+}
+
 // タスクスロットを ID で検索する（task_mutex をロックした状態で呼ぶ）
 static AsyncTask *find_task_locked(int task_id) {
-    for (int i = 0; i < MAX_ASYNC_TASKS; i++) {
-        if (g_runtime.tasks[i].used && g_runtime.tasks[i].id == task_id) {
-            return &g_runtime.tasks[i];
+    int index = task_index_for_id(task_id);
+    for (int probe = 0; probe < ASYNC_TASK_INDEX_SIZE; probe++) {
+        AsyncTaskIndexEntry *entry = &g_runtime.task_index[index];
+        if (!entry->occupied && !entry->deleted) return NULL;
+        if (entry->occupied && entry->task_id == task_id) {
+            return (entry->task != NULL && entry->task->used) ? entry->task : NULL;
         }
+        index = (index + 1) & (ASYNC_TASK_INDEX_SIZE - 1);
     }
     return NULL;
 }
@@ -421,6 +476,7 @@ void async_runtime_cleanup(void) {
             if (task->catch_fn.type != VALUE_NULL) value_free(&task->catch_fn);
             pthread_mutex_destroy(&task->completion_mutex);
             pthread_cond_destroy(&task->completion_cond);
+            task_index_remove_locked(task->id);
             task->used = false;
         }
     }
@@ -582,6 +638,7 @@ Value builtin_async_run(int argc, Value *argv) {
     task->id = g_runtime.next_task_id++;
     task->status = TASK_PENDING;
     task->used = true;
+    task_index_insert_locked(task);
     task->function = value_copy(argv[0]);
     task->result = value_null();
     task->then_fn = value_null();
@@ -690,6 +747,7 @@ Value builtin_async_await(int argc, Value *argv) {
     if (task->catch_fn.type != VALUE_NULL) value_free(&task->catch_fn);
     pthread_mutex_destroy(&task->completion_mutex);
     pthread_cond_destroy(&task->completion_cond);
+    task_index_remove_locked(task->id);
     task->used = false;
     pthread_mutex_unlock(&g_runtime.task_mutex);
     
@@ -718,19 +776,18 @@ Value builtin_task_status(int argc, Value *argv) {
     int task_id = (int)argv[0].number;
     
     pthread_mutex_lock(&g_runtime.task_mutex);
-    for (int i = 0; i < MAX_ASYNC_TASKS; i++) {
-        if (g_runtime.tasks[i].used && g_runtime.tasks[i].id == task_id) {
-            const char *status;
-            switch (g_runtime.tasks[i].status) {
-                case TASK_PENDING:   status = "待機中"; break;
-                case TASK_RUNNING:   status = "実行中"; break;
-                case TASK_COMPLETED: status = "完了"; break;
-                case TASK_FAILED:    status = "失敗"; break;
-                default:             status = "不明"; break;
-            }
-            pthread_mutex_unlock(&g_runtime.task_mutex);
-            return value_string(status);
+    AsyncTask *task = find_task_locked(task_id);
+    if (task != NULL) {
+        const char *status;
+        switch (task->status) {
+            case TASK_PENDING:   status = "待機中"; break;
+            case TASK_RUNNING:   status = "実行中"; break;
+            case TASK_COMPLETED: status = "完了"; break;
+            case TASK_FAILED:    status = "失敗"; break;
+            default:             status = "不明"; break;
         }
+        pthread_mutex_unlock(&g_runtime.task_mutex);
+        return value_string(status);
     }
     pthread_mutex_unlock(&g_runtime.task_mutex);
     
@@ -832,6 +889,7 @@ Value builtin_then(int argc, Value *argv) {
     chain_task->id = g_runtime.next_task_id++;
     chain_task->status = TASK_PENDING;
     chain_task->used = true;
+    task_index_insert_locked(chain_task);
     chain_task->function = value_null();
     chain_task->result = value_null();
     chain_task->then_fn = value_null();
@@ -894,6 +952,7 @@ Value builtin_catch(int argc, Value *argv) {
         chain_task->id = g_runtime.next_task_id++;
         chain_task->status = TASK_PENDING;
         chain_task->used = true;
+        task_index_insert_locked(chain_task);
         chain_task->function = value_null();
         chain_task->result = value_null();
         chain_task->then_fn = value_null();
