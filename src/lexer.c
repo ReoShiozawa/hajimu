@@ -11,6 +11,8 @@
 #include <string.h>
 #include <ctype.h>
 
+#define NUMBER_LITERAL_STACK_SIZE 256
+
 // =============================================================================
 // キーワードテーブル
 // =============================================================================
@@ -467,6 +469,21 @@ static Token scan_identifier(Lexer *lexer) {
     return make_token(lexer, type);
 }
 
+static char *copy_token_text(Token token, char *stack_buffer, size_t stack_size, bool *heap_allocated) {
+    *heap_allocated = false;
+
+    char *buffer = stack_buffer;
+    if ((size_t)token.length + 1 > stack_size) {
+        buffer = malloc((size_t)token.length + 1);
+        if (buffer == NULL) return NULL;
+        *heap_allocated = true;
+    }
+
+    memcpy(buffer, token.start, (size_t)token.length);
+    buffer[token.length] = '\0';
+    return buffer;
+}
+
 // 数値をスキャン
 static Token scan_number(Lexer *lexer) {
     // 16進数リテラル: 0x or 0X
@@ -477,11 +494,12 @@ static Token scan_number(Lexer *lexer) {
             advance(lexer);
         }
         Token token = make_token(lexer, TOKEN_NUMBER);
-        char *temp = malloc(token.length + 1);
-        memcpy(temp, token.start, token.length);
-        temp[token.length] = '\0';
+        char stack_buffer[NUMBER_LITERAL_STACK_SIZE];
+        bool heap_allocated = false;
+        char *temp = copy_token_text(token, stack_buffer, sizeof(stack_buffer), &heap_allocated);
+        if (temp == NULL) return error_token(lexer, "数値リテラルの解析に失敗しました");
         token.value.number = (double)strtol(temp, NULL, 16);
-        free(temp);
+        if (heap_allocated) free(temp);
         return token;
     }
     
@@ -493,11 +511,12 @@ static Token scan_number(Lexer *lexer) {
             advance(lexer);
         }
         Token token = make_token(lexer, TOKEN_NUMBER);
-        char *temp = malloc(token.length + 1);
-        memcpy(temp, token.start, token.length);
-        temp[token.length] = '\0';
+        char stack_buffer[NUMBER_LITERAL_STACK_SIZE];
+        bool heap_allocated = false;
+        char *temp = copy_token_text(token, stack_buffer, sizeof(stack_buffer), &heap_allocated);
+        if (temp == NULL) return error_token(lexer, "数値リテラルの解析に失敗しました");
         token.value.number = (double)strtol(temp + 2, NULL, 2);  // skip "0b"
-        free(temp);
+        if (heap_allocated) free(temp);
         return token;
     }
     
@@ -528,11 +547,12 @@ static Token scan_number(Lexer *lexer) {
     Token token = make_token(lexer, TOKEN_NUMBER);
     
     // 数値を解析
-    char *temp = malloc(token.length + 1);
-    memcpy(temp, token.start, token.length);
-    temp[token.length] = '\0';
+    char stack_buffer[NUMBER_LITERAL_STACK_SIZE];
+    bool heap_allocated = false;
+    char *temp = copy_token_text(token, stack_buffer, sizeof(stack_buffer), &heap_allocated);
+    if (temp == NULL) return error_token(lexer, "数値リテラルの解析に失敗しました");
     token.value.number = strtod(temp, NULL);
-    free(temp);
+    if (heap_allocated) free(temp);
     
     return token;
 }
