@@ -14,6 +14,29 @@
 // 値の作成
 // =============================================================================
 
+static int utf8_count_chars(const char *s, int byte_length) {
+    if (s == NULL || byte_length <= 0) return 0;
+
+    int count = 0;
+    const char *p = s;
+    const char *end = s + byte_length;
+    while (p < end) {
+        unsigned char c = (unsigned char)*p;
+        if (c < 0x80) {
+            p++;
+        } else if (c < 0xE0) {
+            p += 2;
+        } else if (c < 0xF0) {
+            p += 3;
+        } else {
+            p += 4;
+        }
+        count++;
+    }
+
+    return count;
+}
+
 Value value_null(void) {
     Value v;
     v.type = VALUE_NULL;
@@ -58,6 +81,7 @@ Value value_string_n(const char *s, int length) {
     v.ref_count = 1;
     
     v.string.byte_length = length;
+    v.string.char_length = utf8_count_chars(s, length);
     v.string.capacity = length + 1;
     v.string.data = malloc(v.string.capacity);
     
@@ -657,6 +681,7 @@ Value string_concat(Value a, Value b) {
     result.is_const = false;
     result.ref_count = 1;
     result.string.byte_length = new_length;
+    result.string.char_length = a.string.char_length + b.string.char_length;
     result.string.capacity = new_length + 1;
     result.string.data = malloc(result.string.capacity);
     
@@ -667,31 +692,11 @@ Value string_concat(Value a, Value b) {
     return result;
 }
 
-// UTF-8文字列の文字数をカウント
 int string_length(Value *s) {
     if (s == NULL || s->type != VALUE_STRING) {
         return 0;
     }
-    
-    int count = 0;
-    const char *p = s->string.data;
-    const char *end = p + s->string.byte_length;
-    
-    while (p < end) {
-        unsigned char c = (unsigned char)*p;
-        if (c < 0x80) {
-            p++;
-        } else if (c < 0xE0) {
-            p += 2;
-        } else if (c < 0xF0) {
-            p += 3;
-        } else {
-            p += 4;
-        }
-        count++;
-    }
-    
-    return count;
+    return s->string.char_length;
 }
 
 Value string_substring(Value *s, int start, int end) {

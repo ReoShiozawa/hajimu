@@ -67,9 +67,10 @@ struct Value {
         
         // 文字列
         struct {
-            char *data;
-            int byte_length;
-            int capacity;
+            char *data;       // UTF-8 バイト列
+            int byte_length;   // バイト数（メモリ管理・I/O 用）
+            int char_length;   // Unicode 文字数（長さ()・添字用）
+            int capacity;      // バッファ容量（バイト）
         } string;
         
         // 配列

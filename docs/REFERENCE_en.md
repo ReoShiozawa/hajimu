@@ -1479,6 +1479,18 @@ integer-like numeric values.
 
 ---
 
+## UTF-8 String Length
+
+String values store UTF-8 byte length and character length separately.
+`長さ(string)` returns the number of characters, not the number of bytes.
+
+```
+表示(長さ("あいう"))  // 3
+表示("あいう"[0])     // "あ"
+```
+
+---
+
 ## Module Namespaces
 
 Import a module under an alias to use it as a namespace.
