@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define AST_INITIAL_CAPACITY 8
+
 // =============================================================================
 // ノード種別名
 // =============================================================================
@@ -228,8 +230,10 @@ ASTNode *node_class_def(const char *name, const char *parent_name, int line, int
     node->class_def.parent_name = parent_name ? strdup(parent_name) : NULL;
     node->class_def.methods = NULL;
     node->class_def.method_count = 0;
+    node->class_def.method_capacity = 0;
     node->class_def.static_methods = NULL;
     node->class_def.static_method_count = 0;
+    node->class_def.static_method_capacity = 0;
     node->class_def.init_method = NULL;
     return node;
 }
@@ -239,6 +243,7 @@ ASTNode *node_method_def(const char *name, int line, int column) {
     node->method.name = strdup(name);
     node->method.params = NULL;
     node->method.param_count = 0;
+    node->method.param_capacity = 0;
     node->method.return_type = VALUE_NULL;
     node->method.has_return_type = false;
     node->method.body = NULL;
@@ -247,7 +252,14 @@ ASTNode *node_method_def(const char *name, int line, int column) {
 
 void method_add_param(ASTNode *method, const char *name, ValueType type, bool has_type) {
     int count = method->method.param_count;
-    method->method.params = realloc(method->method.params, (count + 1) * sizeof(Parameter));
+    if (count >= method->method.param_capacity) {
+        int new_capacity = method->method.param_capacity == 0
+            ? AST_INITIAL_CAPACITY
+            : method->method.param_capacity * 2;
+        method->method.params = realloc(method->method.params,
+                                        new_capacity * sizeof(Parameter));
+        method->method.param_capacity = new_capacity;
+    }
     method->method.params[count].name = strdup(name);
     method->method.params[count].type = type;
     method->method.params[count].has_type = has_type;
@@ -256,16 +268,28 @@ void method_add_param(ASTNode *method, const char *name, ValueType type, bool ha
 
 void class_add_method(ASTNode *class_node, ASTNode *method) {
     int count = class_node->class_def.method_count;
-    class_node->class_def.methods = realloc(class_node->class_def.methods, 
-                                            (count + 1) * sizeof(ASTNode*));
+    if (count >= class_node->class_def.method_capacity) {
+        int new_capacity = class_node->class_def.method_capacity == 0
+            ? AST_INITIAL_CAPACITY
+            : class_node->class_def.method_capacity * 2;
+        class_node->class_def.methods = realloc(class_node->class_def.methods,
+                                                new_capacity * sizeof(ASTNode*));
+        class_node->class_def.method_capacity = new_capacity;
+    }
     class_node->class_def.methods[count] = method;
     class_node->class_def.method_count++;
 }
 
 void class_add_static_method(ASTNode *class_node, ASTNode *method) {
     int count = class_node->class_def.static_method_count;
-    class_node->class_def.static_methods = realloc(class_node->class_def.static_methods, 
-                                                    (count + 1) * sizeof(ASTNode*));
+    if (count >= class_node->class_def.static_method_capacity) {
+        int new_capacity = class_node->class_def.static_method_capacity == 0
+            ? AST_INITIAL_CAPACITY
+            : class_node->class_def.static_method_capacity * 2;
+        class_node->class_def.static_methods = realloc(class_node->class_def.static_methods,
+                                                       new_capacity * sizeof(ASTNode*));
+        class_node->class_def.static_method_capacity = new_capacity;
+    }
     class_node->class_def.static_methods[count] = method;
     class_node->class_def.static_method_count++;
 }
@@ -311,16 +335,23 @@ ASTNode *node_switch(ASTNode *target, int line, int column) {
     node->switch_stmt.case_values = NULL;
     node->switch_stmt.case_bodies = NULL;
     node->switch_stmt.case_count = 0;
+    node->switch_stmt.case_capacity = 0;
     node->switch_stmt.default_body = NULL;
     return node;
 }
 
 void switch_add_case(ASTNode *switch_node, ASTNode *value, ASTNode *body) {
     int count = switch_node->switch_stmt.case_count;
-    switch_node->switch_stmt.case_values = realloc(
-        switch_node->switch_stmt.case_values, sizeof(ASTNode *) * (count + 1));
-    switch_node->switch_stmt.case_bodies = realloc(
-        switch_node->switch_stmt.case_bodies, sizeof(ASTNode *) * (count + 1));
+    if (count >= switch_node->switch_stmt.case_capacity) {
+        int new_capacity = switch_node->switch_stmt.case_capacity == 0
+            ? AST_INITIAL_CAPACITY
+            : switch_node->switch_stmt.case_capacity * 2;
+        switch_node->switch_stmt.case_values = realloc(
+            switch_node->switch_stmt.case_values, sizeof(ASTNode *) * new_capacity);
+        switch_node->switch_stmt.case_bodies = realloc(
+            switch_node->switch_stmt.case_bodies, sizeof(ASTNode *) * new_capacity);
+        switch_node->switch_stmt.case_capacity = new_capacity;
+    }
     switch_node->switch_stmt.case_values[count] = value;
     switch_node->switch_stmt.case_bodies[count] = body;
     switch_node->switch_stmt.case_count++;
@@ -368,7 +399,7 @@ void block_add_statement(ASTNode *block, ASTNode *stmt) {
     
     // 容量が足りなければ拡張
     if (block->block.count >= block->block.capacity) {
-        int new_capacity = block->block.capacity == 0 ? 8 : block->block.capacity * 2;
+        int new_capacity = block->block.capacity == 0 ? AST_INITIAL_CAPACITY : block->block.capacity * 2;
         block->block.statements = realloc(
             block->block.statements,
             sizeof(ASTNode *) * new_capacity

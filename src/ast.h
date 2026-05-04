@@ -220,8 +220,10 @@ struct ASTNode {
             char *parent_name;      // 親クラス名（NULLなら継承なし）
             ASTNode **methods;      // メソッドの配列
             int method_count;       // メソッド数
+            int method_capacity;    // メソッド配列の容量
             ASTNode **static_methods;  // 静的メソッドの配列
             int static_method_count;   // 静的メソッド数
+            int static_method_capacity; // 静的メソッド配列の容量
             ASTNode *init_method;   // 初期化メソッド（NULLの場合あり）
         } class_def;
         
@@ -230,6 +232,7 @@ struct ASTNode {
             char *name;             // メソッド名
             Parameter *params;      // パラメータ配列
             int param_count;        // パラメータ数
+            int param_capacity;     // パラメータ配列の容量
             ValueType return_type;  // 戻り値の型
             bool has_return_type;   // 戻り値の型注釈があるか
             ASTNode *body;          // メソッド本体（ブロック）
@@ -268,6 +271,7 @@ struct ASTNode {
             ASTNode **case_values;  // 場合の値配列
             ASTNode **case_bodies;  // 場合の本体配列
             int case_count;         // 場合の数
+            int case_capacity;      // 場合配列の容量
             ASTNode *default_body;  // 既定の本体（NULLの場合あり）
         } switch_stmt;
         
