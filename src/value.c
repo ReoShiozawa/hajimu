@@ -37,6 +37,21 @@ static int utf8_count_chars(const char *s, int byte_length) {
     return count;
 }
 
+static void generator_state_release(GeneratorState **state_ref) {
+    if (state_ref == NULL || *state_ref == NULL) return;
+
+    GeneratorState *state = *state_ref;
+    state->ref_count--;
+    if (state->ref_count <= 0) {
+        for (int i = 0; i < state->length; i++) {
+            value_free(&state->values[i]);
+        }
+        free(state->values);
+        free(state);
+    }
+    *state_ref = NULL;
+}
+
 Value value_null(void) {
     Value v;
     v.type = VALUE_NULL;
@@ -419,17 +434,7 @@ void value_free(Value *v) {
             break;
         
         case VALUE_GENERATOR:
-            if (v->generator.state != NULL) {
-                v->generator.state->ref_count--;
-                if (v->generator.state->ref_count <= 0) {
-                    for (int i = 0; i < v->generator.state->length; i++) {
-                        value_free(&v->generator.state->values[i]);
-                    }
-                    free(v->generator.state->values);
-                    free(v->generator.state);
-                }
-                v->generator.state = NULL;
-            }
+            generator_state_release(&v->generator.state);
             break;
         
         case VALUE_FUNCTION:

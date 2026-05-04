@@ -1208,6 +1208,16 @@ Define with `生成関数`; yield values with `譲渡`.
 | `完了(gen)` | Check if exhausted |
 | `全値(gen)` | Get all remaining values as an array |
 
+Assigning a generator to another variable shares the same state, including the
+current read position.
+
+```
+変数 g1 = 数列()
+変数 g2 = g1
+表示(次(g1))  // 1
+表示(次(g2))  // 2
+```
+
 ### Fibonacci Example
 
 ```

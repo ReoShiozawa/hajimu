@@ -16,13 +16,17 @@ struct ASTNode;
 struct Environment;
 
 // ジェネレータの共有状態
+//
+// ジェネレータ Value はコピー時にこの state を共有します。
+// そのため、生成済みの値列・読み取り位置・完了状態の所有権は
+// Value.ref_count ではなく GeneratorState.ref_count が管理します。
 typedef struct GeneratorState {
     struct Value *values;       // yield された値の配列
     int length;                 // 値の数
     int capacity;               // 容量
     int index;                  // 現在の読み取り位置
     bool done;                  // 完了フラグ
-    int ref_count;              // 参照カウント（共有用）
+    int ref_count;              // state を共有するジェネレータ Value 数
 } GeneratorState;
 
 // =============================================================================
@@ -220,11 +224,21 @@ Value value_dict_with_capacity(int capacity);
 
 /**
  * 値をコピー
+ *
+ * 文字列・配列・辞書・インスタンスは独立した値としてコピーします。
+ * ジェネレータは state を共有し、GeneratorState.ref_count を増やします。
  */
 Value value_copy(Value v);
 
 /**
- * 値を解放
+ * 値を即時解放します。
+ *
+ * ref_count を確認せず、呼び出し元が所有している 1 つの Value ハンドルを
+ * 破棄します。通常の参照カウント管理が必要な場合は value_release() を
+ * 使用してください。
+ *
+ * ジェネレータの場合は共有 state の参照数だけを減らし、最後のハンドルで
+ * state 本体を解放します。
  */
 void value_free(Value *v);
 
@@ -234,7 +248,9 @@ void value_free(Value *v);
 void value_retain(Value *v);
 
 /**
- * 参照カウントを減少（0になったら解放）
+ * 参照カウントを減少し、0 になったら value_free() で解放します。
+ *
+ * value_retain() した Value はこちらで対応する release を行います。
  */
 void value_release(Value *v);
 
