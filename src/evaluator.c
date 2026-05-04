@@ -3824,24 +3824,112 @@ static Value builtin_some(int argc, Value *argv) {
     return value_bool(false);
 }
 
+typedef struct {
+    const Value *value;
+    bool occupied;
+} UniqueEntry;
+
+static uint32_t unique_hash_bytes(const char *bytes, int length) {
+    uint32_t hash = 2166136261u;
+    for (int i = 0; i < length; i++) {
+        hash ^= (unsigned char)bytes[i];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+static uint32_t unique_mix_hash(uint32_t hash, uint32_t value) {
+    hash ^= value;
+    hash *= 16777619u;
+    return hash;
+}
+
+static uint32_t unique_hash_value(Value value) {
+    uint32_t hash = unique_mix_hash(2166136261u, (uint32_t)value.type);
+
+    switch (value.type) {
+        case VALUE_NULL:
+            return hash;
+        case VALUE_NUMBER: {
+            double normalized = value.number == 0.0 ? 0.0 : value.number;
+            uint64_t bits = 0;
+            memcpy(&bits, &normalized, sizeof(bits));
+            hash = unique_mix_hash(hash, (uint32_t)(bits & 0xffffffffu));
+            return unique_mix_hash(hash, (uint32_t)(bits >> 32));
+        }
+        case VALUE_BOOL:
+            return unique_mix_hash(hash, value.boolean ? 1u : 0u);
+        case VALUE_STRING:
+            return unique_mix_hash(hash, unique_hash_bytes(value.string.data, value.string.byte_length));
+        case VALUE_ARRAY:
+            hash = unique_mix_hash(hash, (uint32_t)value.array.length);
+            for (int i = 0; i < value.array.length; i++) {
+                hash = unique_mix_hash(hash, unique_hash_value(value.array.elements[i]));
+            }
+            return hash;
+        case VALUE_DICT:
+            hash = unique_mix_hash(hash, (uint32_t)value.dict.length);
+            for (int i = 0; i < value.dict.length; i++) {
+                hash = unique_mix_hash(hash, unique_hash_bytes(value.dict.keys[i], (int)strlen(value.dict.keys[i])));
+                hash = unique_mix_hash(hash, unique_hash_value(value.dict.values[i]));
+            }
+            return hash;
+        case VALUE_FUNCTION:
+            return unique_mix_hash(hash, (uint32_t)(uintptr_t)value.function.definition);
+        case VALUE_BUILTIN:
+            return unique_mix_hash(hash, (uint32_t)(uintptr_t)value.builtin.fn);
+        case VALUE_CLASS:
+            return unique_mix_hash(hash, (uint32_t)(uintptr_t)value.class_value.definition);
+        case VALUE_INSTANCE:
+            return unique_mix_hash(hash, (uint32_t)(uintptr_t)value.instance.class_ref);
+        case VALUE_GENERATOR:
+            return unique_mix_hash(hash, (uint32_t)(uintptr_t)value.generator.state);
+    }
+
+    return hash;
+}
+
+static int unique_table_capacity(int length) {
+    int capacity = 16;
+    while (capacity < length * 2) {
+        capacity *= 2;
+    }
+    return capacity;
+}
+
+static bool unique_seen_or_add(UniqueEntry *entries, int capacity, const Value *value) {
+    uint32_t index = unique_hash_value(*value) & (uint32_t)(capacity - 1);
+    for (int probe = 0; probe < capacity; probe++) {
+        UniqueEntry *entry = &entries[index];
+        if (!entry->occupied) {
+            entry->value = value;
+            entry->occupied = true;
+            return false;
+        }
+        if (value_equals(*entry->value, *value)) {
+            return true;
+        }
+        index = (index + 1) & (uint32_t)(capacity - 1);
+    }
+    return false;
+}
+
 // 一意: 配列の重複を除去
 static Value builtin_unique(int argc, Value *argv) {
     (void)argc;
     if (argv[0].type != VALUE_ARRAY) return value_array();
     
     Value result = value_array();
+    int capacity = unique_table_capacity(argv[0].array.length);
+    UniqueEntry *entries = calloc((size_t)capacity, sizeof(UniqueEntry));
+    if (entries == NULL) return result;
+
     for (int i = 0; i < argv[0].array.length; i++) {
-        bool found = false;
-        for (int j = 0; j < result.array.length; j++) {
-            if (value_compare(argv[0].array.elements[i], result.array.elements[j]) == 0) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
+        if (!unique_seen_or_add(entries, capacity, &argv[0].array.elements[i])) {
             array_push(&result, value_copy(argv[0].array.elements[i]));
         }
     }
+    free(entries);
     
     return result;
 }
