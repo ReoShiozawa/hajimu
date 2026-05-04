@@ -12,6 +12,8 @@
 #include <ctype.h>
 #include <math.h>
 
+#define JSON_STRING_INITIAL_CAPACITY 64
+
 /* ── プラットフォーム依存ヘッダー ─────────────────────────── */
 #ifdef _WIN32
 #  include "win_compat.h"   /* Winsock2 + usleep + gettimeofday + close→closesocket */
@@ -74,7 +76,7 @@ static Value json_parse_string(JsonParser *p) {
     if (json_advance(p) != '"') return value_null();
     
     // 文字列バッファ
-    int capacity = 64;
+    int capacity = JSON_STRING_INITIAL_CAPACITY;
     int length = 0;
     char *buffer = malloc(capacity);
     

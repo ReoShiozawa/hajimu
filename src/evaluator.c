@@ -19,6 +19,11 @@
 #include <time.h>
 #include <errno.h>
 
+#define EVALUATOR_PATH_BUFFER_SIZE 1024
+#define EVALUATOR_LONG_PATH_BUFFER_SIZE 2048
+#define EVALUATOR_INITIAL_IMPORT_CAPACITY 8
+#define STRING_INTERPOLATION_INITIAL_CAPACITY 256
+
 /* ── プラットフォーム依存ヘッダー ───────────────────────────── */
 #ifdef _WIN32
 #  include "win_regex.h"   /* POSIX regex エミュレーション */
@@ -2128,7 +2133,9 @@ static bool is_already_imported(Evaluator *eval, const char *path) {
  */
 static void add_imported_path(Evaluator *eval, const char *path) {
     if (eval->imported_path_count >= eval->imported_path_capacity) {
-        eval->imported_path_capacity = eval->imported_path_capacity == 0 ? 8 : eval->imported_path_capacity * 2;
+        eval->imported_path_capacity = eval->imported_path_capacity == 0
+            ? EVALUATOR_INITIAL_IMPORT_CAPACITY
+            : eval->imported_path_capacity * 2;
         eval->imported_paths = realloc(eval->imported_paths,
                                        eval->imported_path_capacity * sizeof(char *));
     }
@@ -2344,7 +2351,7 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
     //    HJPB マジックがあればバイトコード、なければ dlopen (後方互換)
     // ============================================================
     if (plugin_is_hjp(module_path)) {
-        char resolved[1024];
+        char resolved[EVALUATOR_PATH_BUFFER_SIZE];
         if (plugin_resolve_hjp(module_path, eval->current_file,
                                resolved, sizeof(resolved))) {
             return dispatch_hjp_import(eval, node, resolved);
@@ -2354,7 +2361,7 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
         return value_null();
     }
     
-    char resolved_path[2048];
+    char resolved_path[EVALUATOR_LONG_PATH_BUFFER_SIZE];
     bool found = false;
     
     // ============================================================
@@ -2370,11 +2377,11 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
     
     if (is_file_path) {
         // --- ファイルパスモード ---
-        char try_path[2048];
+        char try_path[EVALUATOR_LONG_PATH_BUFFER_SIZE];
         
         // .jp 拡張子がなければ追加
         const char *effective = module_path;
-        char with_ext[1024];
+        char with_ext[EVALUATOR_PATH_BUFFER_SIZE];
         if (strstr(module_path, ".jp") == NULL) {
             snprintf(with_ext, sizeof(with_ext), "%s.jp", module_path);
             effective = with_ext;
@@ -2382,7 +2389,7 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
         
         // 1. 呼び出し元ファイルからの相対パス
         if (!found && eval->current_file) {
-            char dir[1024];
+            char dir[EVALUATOR_PATH_BUFFER_SIZE];
             snprintf(dir, sizeof(dir), "%s", eval->current_file);
             char *sep = strrchr(dir, '/');
             if (sep) {
@@ -2423,7 +2430,7 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
     
     // 4. .hjp プラグインとして検索（拡張子なしインポート対応）
     if (!found) {
-        char hjp_resolved[1024];
+        char hjp_resolved[EVALUATOR_PATH_BUFFER_SIZE];
         if (plugin_resolve_hjp(module_path, eval->current_file,
                                hjp_resolved, sizeof(hjp_resolved))) {
             return dispatch_hjp_import(eval, node, hjp_resolved);
@@ -2440,7 +2447,7 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
     }
     
     // パスを正規化（重複防止・循環検出用）
-    char canonical_path[1024];
+    char canonical_path[EVALUATOR_PATH_BUFFER_SIZE];
     normalize_path(resolved_path, canonical_path, sizeof(canonical_path));
     
     // 重複インポート防止: 既にインポート済みなら何もしない
@@ -2829,7 +2836,7 @@ static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int
         return value_string(str);
     }
     
-    int capacity = 256;
+    int capacity = STRING_INTERPOLATION_INITIAL_CAPACITY;
     int length = 0;
     char *result = malloc(capacity);
     result[0] = '\0';

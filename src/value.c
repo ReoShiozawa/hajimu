@@ -10,6 +10,8 @@
 #include <string.h>
 #include <math.h>
 
+#define VALUE_INITIAL_CAPACITY 8
+
 // =============================================================================
 // 値の作成
 // =============================================================================
@@ -109,7 +111,7 @@ Value value_string_n(const char *s, int length) {
 }
 
 Value value_array(void) {
-    return value_array_with_capacity(8);
+    return value_array_with_capacity(VALUE_INITIAL_CAPACITY);
 }
 
 Value value_array_with_capacity(int capacity) {
@@ -120,7 +122,7 @@ Value value_array_with_capacity(int capacity) {
     v.ref_count = 1;
     
     v.array.length = 0;
-    v.array.capacity = capacity > 0 ? capacity : 8;
+    v.array.capacity = capacity > 0 ? capacity : VALUE_INITIAL_CAPACITY;
     v.array.elements = malloc(sizeof(Value) * v.array.capacity);
     
     return v;
@@ -206,7 +208,7 @@ void generator_add_value(Value *gen, Value val) {
     if (gen->type != VALUE_GENERATOR || gen->generator.state == NULL) return;
     GeneratorState *s = gen->generator.state;
     if (s->length >= s->capacity) {
-        int new_cap = s->capacity == 0 ? 8 : s->capacity * 2;
+        int new_cap = s->capacity == 0 ? VALUE_INITIAL_CAPACITY : s->capacity * 2;
         s->values = realloc(s->values, sizeof(Value) * new_cap);
         s->capacity = new_cap;
     }
@@ -250,7 +252,7 @@ Value *instance_get_field(Value *instance, const char *name) {
 }
 
 Value value_dict(void) {
-    return value_dict_with_capacity(8);
+    return value_dict_with_capacity(VALUE_INITIAL_CAPACITY);
 }
 
 Value value_dict_with_capacity(int capacity) {
@@ -261,7 +263,7 @@ Value value_dict_with_capacity(int capacity) {
     v.ref_count = 1;
     
     v.dict.length = 0;
-    v.dict.capacity = capacity > 0 ? capacity : 8;
+    v.dict.capacity = capacity > 0 ? capacity : VALUE_INITIAL_CAPACITY;
     v.dict.keys = malloc(sizeof(char *) * v.dict.capacity);
     v.dict.values = malloc(sizeof(Value) * v.dict.capacity);
     
