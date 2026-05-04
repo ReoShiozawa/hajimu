@@ -39,12 +39,10 @@
 // =============================================================================
 
 static AsyncRuntime g_runtime;
-extern Evaluator *g_eval_for_async;  // evaluator.c で公開する
 
-// 非同期タスク実行用の評価器をスレッドセーフに取得するためのグローバル
+// 非同期タスク実行用の評価器を取得
 static Evaluator *get_async_evaluator(void) {
-    extern Evaluator *g_eval_for_async;
-    return g_eval_for_async;
+    return evaluator_current();
 }
 
 // =============================================================================

@@ -33,9 +33,6 @@
 // グローバルevaluatorポインタ（高階関数・toStringプロトコル用）
 static Evaluator *g_eval = NULL;
 
-// 非同期モジュール用のグローバル評価器ポインタ
-Evaluator *g_eval_for_async = NULL;
-
 // グローバルGCインスタンス
 static GC g_gc_state;
 GC *g_gc = &g_gc_state;
@@ -409,10 +406,9 @@ Evaluator *evaluator_new(void) {
 void evaluator_free(Evaluator *eval) {
     if (eval == NULL) return;
     
-    // 非同期ランタイムをクリーンアップ
-    if (eval == g_eval_for_async) {
+    if (eval == g_eval) {
         async_runtime_cleanup();
-        g_eval_for_async = NULL;
+        g_eval = NULL;
     }
     
     // インポートされたモジュールを解放
@@ -435,6 +431,10 @@ void evaluator_free(Evaluator *eval) {
     env_release(eval->global);
     gc_shutdown(g_gc);
     free(eval);
+}
+
+Evaluator *evaluator_current(void) {
+    return g_eval;
 }
 
 // =============================================================================
@@ -991,7 +991,6 @@ Value evaluator_run(Evaluator *eval, ASTNode *program) {
     }
     
     g_eval = eval;
-    g_eval_for_async = eval;
     
     Value result = value_null();
     

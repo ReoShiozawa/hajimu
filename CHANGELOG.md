@@ -50,6 +50,12 @@
 - 同型の `env_define(... value_builtin(...))` 呼び出しを登録ループ化
 - 数学定数とプラットフォーム定数は値生成が必要なため個別登録として維持
 
+### 🐛 Issue #14
+
+- `g_eval_for_async` を廃止し、実行中 evaluator を `evaluator_current()` に一本化
+- 非同期ランタイムの cleanup 判定を単一のグローバル evaluator ライフサイクルに統一
+- async モジュールから evaluator.c の内部グローバル変数へ直接依存しないよう整理
+
 ## [v1.3.3] - 2026-05-04
 
 ### 🤝 共同開発 PR 反映
