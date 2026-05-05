@@ -50,6 +50,9 @@ cd hajimu
 # ビルド
 make
 
+# WebAssembly版を jp-edu/public に出力
+EM_CACHE=/private/tmp/emscripten-cache make wasm
+
 # インストール（オプション）
 sudo make install
 ```

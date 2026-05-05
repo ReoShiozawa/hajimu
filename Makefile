@@ -31,6 +31,21 @@ SOURCES = $(SRC_DIR)/main.c \
           $(SRC_DIR)/plugin.c \
           $(SRC_DIR)/bytecode.c
 
+WASM_SOURCES = $(SRC_DIR)/wasm_api.c \
+          $(SRC_DIR)/lexer.c \
+          $(SRC_DIR)/ast.c \
+          $(SRC_DIR)/parser.c \
+          $(SRC_DIR)/value.c \
+          $(SRC_DIR)/environment.c \
+          $(SRC_DIR)/gc.c \
+          $(SRC_DIR)/evaluator.c \
+          $(SRC_DIR)/diag.c \
+          $(SRC_DIR)/http_wasm.c \
+          $(SRC_DIR)/async.c \
+          $(SRC_DIR)/package.c \
+          $(SRC_DIR)/plugin.c \
+          $(SRC_DIR)/bytecode.c
+
 # オブジェクトファイル
 OBJECTS = $(SOURCES:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 
@@ -195,6 +210,38 @@ clean-windows:
 	rm -rf $(WIN_BUILD) $(WIN_DIST)
 	@echo "Windows ビルドをクリーンアップ完了"
 
+# =============================================================================
+# WebAssembly ビルド (jp-edu 連携用)
+# =============================================================================
+
+EMCC ?= emcc
+WASM_OUT_DIR ?= ../jp-edu/public
+WASM_TARGET_JS = $(WASM_OUT_DIR)/hajimu_wasm.js
+WASM_TARGET_WASM = $(WASM_OUT_DIR)/hajimu_wasm.wasm
+WASM_CFLAGS = -Wall -Wextra -std=gnu11 -O3 -DHAJIMU_WASM=1 -pthread
+WASM_LDFLAGS = -lm -pthread \
+	-sMODULARIZE=1 \
+	-sEXPORT_ES6=1 \
+	-sEXPORT_NAME=createHajimuRuntimeModule \
+	-sENVIRONMENT=web \
+	-sALLOW_MEMORY_GROWTH=1 \
+	-sEXIT_RUNTIME=0 \
+	-sEXPORTED_FUNCTIONS='["_hajimu_run_source","_hajimu_version","_malloc","_free"]' \
+	-sEXPORTED_RUNTIME_METHODS='["ccall","UTF8ToString"]'
+
+wasm: $(WASM_OUT_DIR) $(WASM_TARGET_JS)
+	@echo "WebAssembly ビルド完了: $(WASM_TARGET_JS) $(WASM_TARGET_WASM)"
+
+$(WASM_OUT_DIR):
+	mkdir -p $(WASM_OUT_DIR)
+
+$(WASM_TARGET_JS): $(WASM_SOURCES)
+	$(EMCC) $(WASM_CFLAGS) $(WASM_SOURCES) -o $@ $(WASM_LDFLAGS)
+
+clean-wasm:
+	rm -f $(WASM_TARGET_JS) $(WASM_TARGET_WASM)
+	@echo "WebAssembly ビルドをクリーンアップ完了"
+
 # インストール先
 PREFIX      ?= /usr/local
 BIN_DIR      = $(PREFIX)/bin
@@ -217,4 +264,4 @@ uninstall:
 	@echo "アンインストール完了"
 
 .PHONY: all run hello factorial fibonacci test clean debug release rebuild help \
-        install uninstall windows windows-installer clean-windows
+        install uninstall windows windows-installer clean-windows wasm clean-wasm
