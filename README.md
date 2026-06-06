@@ -118,6 +118,7 @@ hajimu hello.jp
 - **[チュートリアル](docs/TUTORIAL.md)** - ステップバイステップガイド
 - **[コード例](examples/)** - 実践的なサンプルコード
 - **[ロードマップ](docs/ROADMAP.md)** - 開発計画
+- **[英語構文対応ロードマップ](docs/ENGLISH_SYNTAX_ROADMAP.md)** - はじむを英語でも書けるようにするための設計書兼ロードマップ
 
 ### 🇺🇸 English Documentation
 
