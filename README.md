@@ -1,314 +1,321 @@
-# はじむ (Hajimu)
+# はじむ
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![GitHub release](https://img.shields.io/github/release/ReoShiozawa/hajimu.svg)](https://github.com/ReoShiozawa/hajimu/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/ReoShiozawa/hajimu.svg)](https://github.com/ReoShiozawa/hajimu/releases)
 [![GitHub stars](https://img.shields.io/github/stars/ReoShiozawa/hajimu.svg)](https://github.com/ReoShiozawa/hajimu/stargazers)
 
-> 🇺🇸 **English README & documentation:** [README_en.md](README_en.md) · [Tutorial](docs/TUTORIAL_en.md) · [Reference](docs/REFERENCE_en.md) · [Plugin Dev Guide](docs/PLUGIN_DEVELOPMENT.md) · [Roadmap](docs/ROADMAP_en.md)
+> English README: [README_en.md](README_en.md)
 
-**日本語で書く、日本語で考える。英語でもつなげる。** プログラミング言語
+**日本語で書き、日本語で考え、英語圏のプログラミングにも橋をかける言語。**
 
-はじむは、日本語のキーワードと自然な文法を中心にしたプログラミング言語です。現在は `function`、`if`、`for`、`print` などの英語 alias も受け付け、日本語で理解しながら英語圏のプログラミング言語へ橋渡しできる実用的な言語を目指しています。
+はじむは、日本語を第一の構文として扱うプログラミング言語です。
+単に変数名やコメントを日本語にするのではなく、`関数`、`もし`、`戻す`、`表示` などのキーワードを中心に、日本語でプログラムを組み立てられることを目指しています。
 
-## ✨ 特徴
+同時に、現在のはじむは `function`、`var`、`if`、`for`、`return`、`class`、`new`、`print`、`len`、`http_get`、`async_run` などの英語 alias も受け付けます。日本語で理解した概念を、英語圏の一般的なプログラミング表現へ少しずつ接続できるようにするためです。
 
-- 🇯🇵 **日本語中心**: 日本語キーワードと自然な語順でコードが書ける
-- 🌐 **英語 alias 対応**: `function`、`if`、`for`、`print` などでも書ける
-- 🧭 **複数ソース拡張子**: `.jp` に加えて `.haj` / `.hajimu` も読み込み可能
-- 📖 **直感的な文法**: 日本語構文と英語構文を段階的に行き来できる
-- ⚡ **高速**: C言語で実装された高速なインタープリタ
-- 🔧 **実用的**: 143個の組み込み関数、HTTP通信、非同期処理対応
-- 📦 **パッケージ管理**: 内蔵パッケージマネージャで外部パッケージに対応
-- 🔌 **C拡張プラグイン**: 統一 `.hjp` 形式でクロスプラットフォーム対応、C/C++/Rust等で開発可能
-- 📦 **HJPBバイトコード**: `.jp/.haj/.hajimu` から `.hjp` を構築し、直接実行可能
-- 🧭 **親切なエラー表示**: 原因・直し方・例・「もしかして」候補を表示
-- 🎓 **学びやすい**: プログラミング初心者でも理解しやすい設計
-- 🚀 **モダン**: ラムダ式、リスト内包表記、async/awaitなど
+```hajimu
+関数 挨拶(名前):
+    表示("こんにちは、" + 名前 + "さん")
+終わり
 
-## 📦 インストール
+挨拶("はじむ")
+```
 
-### Homebrew（macOS/Linux）
+英語 alias でも書けます。
+
+```hajimu
+function add(a is number, b is number) is number:
+    return a + b
+end
+
+var numbers = [1, 2, 3]
+append(numbers, 4)
+
+var total = 0
+for value in numbers:
+    total += value
+end
+
+print("total = " + to_string(total))
+```
+
+## このプロジェクトが目指すもの
+
+はじむは、次のような問いに向き合うための OSS です。
+
+- 日本語を第一言語として、読み書きしやすいプログラミング言語を作れるか
+- 初学者が「構文の英語」でつまずく前に、計算・条件・繰り返し・抽象化を学べるか
+- 日本語構文と英語構文を同じ AST / 同じ実行系へ自然に接続できるか
+- 親切なエラー表示によって、学習とデバッグの体験をどれだけ良くできるか
+- 小さな C 実装の言語処理系として、共同開発しやすい形に育てられるか
+
+まだ若い言語ですが、言語設計、教育、エディタ拡張、ランタイム実装、パッケージ配布の実験台として育てています。
+
+## 特徴
+
+- **日本語中心構文**: 日本語のキーワードと表現でコードを書けます
+- **英語 alias**: `function` / `if` / `for` / `print` などでも書けます
+- **複数ソース拡張子**: `.jp`、`.haj`、`.hajimu` をサポート
+- **C 実装**: 小さく読める AST インタープリタ
+- **UTF-8 対応**: 日本語文字列の長さ・添字処理を意識した実装
+- **親切な診断**: 原因、直し方、例、「もしかして」候補を表示
+- **実用的な組み込み機能**: JSON、HTTP、ファイル、正規表現、Base64、パス操作など
+- **非同期/並列補助**: async task、await、parallel map/run、channel、mutex、semaphore、atomic
+- **オブジェクト指向**: class、constructor、self、継承、静的メソッド
+- **HJPB `.hjp`**: ソースをバイトコード形式へまとめて直接実行可能
+- **パッケージ管理**: `hajimu pkg` / `hajimu パッケージ` コマンド
+- **ネイティブプラグイン**: C ABI ベースのプラグイン API
+
+## インストール
+
+### macOS / Linux
+
+Homebrew:
 
 ```bash
-# Tap リポジトリを追加
 brew tap ReoShiozawa/hajimu
-
-# インストール
 brew install hajimu
 ```
 
 ### Windows
 
-GitHub Releases から `hajimu_setup.exe` をダウンロードして実行してください。インストーラーは `hajimu.exe` と必要な DLL を配置し、PATH へ追加します。
+[GitHub Releases](https://github.com/ReoShiozawa/hajimu/releases) から `hajimu_setup-1.4.0.exe` をダウンロードして実行してください。インストーラーは `hajimu.exe` と必要な DLL を配置し、PATH に追加します。
 
-ポータブルに使う場合は `hajimu.exe`、`libcurl-x64.dll`、`libwinpthread-1.dll` を同じフォルダーに置いて実行できます。
+ポータブルに使う場合は、`hajimu-windows-x64.exe`、`libcurl-x64.dll`、`libwinpthread-1.dll` を同じフォルダーに置いてください。
 
 ### ソースからビルド
 
 ```bash
-# リポジトリをクローン
 git clone https://github.com/ReoShiozawa/hajimu.git
 cd hajimu
-
-# ビルド
 make
-
-# WebAssembly版を jp-edu/public に出力
-EM_CACHE=/private/tmp/emscripten-cache make wasm
-
-# インストール（オプション）
-sudo make install
+./nihongo examples/english_basic.jp
 ```
 
-### 動作要件
+インストール済みコマンドは通常 `hajimu`、ソースツリー内の実行ファイルは `nihongo` です。
 
-- **OS**: macOS 10.13+, Ubuntu 18.04+, Windows 10+ / WSL2
-- **コンパイラ**: GCC 9.0+ または Clang 10.0+
-- **メモリ**: 最小 256MB
+## クイックスタート
 
-## 🚀 クイックスタート
-
-### Hello World
+`hello.jp` を作成します。
 
 ```hajimu
 表示("こんにちは、世界！")
 ```
 
 実行:
+
 ```bash
 hajimu hello.jp
 # または
 ./nihongo hello.jp
 ```
 
-### より詳しい例
+英語 alias を使う場合は `hello.haj` のように書けます。
 
 ```hajimu
-# 階乗を計算する関数
-関数 階乗(n は 数値) は 数値:
-    もし n <= 1 なら
-        戻す 1
-    それ以外
-        戻す n * 階乗(n - 1)
-    終わり
-終わり
+function greet(name):
+    print("Hello, " + name)
+end
 
-# リスト内包表記
-変数 数列 = [1, 2, 3, 4, 5]
-変数 二倍 = [n * 2 を n から 数列]
-表示(二倍)  // → [2, 4, 6, 8, 10]
-
-# クラス
-クラス 人:
-    初期化(名前, 年齢):
-        自分.名前 = 名前
-        自分.年齢 = 年齢
-    終わり
-    
-    挨拶(自分):
-        表示("こんにちは、" + 自分.名前 + "です")
-    終わり
-終わり
-
-変数 太郎 = 新しい 人("太郎", 25)
-太郎.挨拶()
+greet("Hajimu")
 ```
-
-## 📚 ドキュメント
-
-- **[公式サイト](https://reoshiozawa.github.io/hajimu-document/)** - 完全なドキュメントとチュートリアル
-- **[言語リファレンス](docs/REFERENCE.md)** - 文法と組み込み関数の詳細
-- **[チュートリアル](docs/TUTORIAL.md)** - ステップバイステップガイド
-- **[コード例](examples/)** - 実践的なサンプルコード
-- **[ロードマップ](docs/ROADMAP.md)** - 開発計画
-- **[英語構文対応ロードマップ](docs/ENGLISH_SYNTAX_ROADMAP.md)** - はじむを英語でも書けるようにするための設計書兼ロードマップ
-- **[英語 alias 命名・衝突方針](docs/ENGLISH_ALIAS_POLICY.md)** - 英語 alias を追加・利用するときの予約語と衝突ルール
-
-### 🇺🇸 English Documentation
-
-- **[README (English)](README_en.md)** - English overview
-- **[Tutorial](docs/TUTORIAL_en.md)** - Step-by-step guide in English
-- **[Reference Manual](docs/REFERENCE_en.md)** - Full language reference in English
-- **[Plugin Development Guide](docs/PLUGIN_DEVELOPMENT.md)** - How to build C extension plugins
-- **[Roadmap](docs/ROADMAP_en.md)** - Development roadmap in English
-
-## 🎯 言語仕様
-
-### キーワード
-
-- **制御構造**: `もし`, `それ以外`, `なら`, `繰り返す`, `条件`, `の間`
-- **関数**: `関数`, `戻す`, `終わり`
-- **変数**: `変数`, `定数`
-- **クラス**: `クラス`, `初期化`, `自分`, `新しい`
-- **論理**: `真`, `偽`, `かつ`, `または`, `でない`
-- **ループ制御**: `抜ける`, `続ける`
-- **非同期**: `非同期`, `待つ`
-- **例外**: `試す`, `捕捉`, `最後に`
-- **モジュール**: `取り込む`, `として`
-
-### データ型
-
-- **数値** - 浮動小数点数（64bit）
-- **真偽** - `真` / `偽`
-- **文字列** - UTF-8文字列
-- **配列** - 動的配列 `[1, 2, 3]`
-- **辞書** - ハッシュマップ `{"key": "value"}`
-- **関数** - 第一級オブジェクト
-- **クラス** - オブジェクト指向
-
-### 組み込み関数（143個）
-
-- **I/O**: `表示()`, `入力()`, `読む()`, `書く()`
-- **文字列**: `長さ()`, `分割()`, `結合()`, `置換()`, `検索()`
-- **配列**: `追加()`, `削除()`, `並べ替え()`, `マップ()`, `フィルタ()`
-- **数学**: `合計()`, `平均()`, `最大()`, `最小()`, `累乗()`
-- **HTTP**: `HTTP取得()`, `HTTP投稿()`, `JSON解析()`
-- **ファイル**: `ファイル読込()`, `ファイル書込()`, `ファイル存在()`
-- **型**: `型()`, `整数化()`, `小数化()`, `文字列化()`
-
-完全なリストは[リファレンス](https://github.com/ReoShiozawa/hajimu/blob/main/docs/REFERENCE.md)を参照してください。
-
-## � パッケージ管理
-
-はじむには外部パッケージを管理するパッケージマネージャが内蔵されています。
 
 ```bash
-# プロジェクトの初期化
-hajimu パッケージ 初期化
-
-# パッケージの追加（GitHub から）
-hajimu パッケージ 追加 user/repo
-
-# インストール済みパッケージの一覧
-hajimu パッケージ 一覧
-
-# 依存パッケージの一括インストール
-hajimu パッケージ インストール
+hajimu hello.haj
 ```
 
-インストールしたパッケージは `取り込む` でインポートできます：
+## コード例
+
+### クラス
 
 ```hajimu
-取り込む "my-library" として ライブラリ
-表示(ライブラリ["関数名"](引数))
+class Character:
+    init(name, level):
+        self.name = name
+        self.level = level
+    end
+
+    function describe():
+        return self.name + " Lv." + to_string(self.level)
+    end
+end
+
+var hero = new Character("Aki", 5)
+print(hero.describe())
 ```
 
-## �💻 開発環境
+### 日本語と英語 alias の混在
 
-### ソースからのビルド
+```hajimu
+function 合計(numbers):
+    var total = 0
+    for value in numbers:
+        total += value
+    end
+    戻す total
+end
+
+print(to_string(合計([1, 2, 3])))
+```
+
+### 非同期/並列
+
+```hajimu
+function double(x):
+    return x * 2
+end
+
+var mapped = parallel_map([1, 2, 3], double)
+print(to_string(mapped))  // [2, 4, 6]
+
+var task = async_run(double, 21)
+print(to_string(await_task(task, 2)))  // 42
+```
+
+より多くの例は [examples/](examples/) にあります。
+
+## ドキュメント
+
+はじめに読むもの:
+
+- [チュートリアル](docs/TUTORIAL.md)
+- [リファレンス](docs/REFERENCE.md)
+- [英語 README](README_en.md)
+- [English Tutorial](docs/TUTORIAL_en.md)
+- [English Reference](docs/REFERENCE_en.md)
+- [英語構文対応ロードマップ](docs/ENGLISH_SYNTAX_ROADMAP.md)
+- [英語 alias 命名・衝突方針](docs/ENGLISH_ALIAS_POLICY.md)
+- [プラグイン開発ガイド](docs/外部パッケージ開発ガイド.md)
+- [Plugin Development Guide](docs/PLUGIN_DEVELOPMENT.md)
+- [ロードマップ](docs/ROADMAP.md)
+- [CHANGELOG](CHANGELOG.md)
+
+公式ドキュメントサイト:
+
+- https://reoshiozawa.github.io/hajimu-document/
+
+## 言語機能の概要
+
+| 分野 | 状態 |
+|---|---|
+| 日本語構文 | 第一構文 |
+| 英語 alias | 実用的なサブセットを実装済み |
+| 実行方式 | C 実装の AST インタープリタ |
+| 型システム | 動的型 |
+| 文字列 | UTF-8 対応 |
+| オブジェクト指向 | class / constructor / self / 継承 |
+| 関数型要素 | ラムダ、高階関数、リスト内包表記 |
+| 制御構文 | if / while / for / foreach / switch / match |
+| 例外 | try / catch / finally / throw |
+| 非同期 | task / await / channel / mutex / semaphore / atomic |
+| データ/IO | JSON / HTTP / ファイル / 正規表現 / Base64 / パス |
+| 配布 | `.hjp` バイトコード、Windows インストーラー |
+| プラグイン | C ABI ベースのネイティブプラグイン |
+
+## ビルドとテスト
+
+必要なもの:
+
+- macOS 10.13+、Linux、Windows 10+
+- GCC 9+ または Clang 10+
+- `make`
+- libcurl
+- Windows 配布物を作る場合は MinGW-w64 と NSIS
+
+よく使うコマンド:
 
 ```bash
-# リポジトリのクローン
-git clone https://github.com/ReoShiozawa/hajimu.git
-cd hajimu
-
-# コンパイル
-make
-
-# テスト実行（156個のテストが実行されます）
-make test
-
-# インストール
-sudo make install
-
-# クリーンアップ
-make clean
+make                    # ./nihongo をビルド
+make release            # 最適化ビルド
+make windows            # win/dist/hajimu.exe を生成
+make windows-installer  # win/dist/hajimu_setup.exe を生成
+make wasm               # jp-edu 連携用 WebAssembly を生成
 ```
 
-### プロジェクト構成
+リリース時の主な検証:
 
-```
-hajimu/
-├── src/                    # ソースコード
-│   ├── main.c             # エントリポイント
-│   ├── lexer.c/h          # 字句解析器
-│   ├── parser.c/h         # 構文解析器
-│   ├── ast.c/h            # 抽象構文木
-│   ├── evaluator.c/h      # 評価器
-│   ├── value.c/h          # 値型システム
-│   ├── environment.c/h    # 環境（スコープ管理）
-│   ├── async.c/h          # 非同期処理
-│   ├── http.c/h           # HTTPクライアント
-│   ├── package.c/h        # パッケージ管理
-│   └── plugin.c/h         # C拡張プラグイン
-├── include/               # プラグイン開発用ヘッダー
-│   └── hajimu_plugin.h    # プラグインAPI
-├── examples/              # サンプルプログラム
-│   ├── hello.jp
-│   ├── factorial.jp
-│   ├── fibonacci.jp
-│   ├── class_test.jp
-│   └── async_test.jp
-├── tests/                 # テストスイート
-├── docs/                  # ドキュメント
-│   ├── REFERENCE.md       # リファレンスマニュアル
-│   ├── TUTORIAL.md        # チュートリアル
-│   └── ROADMAP.md         # 開発ロードマップ
-└── Makefile               # ビルド設定
+```bash
+for file in tests/*.jp; do
+  [ "$file" = "tests/webhook_test.jp" ] && continue
+  ./nihongo "$file"
+done
+
+for file in examples/english_*.jp; do
+  ./nihongo "$file"
+done
+
+tests/english_error_and_bytecode.sh
 ```
 
-## 🤝 コントリビューション
+`tests/webhook_test.jp` はサーバーを起動して外部/手動リクエストを待つため、自動 smoke test では除外します。
 
-はじむへの貢献を歓迎します！
+## プロジェクト構成
 
-### 貢献方法
+```text
+src/
+├── lexer.c / lexer.h          字句解析とキーワード alias
+├── parser.c / parser.h        再帰下降パーサ
+├── ast.c / ast.h              AST
+├── evaluator.c / evaluator.h  評価器と組み込み関数
+├── value.c / value.h          動的値モデル
+├── environment.c / .h         スコープとクロージャ
+├── gc.c / gc.h                Environment の循環参照回収
+├── async.c / async.h          非同期、channel、lock
+├── http.c / http.h            JSON、HTTP、簡易サーバー補助
+├── package.c / package.h      パッケージ管理
+├── plugin.c / plugin.h        ネイティブプラグイン
+└── bytecode.c / bytecode.h    HJPB .hjp 形式
+```
 
-1. このリポジトリをフォーク
-2. 機能ブランチを作成 (`git checkout -b feature/amazing-feature`)
-3. 変更をコミット (`git commit -m 'feat: 素晴らしい機能を追加'`)
-4. ブランチにプッシュ (`git push origin feature/amazing-feature`)
-5. プルリクエストを作成
+日本語構文と英語 alias は、最終的に同じ AST と同じ評価器へ接続されます。英語対応は別モードではなく、はじむ本体の文法表現を広げるものです。
 
-詳細は[CONTRIBUTING.md](CONTRIBUTING.md)をご覧ください。
+## 現在の成熟度
 
-### コミット規約
+はじむは OSS として公開され、実験・学習・小規模スクリプトに使える状態です。ただし、まだ production stable な汎用言語ではありません。
 
-- `feat:` 新機能
-- `fix:` バグ修正
-- `docs:` ドキュメント
-- `refactor:` リファクタリング
-- `test:` テスト追加・修正
+向いている用途:
 
-## 📈 プロジェクト統計
+- 日本語中心のプログラミング教育
+- 言語設計の実験
+- エディタ拡張や診断 UI の実験
+- 小さなスクリプトやデモ
+- C 実装ランタイムの共同開発
+- パッケージ/プラグイン配布の実験
 
-- **言語**: C (C99/C11)
-- **文字エンコーディング**: UTF-8対応
-- **テストカバレッジ**: 156テスト全て合格
-- **組み込み関数**: 143個
-- **パーサ方式**: 再帰下降（LL(1)）
-- **実行方式**: AST直接評価
+今後さらに育てたい領域:
 
-## 🔗 リンク
+- 日本語構文と英語 alias の一貫性
+- パッケージエコシステム
+- Windows/macOS/Linux のリリース自動化
+- 長時間動く非同期処理の安定性
+- 形式的な言語仕様
 
-- **ドキュメント**: https://reoshiozawa.github.io/hajimu-document/
-- **リポジトリ**: https://github.com/ReoShiozawa/hajimu
-- **Issue トラッカー**: https://github.com/ReoShiozawa/hajimu/issues
-- **チュートリアル**: [docs/TUTORIAL.md](docs/TUTORIAL.md)
-- **リファレンス**: [docs/REFERENCE.md](docs/REFERENCE.md)
+## コントリビューション
 
-## 📝 ライセンス
+貢献を歓迎します。特に助かるもの:
 
-このプロジェクトは[MIT License](LICENSE)の下で公開されています。
+- 再現しやすいバグ報告
+- エラー表示の改善
+- 日本語/英語ドキュメントの改善
+- 1つの概念を分かりやすく教えるサンプル
+- パーサ・評価器・非同期処理のエッジケーステスト
+- Windows 配布物の動作確認
+- VS Code 拡張や教材との連携アイデア
 
-## 👤 作者
+詳しくは [CONTRIBUTING.md](CONTRIBUTING.md) をご覧ください。
+セキュリティに関する報告は [SECURITY.md](SECURITY.md) を参照してください。
 
-**Reo Shiozawa**
+## リンク
 
-- GitHub: [@ReoShiozawa](https://github.com/ReoShiozawa)
+- Repository: https://github.com/ReoShiozawa/hajimu
+- Releases: https://github.com/ReoShiozawa/hajimu/releases
+- Issues: https://github.com/ReoShiozawa/hajimu/issues
+- Documentation: https://reoshiozawa.github.io/hajimu-document/
 
-## 📊 言語比較
+## ライセンス
 
-| 機能 | はじむ | Python | Ruby | JavaScript |
-|------|--------|--------|------|------------|
-| 日本語中心構文 | ✅ | ❌ | ❌ | ❌ |
-| 英語 alias 構文 | ✅ | - | - | ✅ |
-| 学習難易度 | 低 | 中 | 中 | 中 |
-| 型システム | 動的 | 動的 | 動的 | 動的 |
-| クラスベースOOP | ✅ | ✅ | ✅ | ✅ |
-| 非同期処理 | ✅ | ✅ | ✅ | ✅ |
-| HTTPクライアント | ✅ | ✅ | ✅ | ✅ |
-| 実行速度 | 高速 | 中速 | 中速 | 高速 |
+MIT License で公開しています。詳しくは [LICENSE](LICENSE) を参照してください。
 
----
+## 作者
 
-**はじむ**で、日本語で書く楽しさを体験してください！ ⭐
+[Reo Shiozawa](https://github.com/ReoShiozawa)

@@ -1,250 +1,199 @@
-# はじむへの貢献ガイド
+# Contributing To Hajimu
 
-はじむプロジェクトへの貢献に興味を持っていただき、ありがとうございます！
-このドキュメントでは、貢献の方法と開発ガイドラインについて説明します。
+Thank you for your interest in Hajimu. Contributions are welcome from language
+designers, educators, C developers, tooling authors, and people who simply want
+programming in Japanese to feel better.
 
-## 🤝 貢献の方法
+日本語での Issue / Pull Request も歓迎します。
 
-### Issue の報告
+## Good First Contributions
 
-バグや機能リクエストがある場合は、[Issue](https://github.com/ReoShiozawa/hajimu/issues)を作成してください。
+Great places to start:
 
-- バグ報告には以下を含めてください：
-  - 問題の説明
-  - 再現手順
-  - 期待される動作
-  - 実際の動作
-  - 環境情報（OS、コンパイラバージョンなど）
+- improve English or Japanese documentation
+- add small examples under `examples/`
+- add parser/runtime regression tests under `tests/`
+- improve diagnostics and error messages
+- report Windows packaging issues
+- test `.haj` / `.hajimu` source files and English aliases
+- reduce compiler warnings
+- simplify confusing code paths without changing behavior
 
-### プルリクエストの作成
+## Before Opening An Issue
 
-1. **リポジトリをフォーク**
-   ```bash
-   # GitHubでフォークボタンをクリック後
-   git clone https://github.com/YOUR_USERNAME/hajimu.git
-   cd hajimu
-   ```
+For bugs, please include:
 
-2. **開発環境のセットアップ**
-   ```bash
-   # 依存関係の確認
-   # macOS: Xcode Command Line Tools
-   # Linux: gcc, make
-   
-   # ビルド
-   make
-   
-   # テスト実行
-   make test
-   ```
+- Hajimu version or commit hash
+- OS and compiler
+- a minimal `.jp`, `.haj`, or `.hajimu` program
+- expected behavior
+- actual behavior
+- terminal output or error message
 
-3. **ブランチを作成**
-   ```bash
-   git checkout -b feature/your-feature-name
-   # または
-   git checkout -b fix/your-bug-fix
-   ```
+For feature requests, please include:
 
-4. **変更を加える**
-   - コードを書く
-   - テストを追加
-   - ドキュメントを更新
+- the problem you want to solve
+- example syntax or API shape
+- why it belongs in the language/runtime instead of a package
 
-5. **テストを実行**
-   ```bash
-   make test
-   # 全てのテストが合格することを確認
-   ```
+Security-sensitive issues should follow [SECURITY.md](SECURITY.md).
+Community behavior should follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
-6. **コミット**
-   ```bash
-   git add .
-   git commit -m "feat: 新機能の説明"
-   ```
-
-7. **プッシュして PR を作成**
-   ```bash
-   git push origin feature/your-feature-name
-   # GitHubでプルリクエストを作成
-   ```
-
-## 📝 コーディング規約
-
-### C コードスタイル
-
-```c
-// 関数名: snake_case
-void parse_expression() {
-    // インデント: 4スペース
-    if (condition) {
-        do_something();
-    }
-}
-
-// 変数名: snake_case
-int token_count = 0;
-
-// 構造体名: PascalCase
-typedef struct {
-    TokenType type;
-    char* value;
-} Token;
-```
-
-### コメント
-
-- 日本語または英語でOK
-- 複雑なロジックには説明を追加
-- 関数の目的を簡潔に記述
-
-```c
-// 式をパースする
-// Returns: 式のASTノード
-ASTNode* parse_expression() {
-    // ...
-}
-```
-
-### はじむコード(.jp ファイル)
-
-```
-# 関数名: 日本語（全角スペースでインデント）
-関数 合計を計算(配列):
-    変数 合計 = 0
-    配列 を 要素 で繰り返す
-        合計 = 合計 + 要素
-    終わり
-    戻す 合計
-終わり
-```
-
-## 🧪 テストガイドライン
-
-### 新機能のテスト
-
-新機能を追加する場合は、必ずテストを追加してください：
-
-1. `tests/` ディレクトリにテストファイルを作成
-2. `test_all.jp` に追加
-3. `make test` で動作確認
-
-```
-# tests/your_feature.jp
-表示("テスト: 新機能")
-
-変数 結果 = あなたの新機能()
-もし 結果 == 期待値 なら
-    表示("✓ 合格")
-そうでなければ
-    表示("✗ 失敗")
-終わり
-```
-
-### テストのカバレッジ
-
-- 正常系のテスト
-- エラーケースのテスト
-- エッジケースのテスト
-
-## 📋 コミット規約
-
-コミットメッセージは以下の形式で記述してください：
-
-```
-<type>: <subject>
-
-<body>
-```
-
-### Type
-
-- `feat`: 新機能
-- `fix`: バグ修正
-- `docs`: ドキュメントのみの変更
-- `style`: コードの意味に影響しない変更（空白、フォーマットなど）
-- `refactor`: バグ修正や機能追加を含まないコードの変更
-- `perf`: パフォーマンス改善
-- `test`: テストの追加や修正
-- `chore`: ビルドプロセスやツールの変更
-
-### 例
-
-```
-feat: パイプ演算子の実装
-
-|> 演算子を追加し、関数チェーンを可能にしました。
-
-例:
-変数 結果 = 5 |> 二倍 |> 三倍
-```
-
-## 🔍 プルリクエストのレビュー基準
-
-以下の点を確認してください：
-
-- [ ] コードが意図通りに動作する
-- [ ] 既存のテストが全て合格する
-- [ ] 新しいテストが追加されている
-- [ ] ドキュメントが更新されている
-- [ ] コーディング規約に従っている
-- [ ] コミットメッセージが規約に従っている
-- [ ] メモリリークがない（必要に応じて valgrind で確認）
-
-## 💡 開発のヒント
-
-### デバッグ
+## Development Setup
 
 ```bash
-# デバッグビルド
-make debug
-
-# AddressSanitizer 付きでビルド
-make asan
-
-# Valgrind でメモリリークチェック
-valgrind --leak-check=full ./nihongo examples/hello.jp
+git clone https://github.com/ReoShiozawa/hajimu.git
+cd hajimu
+make
+./nihongo examples/hello.jp
 ```
 
-### 新しいキーワードの追加
+Useful build commands:
 
-1. `lexer.c` にトークンタイプを追加
-2. `parser.c` にパース処理を追加
-3. `evaluator.c` に評価処理を追加
-4. テストを追加
-5. ドキュメント（REFERENCE.md）を更新
+```bash
+make                  # normal build
+make release          # optimized build
+make clean            # remove build output
+make windows          # Windows cross-build, if MinGW-w64 is installed
+make windows-installer
+make wasm             # WebAssembly build, if Emscripten is installed
+```
 
-### 新しい組み込み関数の追加
+## Test Commands
 
-1. `evaluator.c` の `register_builtins()` に登録
-2. 関数の実装を追加
-3. テストを追加
-4. リファレンスに追加
+`make test` runs every `.jp` file in `tests/`, including server-style tests.
+For release-style local validation, use:
 
-## 📚 参考資料
+```bash
+for file in tests/*.jp; do
+  [ "$file" = "tests/webhook_test.jp" ] && continue
+  ./nihongo "$file"
+done
 
-- [docs/REFERENCE.md](docs/REFERENCE.md) - 言語仕様
-- [docs/TUTORIAL.md](docs/TUTORIAL.md) - チュートリアル
-- [docs/implementation_guide.md](docs/implementation_guide.md) - 実装ガイド
-- [docs/improved_design.md](docs/improved_design.md) - 設計ドキュメント
+for file in examples/english_*.jp; do
+  ./nihongo "$file"
+done
 
-## 🌟 良い最初の Issue
+tests/english_error_and_bytecode.sh
+```
 
-初めての貢献を検討している方は、以下のラベルが付いた Issue をご覧ください：
+`tests/webhook_test.jp` starts a server and waits for an external/manual request,
+so it is usually skipped in automated smoke tests.
 
-- `good first issue` - 初心者向けの Issue
-- `help wanted` - 助けを求めている Issue
-- `documentation` - ドキュメントの改善
+When working on async/concurrency behavior, also run a repetition test:
 
-## ❓ 質問がある場合
+```bash
+for i in $(seq 1 50); do
+  ./nihongo examples/english_concurrency_aliases.jp >/tmp/hajimu-async.out
+done
+```
 
-- [Issue](https://github.com/ReoShiozawa/hajimu/issues) で質問を作成
-- または [Discussion](https://github.com/ReoShiozawa/hajimu/discussions) で議論
+## Code Style
 
-## 👥 コミュニティ
+### C
 
-はじむプロジェクトは、オープンで歓迎的なコミュニティを目指しています。
-全ての貢献者が敬意を持って接するようお願いします。
+- Use 4-space indentation.
+- Prefer clear, local helper functions over broad abstractions.
+- Keep ownership rules explicit.
+- Check allocation failures in new code when practical.
+- Avoid shell command construction with untrusted input.
+- Keep comments short and useful, especially around memory ownership,
+  parser decisions, concurrency, and platform-specific behavior.
 
----
+Example:
 
-**ありがとうございます！** あなたの貢献がはじむをより良いものにします。🚀
+```c
+static Value builtin_example(int argc, Value *argv) {
+    if (argc < 1 || argv[0].type != VALUE_STRING) {
+        return value_null();
+    }
+
+    return value_string(argv[0].string.data);
+}
+```
+
+### Hajimu Code
+
+- Keep examples small and focused.
+- Prefer one concept per example.
+- Use `.jp` for Japanese-first examples.
+- Use `.haj` or `.hajimu` when the example is intentionally English-first.
+- If a feature has both Japanese syntax and English aliases, tests should cover
+  both when reasonable.
+
+## Adding A Language Feature
+
+Most language features touch several layers:
+
+1. `src/lexer.c` / `src/lexer.h` for tokens or keyword aliases
+2. `src/parser.c` / `src/parser.h` for grammar
+3. `src/ast.c` / `src/ast.h` for AST shape, if needed
+4. `src/evaluator.c` / `src/evaluator.h` for runtime behavior
+5. tests under `tests/`
+6. examples under `examples/`, if user-facing
+7. documentation under `docs/`
+
+For English aliases, also update:
+
+- [docs/ENGLISH_ALIAS_POLICY.md](docs/ENGLISH_ALIAS_POLICY.md)
+- [docs/ENGLISH_SYNTAX_ROADMAP.md](docs/ENGLISH_SYNTAX_ROADMAP.md)
+- [docs/REFERENCE_en.md](docs/REFERENCE_en.md)
+- [docs/TUTORIAL_en.md](docs/TUTORIAL_en.md)
+
+## Adding A Built-In Function
+
+1. Implement the function in `src/evaluator.c` or the relevant module.
+2. Register it in the built-in table.
+3. Add a Japanese name first when the function is part of the core language.
+4. Add English aliases when they are clear and unlikely to collide.
+5. Add tests.
+6. Update the reference manual.
+
+## Pull Request Checklist
+
+Before opening a PR:
+
+- [ ] The change is focused and explained.
+- [ ] Relevant tests were added or updated.
+- [ ] Documentation was updated for user-facing behavior.
+- [ ] `git diff --check` passes.
+- [ ] The release-style test loop passes, or the skipped tests are explained.
+- [ ] No generated build directories are committed accidentally.
+
+Do not include local generated artifacts such as:
+
+- `build/`
+- `dist/`
+- `win/build/`
+- `win/curl-win64/`
+- temporary `.hjp` files unless the test explicitly requires them
+
+## Commit Messages
+
+Use a lightweight conventional format:
+
+- `feat:` new feature
+- `fix:` bug fix
+- `docs:` documentation
+- `test:` tests
+- `refactor:` internal cleanup
+- `perf:` performance improvement
+- `chore:` build/release maintenance
+
+Examples:
+
+```text
+feat: add English aliases for async helpers
+fix: preserve HTTP response shape on curl failures
+docs: improve English quick start
+```
+
+## Review Philosophy
+
+Hajimu is a language project, so changes should be judged by both correctness
+and user experience. A technically valid change can still be confusing if the
+syntax, diagnostics, or documentation do not help learners understand what is
+happening.
+
+When in doubt, include a tiny example and a regression test. They make the
+discussion concrete.

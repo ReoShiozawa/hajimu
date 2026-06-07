@@ -1,320 +1,337 @@
-# Hajimu (はじむ)
+# Hajimu
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![GitHub release](https://img.shields.io/github/release/ReoShiozawa/hajimu.svg)](https://github.com/ReoShiozawa/hajimu/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/ReoShiozawa/hajimu.svg)](https://github.com/ReoShiozawa/hajimu/releases)
 [![GitHub stars](https://img.shields.io/github/stars/ReoShiozawa/hajimu.svg)](https://github.com/ReoShiozawa/hajimu/stargazers)
 
-> 🇯🇵 **日本語版 README はこちら:** [README.md](README.md)
+> 日本語版 README: [README.md](README.md)
 
-**Write in Japanese. Think in Japanese. Bridge to English syntax too.**
+**A Japanese-first programming language with a practical bridge to English syntax.**
 
-Hajimu is a programming language centered on Japanese keywords and natural Japanese grammar.
-It now also accepts practical English aliases such as `function`, `if`, `for`, and `print`,
-so learners can move between Japanese understanding and English-based programming concepts.
+Hajimu is an experimental programming language and runtime implemented in C.
+It started from a simple question: what would programming feel like if Japanese
+were not merely comments, variable names, or a teaching layer, but the primary
+syntax of the language?
 
-## ✨ Features
+At the same time, Hajimu is not trying to isolate learners from the wider
+programming ecosystem. Current builds also accept English aliases such as
+`function`, `var`, `if`, `for`, `return`, `class`, `new`, `print`, `len`,
+`http_get`, and `async_run`. This makes Hajimu useful both as a Japanese-first
+language and as a research playground for localized syntax, language learning,
+runtime design, and tooling.
 
-- 🇯🇵 **Japanese-centered syntax**: Code can be written with Japanese keywords and natural word order
-- 🌐 **English aliases**: Practical aliases such as `function`, `if`, `for`, and `print`
-- 🧭 **Multiple source extensions**: `.jp`, `.haj`, and `.hajimu` source files are supported
-- 📖 **Intuitive grammar**: Move gradually between Japanese syntax and English-style code
-- ⚡ **Fast**: High-performance interpreter implemented in C
-- 🔧 **Practical**: 143 built-in functions, HTTP client, async/parallel support
-- 📦 **Package manager**: Built-in manager for external packages
-- 🔌 **C extension plugins**: Cross-platform `.hjp` plugin format — write plugins in C, C++, Rust, Go, or Zig
-- 📦 **HJPB bytecode**: Build `.jp/.haj/.hajimu` into directly executable `.hjp` files
-- 🧭 **Friendly diagnostics**: Shows causes, fixes, examples, and "did you mean" suggestions
-- 🎓 **Beginner-friendly**: Designed to be easy to learn even for first-time programmers
-- 🚀 **Modern**: Lambda expressions, list comprehensions, async/await, and more
+```hajimu
+function add(a is number, b is number) is number:
+    return a + b
+end
 
-## 📦 Installation
+var numbers = [1, 2, 3]
+append(numbers, 4)
 
-### Homebrew (macOS / Linux)
+var total = 0
+for value in numbers:
+    total += value
+end
+
+if total >= 10 then
+    print("total = " + to_string(total))
+else:
+    print("too small")
+end
+```
+
+The same runtime also supports Japanese-native code:
+
+```hajimu
+関数 挨拶(名前):
+    表示("こんにちは、" + 名前 + "さん")
+終わり
+
+挨拶("はじむ")
+```
+
+## Why This Is Interesting
+
+Most programming languages assume English-like keywords and grammar. Hajimu
+explores a different design space:
+
+- **Localized syntax as a first-class language design problem**, not a skin.
+- **Gradual transition between Japanese and English programming concepts**.
+- **Friendly diagnostics** that explain causes, fixes, examples, and likely typos.
+- **A compact C interpreter** that is small enough to read and hack on.
+- **Practical batteries included**: HTTP, JSON, files, async tasks, channels,
+  atomics, classes, enums, pattern matching, generators, and a package manager.
+- **Cross-platform distribution work** through HJPB `.hjp` bytecode and Windows
+  installer builds.
+
+Hajimu is still young, but it is already substantial enough for language
+experiments, educational tools, editor integrations, and small scripts.
+
+## Quick Start
+
+### Install
+
+macOS / Linux with Homebrew:
 
 ```bash
-# Add the tap
 brew tap ReoShiozawa/hajimu
-
-# Install
 brew install hajimu
 ```
 
-### Windows
+Windows:
 
-Download `hajimu_setup.exe` from GitHub Releases and run it. The installer places `hajimu.exe` and required DLLs, then adds Hajimu to PATH.
+Download `hajimu_setup-1.4.0.exe` from
+[GitHub Releases](https://github.com/ReoShiozawa/hajimu/releases), run it, and
+open a new terminal.
 
-For portable use, keep `hajimu.exe`, `libcurl-x64.dll`, and `libwinpthread-1.dll` in the same folder.
+Portable Windows usage is also supported: keep `hajimu-windows-x64.exe`,
+`libcurl-x64.dll`, and `libwinpthread-1.dll` in the same directory.
 
-### Build from Source
-
-```bash
-# Clone the repository
-git clone https://github.com/ReoShiozawa/hajimu.git
-cd hajimu
-
-# Build
-make
-
-# Install (optional)
-sudo make install
-```
-
-### Requirements
-
-- **OS**: macOS 10.13+, Ubuntu 18.04+, Windows 10+ / WSL2
-- **Compiler**: GCC 9.0+ or Clang 10.0+
-- **Memory**: 256 MB minimum
-
-## 🚀 Quick Start
-
-### Hello, World!
-
-```
-表示("こんにちは、世界！")
-```
-
-Run it:
-```bash
-hajimu hello.jp
-# or
-./nihongo hello.jp
-```
-
-### More Examples
-
-```
-// Recursive factorial function
-関数 階乗(n は 数値) は 数値:
-    もし n <= 1 なら
-        戻す 1
-    それ以外
-        戻す n * 階乗(n - 1)
-    終わり
-終わり
-
-// List comprehension
-変数 数列 = [1, 2, 3, 4, 5]
-変数 二倍 = [n * 2 を n から 数列]
-表示(二倍)  // → [2, 4, 6, 8, 10]
-
-// Class
-型 人:
-    初期化(名前, 年齢):
-        自分.名前 = 名前
-        自分.年齢 = 年齢
-    終わり
-
-    関数 挨拶():
-        表示("Hello, I'm " + 自分.名前)
-    終わり
-終わり
-
-変数 太郎 = 新規 人("Taro", 25)
-太郎.挨拶()
-```
-
-> **Keyword reference:** `表示` = print, `関数` = function, `戻す` = return,
-> `もし/それ以外/終わり` = if/else/end, `変数` = variable, `型` = class,
-> `初期化` = constructor, `自分` = self, `新規` = new
-
-## 📚 Documentation
-
-### 🇺🇸 English
-
-- **[Tutorial](docs/TUTORIAL_en.md)** — Step-by-step beginner guide
-- **[Reference Manual](docs/REFERENCE_en.md)** — Complete language reference (all 37 sections)
-- **[Plugin Development Guide](docs/PLUGIN_DEVELOPMENT.md)** — Build C extension plugins
-- **[Roadmap](docs/ROADMAP_en.md)** — Development roadmap
-
-### 🇯🇵 Japanese (日本語)
-
-- **[Official Website](https://reoshiozawa.github.io/hajimu-document/)** — Full docs and tutorials
-- **[Language Reference](docs/REFERENCE.md)** — Syntax and built-in function details
-- **[Tutorial](docs/TUTORIAL.md)** — Step-by-step guide
-- **[Code Examples](examples/)** — Practical sample programs
-- **[Roadmap](docs/ROADMAP.md)** — Development plan
-
-## 🎯 Language Specification
-
-### Keywords
-
-| Category | Keywords |
-|---|---|
-| Control flow | `もし`, `それ以外`, `なら`, `繰り返す`, `条件`, `の間` |
-| Functions | `関数`, `戻す`, `終わり` |
-| Variables | `変数`, `定数` |
-| Classes | `型`, `初期化`, `自分`, `新規`, `継承` |
-| Logic | `真`, `偽`, `かつ`, `または`, `でない` |
-| Loop control | `抜ける`, `続ける` |
-| Async | `非同期実行`, `待機`, `全待機` |
-| Exceptions | `試行`, `捕獲`, `最終`, `投げる` |
-| Modules | `取り込む`, `として` |
-
-### Data Types
-
-| Type | Description | Example |
-|---|---|---|
-| 数値 (number) | 64-bit floating point | `42`, `3.14` |
-| 真偽 (boolean) | Boolean | `真` (true), `偽` (false) |
-| 文字列 (string) | UTF-8 string | `"hello"` |
-| 配列 (array) | Dynamic array | `[1, 2, 3]` |
-| 辞書 (dictionary) | Hash map | `{"key": "value"}` |
-| 関数 (function) | First-class function | lambda / named function |
-| 型 (class) | Object-oriented class | `型 MyClass:` |
-| 無 (null) | No value | `無` |
-
-### Built-in Functions (143 total)
-
-| Category | Functions |
-|---|---|
-| I/O | `表示()`, `入力()`, `読み込む()`, `書き込む()` |
-| String | `長さ()`, `分割()`, `結合()`, `置換()`, `検索()` |
-| Array | `追加()`, `削除()`, `ソート()`, `変換()`, `抽出()` |
-| Math | `合計()`, `平均()`, `最大()`, `最小()`, `平方根()` |
-| HTTP | `HTTP取得()`, `HTTP送信()`, `JSON解析()` |
-| File | `読み込む()`, `書き込む()`, `ファイル存在()` |
-| Type | `数値化()`, `文字列化()`, `型判定()` |
-
-See the [Reference Manual](docs/REFERENCE_en.md) for the complete list.
-
-## 📦 Package Management
-
-Hajimu has a built-in package manager.
-
-```bash
-# Initialize a project
-hajimu パッケージ 初期化      # Japanese
-hajimu pkg init               # English alias
-
-# Add a package from GitHub
-hajimu パッケージ 追加 user/repo
-hajimu pkg add user/repo
-
-# List installed packages
-hajimu パッケージ 一覧
-hajimu pkg list
-
-# Install all dependencies from hajimu.json
-hajimu パッケージ インストール
-hajimu pkg install
-```
-
-Use installed packages with `取り込む` (import):
-
-```
-取り込む "my-library" として lib
-表示(lib["someFunction"](arg))
-```
-
-## 💻 Development
-
-### Build from Source
+Build from source:
 
 ```bash
 git clone https://github.com/ReoShiozawa/hajimu.git
 cd hajimu
-
-# Compile
 make
-
-# Run tests (170 tests)
-make test
-
-# Install
-sudo make install
-
-# Clean
-make clean
+./nihongo examples/english_basic.jp
 ```
 
-### Project Structure
+The installed command is usually `hajimu`; the source-tree binary is `nihongo`.
 
-```
-hajimu/
-├── src/                    # Source code
-│   ├── main.c             # Entry point
-│   ├── lexer.c/h          # Lexer
-│   ├── parser.c/h         # Parser
-│   ├── ast.c/h            # Abstract Syntax Tree
-│   ├── evaluator.c/h      # Evaluator
-│   ├── value.c/h          # Value type system
-│   ├── environment.c/h    # Environment (scope management)
-│   ├── async.c/h          # Async execution
-│   ├── http.c/h           # HTTP client
-│   ├── package.c/h        # Package manager
-│   └── plugin.c/h         # C extension plugins
-├── include/               # Plugin development header
-│   └── hajimu_plugin.h    # Plugin API
-├── examples/              # Sample programs
-├── tests/                 # Test suite
-├── docs/                  # Documentation
-│   ├── REFERENCE.md       # Reference manual (Japanese)
-│   ├── REFERENCE_en.md    # Reference manual (English)
-│   ├── TUTORIAL.md        # Tutorial (Japanese)
-│   ├── TUTORIAL_en.md     # Tutorial (English)
-│   ├── PLUGIN_DEVELOPMENT.md  # Plugin dev guide (English)
-│   └── ROADMAP.md         # Roadmap (Japanese)
-└── Makefile               # Build configuration
+### Run A Program
+
+Create `hello.haj`:
+
+```hajimu
+function greet(name):
+    print("Hello, " + name)
+end
+
+greet("Hajimu")
 ```
 
-## 🤝 Contributing
+Run:
 
-Contributions are welcome!
+```bash
+hajimu hello.haj
+# or from a source checkout:
+./nihongo hello.haj
+```
 
-### How to Contribute
+Supported source extensions are `.jp`, `.haj`, and `.hajimu`.
 
-1. Fork this repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+## Language Snapshot
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+| Area | Status |
+|---|---|
+| Japanese syntax | Primary syntax |
+| English aliases | Practical subset implemented |
+| Runtime | AST interpreter in C |
+| Type system | Dynamic |
+| Strings | UTF-8 aware |
+| OOP | Classes, constructors, `self`, inheritance support |
+| Functional features | Lambdas, higher-order functions, list comprehensions |
+| Control flow | if/else, while, for, foreach, switch, match |
+| Error handling | try/catch/finally, throw |
+| Async/concurrency | async tasks, await, parallel map/run, channels, mutexes, semaphores, atomics |
+| Data / IO | JSON, HTTP client, file IO, path helpers, Base64, regex |
+| Packaging | `hajimu pkg` package manager |
+| Distribution | HJPB `.hjp` bytecode and native plugin loading |
+| Plugins | C ABI plugin API, suitable for C/C++/Rust-style native extensions |
 
-### Commit Convention
+## Examples
 
-- `feat:` New feature
-- `fix:` Bug fix
-- `docs:` Documentation
-- `refactor:` Code refactoring
-- `test:` Add or fix tests
+Object-oriented code:
 
-## 📈 Project Stats
+```hajimu
+class Character:
+    init(name, level):
+        self.name = name
+        self.level = level
+    end
 
-- **Implementation language**: C (C99/C11)
-- **Character encoding**: UTF-8
-- **Tests**: 170 tests passing
-- **Built-in functions**: 143
-- **Parser**: Recursive descent (LL(1))
-- **Execution**: Direct AST evaluation
+    function describe():
+        return self.name + " Lv." + to_string(self.level)
+    end
+end
 
-## 🔗 Links
+var hero = new Character("Aki", 5)
+print(hero.describe())
+```
 
-- **Documentation**: https://reoshiozawa.github.io/hajimu-document/
-- **Repository**: https://github.com/ReoShiozawa/hajimu
-- **Issue tracker**: https://github.com/ReoShiozawa/hajimu/issues
-- **Tutorial (English)**: [docs/TUTORIAL_en.md](docs/TUTORIAL_en.md)
-- **Reference (English)**: [docs/REFERENCE_en.md](docs/REFERENCE_en.md)
-- **English alias policy**: [docs/ENGLISH_ALIAS_POLICY.md](docs/ENGLISH_ALIAS_POLICY.md)
+Async and parallel helpers:
 
-## 📝 License
+```hajimu
+function double(x):
+    return x * 2
+end
 
-This project is released under the [MIT License](LICENSE).
+var mapped = parallel_map([1, 2, 3], double)
+print(to_string(mapped))  // [2, 4, 6]
 
-## 👤 Author
+var task = async_run(double, 21)
+print(to_string(await_task(task, 2)))  // 42
+```
 
-**Reo Shiozawa**
+Japanese and English can be mixed intentionally:
 
-- GitHub: [@ReoShiozawa](https://github.com/ReoShiozawa)
+```hajimu
+function 合計(numbers):
+    var total = 0
+    for value in numbers:
+        total += value
+    end
+    戻す total
+end
 
-## 📊 Language Comparison
+print(to_string(合計([1, 2, 3])))
+```
 
-| Feature | Hajimu | Python | Ruby | JavaScript |
-|---|---|---|---|---|
-| Japanese-centered syntax | ✅ | ❌ | ❌ | ❌ |
-| English alias syntax | ✅ | - | - | ✅ |
-| Learning difficulty | Low | Medium | Medium | Medium |
-| Type system | Dynamic | Dynamic | Dynamic | Dynamic |
-| Async support | ✅ | ✅ | ✅ | ✅ |
-| C extension plugins | ✅ | ✅ | ✅ | ✅ |
-| Built-in package manager | ✅ | ✅ | ✅ | ✅ |
+More examples live in [examples/](examples/), especially:
+
+- [examples/english_basic.jp](examples/english_basic.jp)
+- [examples/english_advanced.jp](examples/english_advanced.jp)
+- [examples/english_oop.jp](examples/english_oop.jp)
+- [examples/english_concurrency_aliases.jp](examples/english_concurrency_aliases.jp)
+
+## Documentation
+
+Start here:
+
+- [Tutorial](docs/TUTORIAL_en.md)
+- [Reference Manual](docs/REFERENCE_en.md)
+- [English Syntax Roadmap](docs/ENGLISH_SYNTAX_ROADMAP.md)
+- [English Alias Naming And Collision Policy](docs/ENGLISH_ALIAS_POLICY.md)
+- [Plugin Development Guide](docs/PLUGIN_DEVELOPMENT.md)
+- [Roadmap](docs/ROADMAP_en.md)
+- [Changelog](CHANGELOG.md)
+
+Japanese documentation:
+
+- [日本語 README](README.md)
+- [チュートリアル](docs/TUTORIAL.md)
+- [リファレンス](docs/REFERENCE.md)
+- [ロードマップ](docs/ROADMAP.md)
+
+## Build And Test
+
+Requirements:
+
+- macOS 10.13+, Linux, or Windows 10+
+- GCC 9+ or Clang 10+
+- `make`
+- libcurl development files
+- MinGW-w64 and NSIS only if you want to build Windows artifacts from macOS/Linux
+
+Common commands:
+
+```bash
+make                 # build ./nihongo
+make release         # optimized local build
+make windows         # cross-build win/dist/hajimu.exe
+make windows-installer
+make wasm            # build WebAssembly artifacts for jp-edu integration
+```
+
+Test commands used for releases:
+
+```bash
+# Most tests are standalone .jp files.
+for file in tests/*.jp; do
+  [ "$file" = "tests/webhook_test.jp" ] && continue
+  ./nihongo "$file"
+done
+
+for file in examples/english_*.jp; do
+  ./nihongo "$file"
+done
+
+tests/english_error_and_bytecode.sh
+```
+
+`tests/webhook_test.jp` starts a server and waits for an external/manual request,
+so it is intentionally skipped in automated release smoke tests.
+
+## Architecture
+
+The core is intentionally approachable:
+
+```text
+src/
+├── lexer.c / lexer.h          tokenization and keyword aliases
+├── parser.c / parser.h        recursive descent parser
+├── ast.c / ast.h              AST nodes
+├── evaluator.c / evaluator.h  runtime evaluator and built-ins
+├── value.c / value.h          dynamic value model
+├── environment.c / .h         scopes and closures
+├── gc.c / gc.h                environment cycle collection
+├── async.c / async.h          async tasks, channels, locks
+├── http.c / http.h            JSON, HTTP client, simple server helpers
+├── package.c / package.h      package manager
+├── plugin.c / plugin.h        native plugin loading
+└── bytecode.c / bytecode.h    HJPB .hjp format
+```
+
+The parser maps Japanese syntax and English aliases into the same AST. That is
+the key design choice: English support is not a second language mode, and
+Japanese code does not become a translation artifact.
+
+## Current Maturity
+
+Hajimu is open source and usable, but not yet a production-stable general-purpose
+language. Good use cases today:
+
+- language design experiments
+- Japanese-first programming education
+- editor tooling and diagnostics experiments
+- small scripts and demos
+- package/plugin architecture experiments
+- runtime hacking in C
+
+Areas still evolving:
+
+- grammar consistency between Japanese and English aliases
+- package ecosystem maturity
+- Windows/macOS/Linux release automation
+- long-running async workloads
+- formal language specification
+
+## Contributing
+
+Contributions are welcome. The most valuable contributions right now are:
+
+- small reproducible bug reports
+- diagnostics improvements
+- English and Japanese documentation improvements
+- examples that teach one idea clearly
+- tests for parser/runtime edge cases
+- Windows packaging feedback
+- VS Code tooling ideas and integration feedback
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+For security-sensitive reports, see [SECURITY.md](SECURITY.md).
+
+Commit message convention:
+
+- `feat:` new feature
+- `fix:` bug fix
+- `docs:` documentation
+- `test:` tests
+- `refactor:` internal cleanup
+- `perf:` performance improvement
+- `chore:` build/release maintenance
+
+## Project Links
+
+- Repository: https://github.com/ReoShiozawa/hajimu
+- Releases: https://github.com/ReoShiozawa/hajimu/releases
+- Issues: https://github.com/ReoShiozawa/hajimu/issues
+- Documentation site: https://reoshiozawa.github.io/hajimu-document/
+
+## License
+
+Hajimu is released under the [MIT License](LICENSE).
+
+## Author
+
+Created and maintained by [Reo Shiozawa](https://github.com/ReoShiozawa).
