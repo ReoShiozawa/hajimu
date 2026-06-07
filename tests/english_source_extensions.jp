@@ -1,0 +1,24 @@
+// .haj / .hajimu source module import tests.
+
+var passed = 0
+var failed = 0
+
+function check(name, actual, expected):
+    if to_string(actual) == to_string(expected) then
+        passed += 1
+    else:
+        failed += 1
+        print("X " + name + ": expected=" + to_string(expected) + " actual=" + to_string(actual))
+    end
+end
+
+import "tests/lib_english_haj" as haj_mod
+import "tests/lib_english_hajimu.hajimu" as hajimu_mod
+
+check("extensionless .haj import", haj_mod["triple"](5), 15)
+check("explicit .hajimu import", hajimu_mod["quad"](5), 20)
+check("haj module value", haj_mod["label"], "haj")
+check("hajimu module value", hajimu_mod["label"], "hajimu")
+
+assert(failed == 0, "english_source_extensions failed: " + to_string(failed))
+print("english_source_extensions: " + to_string(passed) + " passed")

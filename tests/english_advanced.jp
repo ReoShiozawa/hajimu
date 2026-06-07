@@ -1,0 +1,80 @@
+// 英語構文 alias の発展機能テスト
+
+var passed = 0
+var failed = 0
+
+function check(name, actual, expected):
+    if to_string(actual) == to_string(expected) then
+        passed += 1
+    else:
+        failed += 1
+        print("X " + name + ": expected=" + to_string(expected) + " actual=" + to_string(actual))
+    end
+end
+
+enum Direction:
+    North
+    East
+    South
+    West
+end
+
+check("enum auto value", Direction.North, 0)
+check("enum sequence", Direction.West, 3)
+
+var switched = ""
+switch Direction.East:
+    case Direction.North:
+        switched = "north"
+    case Direction.East:
+        switched = "east"
+    default:
+        switched = "other"
+end
+check("switch/case/default", switched, "east")
+
+var matched = ""
+match 2:
+    case 1 => matched = "one"
+    case 2, 3 => matched = "small"
+    default => matched = "other"
+end
+check("match/case/default", matched, "small")
+
+generator nums(max):
+    var current = 1
+    while current <= max:
+        yield current
+        current += 1
+    end
+end
+
+var gen = nums(4)
+check("generator next", next(gen), 1)
+check("generator collect length", len(collect(gen)), 3)
+
+class Calculator:
+    static function add(a, b):
+        return a + b
+    end
+
+    static function multiply(a, b):
+        return a * b
+    end
+end
+
+check("static method add", Calculator.add(3, 5), 8)
+check("static method multiply", Calculator.multiply(4, 6), 24)
+
+var caught = ""
+try:
+    throw "boom"
+catch err:
+    caught = err
+finally:
+    caught = caught + "!"
+end
+check("try/catch/finally", caught, "boom!")
+
+assert(failed == 0, "english_advanced failed: " + to_string(failed))
+print("english_advanced: " + to_string(passed) + " passed")

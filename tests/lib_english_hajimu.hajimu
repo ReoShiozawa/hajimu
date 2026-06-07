@@ -1,0 +1,5 @@
+function quad(x):
+    return x * 4
+end
+
+var label = "hajimu"

@@ -1,0 +1,41 @@
+// Advanced English aliases: enum, match, generator, static methods, exceptions.
+
+enum Direction:
+    North
+    East
+    South
+    West
+end
+
+function label(direction):
+    var result = ""
+    match direction:
+        case Direction.North => result = "north"
+        case Direction.East => result = "east"
+        case Direction.South => result = "south"
+        default => result = "west"
+    end
+    return result
+end
+
+generator numbers(max):
+    var current = 1
+    while current <= max:
+        yield current
+        current += 1
+    end
+end
+
+class Calculator:
+    static function add(a, b):
+        return a + b
+    end
+end
+
+try:
+    print("Direction: " + label(Direction.East))
+    print("Numbers: " + to_string(collect(numbers(3))))
+    print("3 + 4 = " + to_string(Calculator.add(3, 4)))
+catch err:
+    print("error: " + to_string(err))
+end

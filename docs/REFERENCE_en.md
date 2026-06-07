@@ -5,8 +5,9 @@
 Hajimu (はじむ) is a programming language designed around natural Japanese expression.
 It is executed by a C-language interpreter.
 
-> **Note:** All keywords are Japanese. Code examples are in authentic Hajimu syntax.
-> Each section includes a keyword table for reference.
+> **Note:** Hajimu keeps Japanese syntax as its primary style, but it also accepts
+> selected English keyword and built-in aliases. Existing Japanese code remains
+> compatible, and mixed Japanese / English code is allowed.
 
 ## Table of Contents
 
@@ -85,6 +86,60 @@ It is executed by a C-language interpreter.
 |---|---|
 | `は 数値` | : number |
 | `は 文字列` | : string |
+
+### English Syntax Aliases
+
+Hajimu can now parse a practical subset of English syntax aliases while using the same runtime and AST as Japanese Hajimu.
+
+```hajimu
+function add(a is number, b is number) is number:
+    return a + b
+end
+
+var numbers is array = [1, 2, 3]
+append(numbers, 4)
+
+var total = 0
+for value in numbers:
+    total += value
+end
+
+if total >= 10 then
+    print("OK")
+else:
+    print("NG")
+end
+```
+
+Common aliases:
+
+| Japanese | English |
+|---|---|
+| `関数` | `function`, `fn` |
+| `終わり` | `end` |
+| `戻す` / `返す` | `return` |
+| `変数` | `var`, `let` |
+| `定数` | `const` |
+| `もし` / `なら` / `それ以外` | `if` / `then` / `else` |
+| `条件` / `の間` | `while` / `do` |
+| `各 ... の中` | `for ... in ...:` |
+| `表示` | `print`, `println` |
+| `長さ` | `len`, `length` |
+| `追加` | `append`, `push` |
+
+The standard library also exposes English aliases. Representative examples:
+
+| Area | English aliases |
+|---|---|
+| Type checks | `is_number`, `is_string`, `is_array`, `is_dict`, `is_null` |
+| Strings | `substring`, `starts_with`, `ends_with`, `split`, `join`, `replace`, `upper`, `lower`, `trim` |
+| Arrays | `sort`, `reverse`, `slice`, `index_of`, `contains`, `flat`, `insert`, `unique`, `zip` |
+| Math | `abs`, `sqrt`, `floor`, `ceil`, `round`, `sin`, `cos`, `tan`, `log`, `random_int` |
+| JSON / HTTP | `json_encode`, `json_decode`, `http_get`, `http_post`, `http_put`, `http_delete` |
+| Regex | `regex_match`, `regex_search`, `regex_replace` |
+| Path / Base64 | `path_join`, `basename`, `dirname`, `extension`, `base64_encode`, `base64_decode` |
+| Sets | `set`, `set_add`, `set_contains`, `set_union`, `set_intersection`, `set_difference` |
+| Async helpers | `async_run`, `await_task`, `await_all`, `atomic_create`, `channel_create`, `channel_try_send` |
 
 ---
 
@@ -570,6 +625,7 @@ Define with `静的 関数`. Call as `ClassName.method()` without an instance.
 // Import by file path
 取り込む "math.jp"
 取り込む "utils/helpers.jp"
+取り込む "english_module.haj"
 
 // Import by package name (works with package manager)
 取り込む "my-package"
@@ -580,6 +636,8 @@ Define with `静的 関数`. Call as `ClassName.method()` without an instance.
 1. **Relative to the caller** — directory of the currently executing file
 2. **Current working directory**
 3. **Package search** — `hajimu_packages/` and `~/.hajimu/packages/`
+
+Source modules can use `.jp`, `.haj`, or `.hajimu`. When the extension is omitted for a file path, Hajimu tries `.jp`, then `.haj`, then `.hajimu`.
 
 ### Deduplication
 
@@ -887,7 +945,7 @@ Runs a shell command and returns stdout as a string.
 |---|---|---|
 | `システム名` | OS name | `"macOS"` / `"Linux"` / `"Windows"` |
 | `アーキテクチャ` | CPU architecture | `"arm64"` / `"x86-64"` |
-| `はじむバージョン` | Interpreter version | `"1.3.3"` |
+| `はじむバージョン` | Interpreter version | `"1.4.0"` |
 | `システム["OS"]` | Same as `システム名` | |
 | `システム["区切り文字"]` | Path separator | `/` (Windows: `\`) |
 | `システム["改行"]` | Newline | `\n` (Windows: `\r\n`) |
@@ -926,6 +984,10 @@ Built on libcurl. All functions return a response dictionary.
 | `"本文"` | Response body (string) |
 | `"ヘッダー"` | Response headers (dict) |
 | `"エラー"` | Error message (on failure) |
+| `"エラーコード"` | libcurl error code (on failure) |
+| `"URL"` | Request URL (useful when diagnosing failures) |
+
+On network failure, `"状態"` is `0`, `"本文"` is an empty string, and `"ヘッダー"` is an empty dict. Check `"状態"` or `"エラー"` before calling `JSON解析(応答["本文"])`.
 
 ### `HTTP取得(url [, headers])` — GET
 
@@ -1257,6 +1319,24 @@ $ nihongo script.jp arg1 arg2 arg3
 各 値 を 引数 の中:
     表示("arg:", 値)
 終わり
+```
+
+---
+
+## Bytecode `.hjp`
+
+Source files with `.jp`, `.haj`, or `.hajimu` can be packed into HJPB `.hjp` bytecode. HJPB files embed source text and can be executed directly.
+
+```bash
+nihongo build main.haj
+nihongo main.hjp
+nihongo info main.hjp
+```
+
+When the output path is omitted, Hajimu replaces the input extension with `.hjp`. You can also pass an explicit output path.
+
+```bash
+nihongo build main.haj dist/app.hjp
 ```
 
 ---
@@ -1623,6 +1703,10 @@ Entry point search order within a package:
 1. File specified by `"メイン"` in `hajimu.json`
 2. `main.jp`
 3. `<package-name>.jp`
+4. `main.haj`
+5. `<package-name>.haj`
+6. `main.hajimu`
+7. `<package-name>.hajimu`
 
 ---
 
@@ -1825,5 +1909,5 @@ Hello, World!
 
 ## Version
 
-- Version: 1.3.3
+- Version: 1.4.0
 - Author: Reo Shiozawa

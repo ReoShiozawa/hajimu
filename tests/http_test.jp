@@ -1,63 +1,97 @@
-// JSON テスト
+// JSON / HTTP テスト
+// 外部サービスに依存しないよう、非同期でローカルサーバーを起動して検証する。
+
+変数 成功数 = 0
+変数 失敗数 = 0
+
+関数 確認(名前, 実際, 期待):
+    もし 文字列化(実際) == 文字列化(期待) なら
+        成功数 += 1
+    それ以外
+        失敗数 += 1
+        表示("X " + 名前 + ": 期待=" + 文字列化(期待) + " 実際=" + 文字列化(実際))
+    終わり
+終わり
+
 表示("=== JSON テスト ===")
 
-// 辞書をJSONに変換
 変数 データ = {"名前": "太郎", "年齢": 25, "趣味": ["読書", "プログラミング"]}
 変数 json文字列 = JSON化(データ)
-表示("JSON化: " + json文字列)
+変数 再解析 = JSON解析(json文字列)
+確認("JSON roundtrip name", 再解析["名前"], "太郎")
+確認("JSON roundtrip array length", 長さ(再解析["趣味"]), 2)
 
-// JSONをパース
 変数 解析結果 = JSON解析("{\"message\":\"hello\",\"count\":42,\"items\":[1,2,3]}")
-表示("JSON解析: " + 文字列化(解析結果))
+確認("JSON parse message", 解析結果["message"], "hello")
+確認("JSON parse count", 解析結果["count"], 42)
 
-// ネストされたJSON
 変数 複雑 = JSON解析("{\"user\":{\"name\":\"花子\",\"active\":true},\"scores\":[90,85,95]}")
-表示("ユーザー名: " + 文字列化(複雑["user"]["name"]))
-表示("スコア: " + 文字列化(複雑["scores"]))
+確認("nested JSON user", 複雑["user"]["name"], "花子")
+確認("nested JSON scores", 複雑["scores"][1], 85)
 
-// 配列のJSON
 変数 テスト配列 = [1, "hello", 真]
-表示("配列JSON: " + JSON化(テスト配列))
+確認("array JSON", JSON化(テスト配列), "[1,\"hello\",true]")
 
-表示("")
 表示("=== HTTP GET テスト ===")
 
-// パブリックAPIにGETリクエスト
-変数 応答 = HTTP取得("https://httpbin.org/get")
-表示("ステータス: " + 文字列化(応答["状態"]))
+関数 GETサーバー():
+    戻す サーバー起動(18081, 5)
+終わり
 
-// レスポンスのJSONをパース
+変数 getTask = 非同期実行(GETサーバー)
+待つ(0.1)
+変数 応答 = HTTP取得("http://127.0.0.1:18081/get?kind=test")
+変数 getReq = 待機(getTask, 5)
 変数 本文 = JSON解析(応答["本文"])
-表示("User-Agent: " + 文字列化(本文["headers"]["User-Agent"]))
 
-表示("")
+確認("GET status", 応答["状態"], 200)
+確認("GET body", 本文["状態"], "受信完了")
+確認("GET method", getReq["メソッド"], "GET")
+確認("GET path", getReq["パス"], "/get")
+確認("GET query", getReq["クエリ"], "kind=test")
+確認("GET user-agent", getReq["ヘッダー"]["user-agent"], "nihongo-lang/1.0")
+
 表示("=== HTTP POST テスト ===")
 
-// POSTリクエスト（JSON送信）
+関数 POSTサーバー():
+    戻す サーバー起動(18082, 5)
+終わり
+
+変数 postTask = 非同期実行(POSTサーバー)
+待つ(0.1)
 変数 送信データ = {"名前": "太郎", "メッセージ": "こんにちは"}
-変数 結果 = HTTP送信("https://httpbin.org/post", 送信データ)
-表示("POSTステータス: " + 文字列化(結果["状態"]))
-
+変数 結果 = HTTP送信("http://127.0.0.1:18082/post", 送信データ)
+変数 postReq = 待機(postTask, 5)
 変数 post本文 = JSON解析(結果["本文"])
-表示("送信したデータ: " + 文字列化(post本文["data"]))
 
-表示("")
+確認("POST status", 結果["状態"], 200)
+確認("POST response body", post本文["状態"], "受信完了")
+確認("POST method", postReq["メソッド"], "POST")
+確認("POST content type", postReq["ヘッダー"]["content-type"], "application/json; charset=utf-8")
+確認("POST parsed name", postReq["データ"]["名前"], "太郎")
+
+表示("=== カスタムヘッダー付きリクエスト ===")
+
+関数 Headerサーバー():
+    戻す サーバー起動(18083, 5)
+終わり
+
+変数 headerTask = 非同期実行(Headerサーバー)
+待つ(0.1)
+変数 ヘッダー = {"Authorization": "Bearer test-token", "X-Custom": "nihongo-lang"}
+変数 応答2 = HTTP取得("http://127.0.0.1:18083/headers", ヘッダー)
+変数 headerReq = 待機(headerTask, 5)
+
+確認("custom header status", 応答2["状態"], 200)
+確認("custom header auth", headerReq["ヘッダー"]["authorization"], "Bearer test-token")
+確認("custom header value", headerReq["ヘッダー"]["x-custom"], "nihongo-lang")
+
 表示("=== URL エンコード テスト ===")
 
 変数 日本語 = "こんにちは 世界"
 変数 エンコード済み = URLエンコード(日本語)
-表示("エンコード: " + エンコード済み)
-
 変数 デコード済み = URLデコード(エンコード済み)
-表示("デコード: " + デコード済み)
+確認("url decode", デコード済み, 日本語)
 
-表示("")
-表示("=== カスタムヘッダー付きリクエスト ===")
-
-変数 ヘッダー = {"Authorization": "Bearer test-token", "X-Custom": "nihongo-lang"}
-変数 応答2 = HTTP取得("https://httpbin.org/headers", ヘッダー)
-変数 ヘッダー結果 = JSON解析(応答2["本文"])
-表示("カスタムヘッダー: " + 文字列化(ヘッダー結果["headers"]["X-Custom"]))
-
-表示("")
-表示("全テスト完了！")
+表明(失敗数 == 0, "http_test failed: " + 文字列化(失敗数))
+表示("http_test: " + 文字列化(成功数) + " passed")

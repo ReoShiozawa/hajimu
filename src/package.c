@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <errno.h>
+#include <curl/curl.h>
 
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -50,6 +51,30 @@
 // ヘルパー関数
 // =============================================================================
 
+static bool shell_arg_is_safe(const char *s) {
+    if (s == NULL || s[0] == '\0') return false;
+
+    /* git clone は互換性のため shell 経由で実行している。
+     * URL/パスに shell メタ文字が入るとコマンド注入につながるため拒否する。 */
+    const char *unsafe = "\"'`$&|;<>\\\r\n";
+#ifdef _WIN32
+    unsafe = "\"'`$&|;<>\\^%!()\r\n";
+#endif
+    return strpbrk(s, unsafe) == NULL;
+}
+
+static void safe_copy(char *dst, size_t dst_size, const char *src) {
+    if (dst == NULL || dst_size == 0) return;
+    if (src == NULL) src = "";
+
+    size_t i = 0;
+    while (i + 1 < dst_size && src[i] != '\0') {
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = '\0';
+}
+
 /**
  * ディレクトリを再帰的に作成
  */
@@ -83,6 +108,14 @@ static bool dir_exists(const char *path) {
 static bool file_exists(const char *path) {
     struct stat st;
     return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+static bool has_source_script_extension(const char *path) {
+    size_t len = strlen(path);
+    return (len >= 3 && strcmp(path + len - 3, ".jp") == 0 &&
+            (len < 4 || path[len - 4] != 'h')) ||
+           (len >= 4 && strcmp(path + len - 4, ".haj") == 0) ||
+           (len >= 7 && strcmp(path + len - 7, ".hajimu") == 0);
 }
 
 /**
@@ -462,23 +495,40 @@ static void normalize_github_url(const char *input, char *url, int max_len) {
     }
 }
 
-/**
- * URL からファイルをダウンロードして dest_path に保存する
- * curl コマンドを使用（Windows 10+/macOS/Linux で利用可、MSYS2 usr/bin にも存在）
- * 成功なら true、失敗（404含む）なら false
- */
 static bool download_to_file(const char *url, const char *dest_path) {
-    char cmd[PACKAGE_MAX_PATH * 3];
-#ifdef _WIN32
-    snprintf(cmd, sizeof(cmd),
-        "curl -fsSL --max-time 30 -o \"%s\" \"%s\" >NUL 2>&1",
-        dest_path, url);
-#else
-    snprintf(cmd, sizeof(cmd),
-        "curl -fsSL --max-time 30 -o \"%s\" \"%s\" >/dev/null 2>&1",
-        dest_path, url);
+    if (url == NULL || dest_path == NULL) return false;
+
+    CURL *curl = curl_easy_init();
+    if (curl == NULL) return false;
+
+    FILE *out = fopen(dest_path, "wb");
+    if (out == NULL) {
+        curl_easy_cleanup(curl);
+        return false;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
+    curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, fwrite);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, out);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "hajimu-package-manager/1.0");
+#ifndef _WIN32
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 #endif
-    return system(cmd) == 0;
+
+    CURLcode res = curl_easy_perform(curl);
+    fclose(out);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK) {
+        unlink(dest_path);
+        return false;
+    }
+    return true;
 }
 
 /**
@@ -497,6 +547,11 @@ static void repo_base_url(const char *repo_url, char *base, int max_len) {
 static int git_clone(const char *url, const char *dest) {
     char cmd[PACKAGE_MAX_PATH * 2];
 
+    if (!shell_arg_is_safe(url) || !shell_arg_is_safe(dest)) {
+        fprintf(stderr, "エラー: パッケージURLまたは保存先パスに使用できない文字が含まれています\n");
+        return 1;
+    }
+
 #ifdef _WIN32
     /* where コマンドで git の存在を事前確認 */
     if (system("where git >nul 2>&1") != 0) {
@@ -513,7 +568,11 @@ static int git_clone(const char *url, const char *dest) {
     }
 #endif
 
-    snprintf(cmd, sizeof(cmd), "git clone --depth 1 -q \"%s\" \"%s\" 2>&1", url, dest);
+    int written = snprintf(cmd, sizeof(cmd), "git clone --depth 1 -q \"%s\" \"%s\" 2>&1", url, dest);
+    if (written < 0 || written >= (int)sizeof(cmd)) {
+        fprintf(stderr, "エラー: git clone コマンドが長すぎます\n");
+        return 1;
+    }
 
     FILE *pipe = popen(cmd, "r");
     if (!pipe) {
@@ -683,21 +742,27 @@ int package_install(const char *name_or_url) {
     //   ネイティブ C プラグイン (.hjp DLL/dylib): ビルドまたは pre-built ダウンロード
     {
         // ── スクリプトパッケージの判定 ──
-        // hajimu.json の "メイン" が .jp ファイルを指し、ビルドコマンドがない場合
+        // hajimu.json の "メイン" がソースファイルを指し、ビルドコマンドがない場合
         bool is_script_package = false;
         if (has_manifest) {
             const char *mf = pkg_manifest.main_file;
-            size_t mf_len = strlen(mf);
-            bool main_is_jp = (mf_len >= 3 && strcmp(mf + mf_len - 3, ".jp") == 0
-                               && (mf_len < 4 || mf[mf_len - 4] != 'h')); /* .jp but not .hjp */
-            if (main_is_jp && !pkg_manifest.build_cmd[0]) {
+            if (has_source_script_extension(mf) && !pkg_manifest.build_cmd[0]) {
                 is_script_package = true;
             }
         } else {
-            // hajimu.json がない場合、main.jp / <name>.jp の存在でスクリプトと判定
-            char jp_path[PACKAGE_MAX_PATH + 32];
-            snprintf(jp_path, sizeof(jp_path), "%s/main.jp", pkg_dir);
-            if (file_exists(jp_path)) is_script_package = true;
+            // hajimu.json がない場合、main.* / <name>.* の存在でスクリプトと判定
+            static const char * const source_exts[] = {".jp", ".haj", ".hajimu", NULL};
+            char source_path[PACKAGE_MAX_PATH + PACKAGE_MAX_NAME];
+            for (int ext_i = 0; source_exts[ext_i] != NULL && !is_script_package; ext_i++) {
+                snprintf(source_path, sizeof(source_path), "%s/main%s", pkg_dir, source_exts[ext_i]);
+                if (file_exists(source_path)) {
+                    is_script_package = true;
+                    break;
+                }
+                snprintf(source_path, sizeof(source_path), "%s/%s%s",
+                         pkg_dir, package_name, source_exts[ext_i]);
+                if (file_exists(source_path)) is_script_package = true;
+            }
         }
 
         if (is_script_package) {
@@ -758,7 +823,7 @@ int package_install(const char *name_or_url) {
                 printf("   🌐 ビルド済みバイナリを確認中...\n");
                 if (download_to_file(release_candidates[ci], dest) && file_exists(dest)) {
                     printf("   ✅ ビルド済みバイナリをダウンロードしました\n");
-                    strncpy(found_hjp, dest, sizeof(found_hjp)-1);
+                    safe_copy(found_hjp, sizeof(found_hjp), dest);
                     hjp_found = true;
                     /* main を更新 */
                     PackageManifest updated_m;
@@ -835,7 +900,7 @@ int package_install(const char *name_or_url) {
                 (user_cmd[4] == '\0' || user_cmd[4] == ' ')) {
                 is_make_cmd = true;
                 if (user_cmd[4] == ' ') {
-                    strncpy(make_args_only, user_cmd + 5, sizeof(make_args_only) - 1);
+                    safe_copy(make_args_only, sizeof(make_args_only), user_cmd + 5);
                 }
             }
 #endif
@@ -891,7 +956,7 @@ int package_install(const char *name_or_url) {
                 /* PATH エントリから祖先を辿って msys2_root を探すヘルパー */
 #define TRY_FIND_MSYS2_ROOT(entry) do { \
     char _tmp[PACKAGE_MAX_PATH]; \
-    strncpy(_tmp, (entry), sizeof(_tmp)-1); \
+    safe_copy(_tmp, sizeof(_tmp), (entry)); \
     /* 最大4段上まで辿る */ \
     for (int _d = 0; _d <= 4 && !msys2_root[0]; _d++) { \
         /* AppData / WindowsApps は無条件スキップ */ \
@@ -899,7 +964,7 @@ int package_install(const char *name_or_url) {
         char _probe[PACKAGE_MAX_PATH + 30]; \
         snprintf(_probe, sizeof(_probe), "%s\\mingw64\\bin\\gcc.exe", _tmp); \
         if (GetFileAttributesA(_probe) != INVALID_FILE_ATTRIBUTES) { \
-            strncpy(msys2_root, _tmp, sizeof(msys2_root)-1); \
+            safe_copy(msys2_root, sizeof(msys2_root), _tmp); \
             break; \
         } \
         /* 1段上へ */ \
@@ -964,7 +1029,7 @@ int package_install(const char *name_or_url) {
                         char probe[PACKAGE_MAX_PATH + 30];
                         snprintf(probe, sizeof(probe), "%s\\mingw64\\bin\\gcc.exe", roots[ri]);
                         if (GetFileAttributesA(probe) != INVALID_FILE_ATTRIBUTES) {
-                            strncpy(msys2_root, roots[ri], sizeof(msys2_root)-1);
+                            safe_copy(msys2_root, sizeof(msys2_root), roots[ri]);
                         }
                     }
                 }
@@ -1014,10 +1079,10 @@ int package_install(const char *name_or_url) {
                     if (pkg_dir[1] == ':') {
                         msys2_dir[0] = '/';
                         msys2_dir[1] = (char)tolower((unsigned char)pkg_dir[0]);
-                        strncpy(msys2_dir + 2, pkg_dir + 2, sizeof(msys2_dir) - 3);
+                        safe_copy(msys2_dir + 2, sizeof(msys2_dir) - 2, pkg_dir + 2);
                         for (char *p = msys2_dir; *p; p++) if (*p == '\\') *p = '/';
                     } else {
-                        strncpy(msys2_dir, pkg_dir, sizeof(msys2_dir)-1);
+                        safe_copy(msys2_dir, sizeof(msys2_dir), pkg_dir);
                         for (char *p = msys2_dir; *p; p++) if (*p == '\\') *p = '/';
                     }
 
@@ -1027,10 +1092,10 @@ int package_install(const char *name_or_url) {
                         if (include_dir[1] == ':') {
                             msys2_inc[0] = '/';
                             msys2_inc[1] = (char)tolower((unsigned char)include_dir[0]);
-                            strncpy(msys2_inc + 2, include_dir + 2, sizeof(msys2_inc) - 3);
+                            safe_copy(msys2_inc + 2, sizeof(msys2_inc) - 2, include_dir + 2);
                             for (char *p = msys2_inc; *p; p++) if (*p == '\\') *p = '/';
                         } else {
-                            strncpy(msys2_inc, include_dir, sizeof(msys2_inc)-1);
+                            safe_copy(msys2_inc, sizeof(msys2_inc), include_dir);
                         }
                         snprintf(build_cmd, sizeof(build_cmd),
                             "\"%s\" --login -c \"cd '%s' && HAJIMU_INCLUDE='%s' make %s\" 2>&1",
@@ -1047,16 +1112,16 @@ int package_install(const char *name_or_url) {
                     FILE *gm = popen("make --version 2>NUL", "r");
                     if (gm) {
                         char _t[64] = {0};
-                        if (fgets(_t, sizeof(_t), gm)) strncpy(make_tool, "make", sizeof(make_tool)-1);
+                        if (fgets(_t, sizeof(_t), gm)) safe_copy(make_tool, sizeof(make_tool), "make");
                         pclose(gm);
                     }
                     char final_cmd[PACKAGE_MAX_PATH] = {0};
                     if (make_args_only[0])
                         snprintf(final_cmd, sizeof(final_cmd), "%s %s", make_tool, make_args_only);
                     else if (is_make_cmd)
-                        strncpy(final_cmd, make_tool, sizeof(final_cmd)-1);
+                        safe_copy(final_cmd, sizeof(final_cmd), make_tool);
                     else
-                        strncpy(final_cmd, user_cmd, sizeof(final_cmd)-1);
+                        safe_copy(final_cmd, sizeof(final_cmd), user_cmd);
 
                     if (_chdir(win_pkg_dir) != 0) {
                         fprintf(stderr, "   ⚠  ディレクトリ変更失敗: %s\n", win_pkg_dir);
@@ -1391,13 +1456,17 @@ bool package_resolve(const char *package_name, const char *caller_file,
             if (file_exists(resolved_path)) return true;
         }
 
-        // main.jp を試す
-        snprintf(resolved_path, max_len, "%s/main.jp", search_paths[i]);
-        if (file_exists(resolved_path)) return true;
+        // ソーススクリプトを試す (.jp / .haj / .hajimu)
+        static const char * const source_exts[] = {".jp", ".haj", ".hajimu", NULL};
+        for (int ext_i = 0; source_exts[ext_i] != NULL; ext_i++) {
+            snprintf(resolved_path, max_len, "%s/main%s",
+                     search_paths[i], source_exts[ext_i]);
+            if (file_exists(resolved_path)) return true;
 
-        // <パッケージ名>.jp を試す
-        snprintf(resolved_path, max_len, "%s/%s.jp", search_paths[i], package_name);
-        if (file_exists(resolved_path)) return true;
+            snprintf(resolved_path, max_len, "%s/%s%s",
+                     search_paths[i], package_name, source_exts[ext_i]);
+            if (file_exists(resolved_path)) return true;
+        }
 
         /* --- .hjp ファイルのフォールバック検索 ---
          * hajimu.json の main が未設定 / 検出できなかった場合に

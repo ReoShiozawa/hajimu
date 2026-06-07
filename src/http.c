@@ -11,6 +11,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <math.h>
+#include <stdint.h>
 
 #define JSON_STRING_INITIAL_CAPACITY 64
 
@@ -444,9 +445,11 @@ typedef struct {
 } CurlBuffer;
 
 static size_t http_write_cb(void *contents, size_t size, size_t nmemb, void *userp) {
+    if (size != 0 && nmemb > SIZE_MAX / size) return 0;
     size_t realsize = size * nmemb;
     CurlBuffer *buf = (CurlBuffer *)userp;
-    
+
+    if (realsize > SIZE_MAX - buf->size - 1) return 0;
     char *ptr = realloc(buf->data, buf->size + realsize + 1);
     if (ptr == NULL) return 0;
     
@@ -472,6 +475,7 @@ static size_t curl_header_callback(char *buffer, size_t size, size_t nitems, voi
     if (colon && hd->dict) {
         int key_len = (int)(colon - buffer);
         char *key = strndup(buffer, key_len);
+        if (key == NULL) return 0;
         
         // 値の前の空白をスキップ
         char *val_start = colon + 1;
@@ -511,12 +515,50 @@ static Value http_request(const char *method, const char *url,
         Value result = value_dict();
         Value err = value_string("curlの初期化に失敗しました");
         dict_set(&result, "エラー", err);
+        Value status = value_number(0);
+        dict_set(&result, "状態", status);
+        Value code = value_number((double)CURLE_FAILED_INIT);
+        dict_set(&result, "エラーコード", code);
+        Value body = value_string("");
+        dict_set(&result, "本文", body);
+        Value headers = value_dict();
+        dict_set(&result, "ヘッダー", headers);
+        Value url_val = value_string(url ? url : "");
+        dict_set(&result, "URL", url_val);
         value_free(&err);
+        value_free(&status);
+        value_free(&code);
+        value_free(&body);
+        value_free(&headers);
+        value_free(&url_val);
         return result;
     }
     
     CurlBuffer response_body = {NULL, 0};
     response_body.data = malloc(1);
+    if (response_body.data == NULL) {
+        curl_easy_cleanup(curl);
+        Value result = value_dict();
+        Value err = value_string("HTTPレスポンス用メモリを確保できません");
+        dict_set(&result, "エラー", err);
+        Value status = value_number(0);
+        dict_set(&result, "状態", status);
+        Value code = value_number(0);
+        dict_set(&result, "エラーコード", code);
+        Value body = value_string("");
+        dict_set(&result, "本文", body);
+        Value headers = value_dict();
+        dict_set(&result, "ヘッダー", headers);
+        Value url_val = value_string(url ? url : "");
+        dict_set(&result, "URL", url_val);
+        value_free(&err);
+        value_free(&status);
+        value_free(&code);
+        value_free(&body);
+        value_free(&headers);
+        value_free(&url_val);
+        return result;
+    }
     response_body.data[0] = '\0';
     
     Value resp_headers = value_dict();
@@ -590,8 +632,18 @@ static Value http_request(const char *method, const char *url,
         dict_set(&result, "エラー", err);
         Value status = value_number(0);
         dict_set(&result, "状態", status);
+        Value code = value_number((double)res);
+        dict_set(&result, "エラーコード", code);
+        Value body_val = value_string_n(response_body.data, (int)response_body.size);
+        dict_set(&result, "本文", body_val);
+        dict_set(&result, "ヘッダー", resp_headers);
+        Value url_val = value_string(url);
+        dict_set(&result, "URL", url_val);
         value_free(&err);
         value_free(&status);
+        value_free(&code);
+        value_free(&body_val);
+        value_free(&url_val);
     } else {
         // ステータスコード
         long http_code = 0;

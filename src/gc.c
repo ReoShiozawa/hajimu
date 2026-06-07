@@ -3,6 +3,11 @@
 #include "value.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
+
+// 非同期タスクの detached 評価器も同じ GC リストを使うため、
+// 追跡リストの追加・削除・収集はプロセス全体で直列化する。
+static pthread_mutex_t g_gc_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 typedef void (*ClosureVisitor)(Environment *env, void *ctx);
 
@@ -199,6 +204,8 @@ static int gc_sweep(GC *gc) {
 
 void gc_init(GC *gc) {
     if (gc == NULL) return;
+
+    pthread_mutex_lock(&g_gc_mutex);
     gc->head.gc_next = &gc->head;
     gc->head.gc_prev = &gc->head;
     gc->head.gc_refs = 0;
@@ -207,10 +214,13 @@ void gc_init(GC *gc) {
     gc->threshold = 128;
     gc->collections = 0;
     gc->collected = 0;
+    pthread_mutex_unlock(&g_gc_mutex);
 }
 
 void gc_shutdown(GC *gc) {
     if (gc == NULL) return;
+
+    pthread_mutex_lock(&g_gc_mutex);
 
     // 残存する追跡中Environmentを全て解放
     GCNode *node = gc->head.gc_next;
@@ -243,11 +253,17 @@ void gc_shutdown(GC *gc) {
     gc->head.gc_next = &gc->head;
     gc->head.gc_prev = &gc->head;
     gc->tracked_count = 0;
+    pthread_mutex_unlock(&g_gc_mutex);
 }
 
 void gc_track(GC *gc, Environment *env) {
     if (gc == NULL || env == NULL) return;
-    if (gc_is_tracked(gc, env)) return;
+
+    pthread_mutex_lock(&g_gc_mutex);
+    if (gc_is_tracked(gc, env)) {
+        pthread_mutex_unlock(&g_gc_mutex);
+        return;
+    }
 
     GCNode *node = &env->gc_node;
     node->gc_next = gc->head.gc_next;
@@ -258,11 +274,17 @@ void gc_track(GC *gc, Environment *env) {
     node->gc_marked = false;
     node->gc_tracked = true;
     gc->tracked_count++;
+    pthread_mutex_unlock(&g_gc_mutex);
 }
 
 void gc_untrack(GC *gc, Environment *env) {
     if (gc == NULL || env == NULL) return;
-    if (!gc_is_tracked(gc, env)) return;
+
+    pthread_mutex_lock(&g_gc_mutex);
+    if (!gc_is_tracked(gc, env)) {
+        pthread_mutex_unlock(&g_gc_mutex);
+        return;
+    }
 
     GCNode *node = &env->gc_node;
     node->gc_prev->gc_next = node->gc_next;
@@ -275,10 +297,17 @@ void gc_untrack(GC *gc, Environment *env) {
     if (gc->tracked_count > 0) {
         gc->tracked_count--;
     }
+    pthread_mutex_unlock(&g_gc_mutex);
 }
 
 int gc_collect(GC *gc) {
-    if (gc == NULL || gc->tracked_count <= 0) return 0;
+    if (gc == NULL) return 0;
+
+    pthread_mutex_lock(&g_gc_mutex);
+    if (gc->tracked_count <= 0) {
+        pthread_mutex_unlock(&g_gc_mutex);
+        return 0;
+    }
 
     gc_update_refs(gc);
     gc_subtract_internal_refs(gc);
@@ -287,11 +316,15 @@ int gc_collect(GC *gc) {
     int collected = gc_sweep(gc);
     gc->collections++;
     gc->collected += collected;
+    pthread_mutex_unlock(&g_gc_mutex);
     return collected;
 }
 
 void gc_stats(GC *gc) {
     if (gc == NULL) return;
+
+    pthread_mutex_lock(&g_gc_mutex);
     printf("[GC] tracked=%d threshold=%d collections=%d collected=%d\n",
            gc->tracked_count, gc->threshold, gc->collections, gc->collected);
+    pthread_mutex_unlock(&g_gc_mutex);
 }

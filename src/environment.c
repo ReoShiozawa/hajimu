@@ -7,8 +7,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <pthread.h>
 
 extern GC *g_gc;
+
+// 非同期ワーカーが関数クロージャをコピー/解放するため、
+// Environment の参照カウント更新はプロセス全体で直列化する。
+static pthread_mutex_t g_env_ref_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // =============================================================================
 // ハッシュ関数
@@ -29,6 +34,8 @@ static uint32_t hash_string(const char *s) {
 
 Environment *env_new(Environment *parent) {
     Environment *env = calloc(1, sizeof(Environment));
+    if (env == NULL) return NULL;
+
     env->parent = parent;
     env->depth = parent ? parent->depth + 1 : 0;
     env->ref_count = 1;
@@ -68,13 +75,24 @@ void env_free(Environment *env) {
 
 void env_retain(Environment *env) {
     if (env == NULL) return;
+
+    pthread_mutex_lock(&g_env_ref_mutex);
     env->ref_count++;
+    pthread_mutex_unlock(&g_env_ref_mutex);
 }
 
 void env_release(Environment *env) {
     if (env == NULL) return;
+
+    bool should_free = false;
+    pthread_mutex_lock(&g_env_ref_mutex);
     env->ref_count--;
     if (env->ref_count <= 0) {
+        should_free = true;
+    }
+    pthread_mutex_unlock(&g_env_ref_mutex);
+
+    if (should_free) {
         env_free(env);
     }
 }
@@ -130,7 +148,13 @@ bool env_define(Environment *env, const char *name, Value value, bool is_const) 
     
     // 新しいエントリを作成
     EnvEntry *entry = malloc(sizeof(EnvEntry));
+    if (entry == NULL) return false;
+
     entry->name = strdup(name);
+    if (entry->name == NULL) {
+        free(entry);
+        return false;
+    }
     entry->value = value;
     entry->is_const = is_const;
     

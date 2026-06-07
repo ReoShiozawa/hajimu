@@ -3,10 +3,9 @@
 ## Introduction
 
 Hajimu (はじむ) is a programming language designed to express code naturally using Japanese syntax.
-Even beginners can write programs intuitively.
+It also accepts practical English aliases, so learners can move gradually between Japanese-first code and English-style programming concepts.
 
-> **Note:** Hajimu's keywords are Japanese. Code examples in this tutorial use the actual Japanese keywords.
-> Refer to the keyword glossary at the end of each section for translation help.
+> **Note:** Japanese syntax remains the core style. English aliases such as `function`, `if`, `for`, `return`, and `print` are additional spellings that connect to the same runtime.
 
 ---
 
@@ -593,7 +592,7 @@ Hajimu provides built-in constants to detect the current OS and architecture at 
 ```jp
 表示(システム名)           // → "macOS" / "Linux" / "Windows"
 表示(アーキテクチャ)       // → "arm64" / "x86-64"
-表示(はじむバージョン)     // → "1.3.3"
+表示(はじむバージョン)     // → "1.4.0"
 
 // Detailed info via the システム dictionary
 表示(システム["OS"])        // → "macOS"
@@ -632,6 +631,96 @@ When you write `取り込む "engine_render"`, Hajimu automatically picks the co
 | Windows | `engine_render-windows-x64.hjp` |
 
 See the [Plugin Development Guide](PLUGIN_DEVELOPMENT.md) for how to build cross-platform packages.
+
+---
+
+## Writing With English Aliases
+
+You can write basic Hajimu programs with English aliases while using the same runtime. Source files can use `.jp`, `.haj`, or `.hajimu`; `.haj` and `.hajimu` are convenient when presenting English-first material.
+
+```hajimu
+function greet(name):
+    print("Hello, " + name)
+end
+
+greet("Hajimu")
+```
+
+Japanese and English names can be mixed in one file. This is useful for learning because you can replace only the parts you are ready to practice.
+
+```hajimu
+function 合計(numbers):
+    var total = 0
+    for value in numbers:
+        total += value
+    end
+    return total
+end
+
+print(to_string(合計([1, 2, 3])))
+```
+
+### Conditionals And Loops
+
+```hajimu
+var score = 82
+
+if score >= 80:
+    print("great")
+else if score >= 60:
+    print("ok")
+else:
+    print("try again")
+end
+
+for i from 1 to 3:
+    print(i)
+end
+
+var fruits = ["apple", "banana", "orange"]
+for fruit in fruits:
+    print(fruit)
+end
+```
+
+### Classes And Imports
+
+```hajimu
+class User:
+    init(name):
+        self.name = name
+    end
+
+    function greet():
+        return "Hello, " + self.name
+    end
+end
+
+var user = new User("Aki")
+print(user.greet())
+
+import "math_utils" as math
+```
+
+### Common Alias Map
+
+| Japanese | English alias |
+|---|---|
+| `関数` | `function`, `fn` |
+| `終わり` | `end` |
+| `戻す` | `return` |
+| `変数` | `var`, `let` |
+| `定数` | `const` |
+| `もし` / `それ以外` | `if` / `else` |
+| `条件` | `while` |
+| `繰り返す` | `for` |
+| `取り込む` | `import`, `use` |
+| `表示` | `print`, `println` |
+| `長さ` | `len`, `length` |
+| `文字列化` | `to_string` |
+| `数値化` | `to_number` |
+
+See [English Alias Naming And Collision Policy](ENGLISH_ALIAS_POLICY.md) for reserved names and naming rules.
 
 ---
 

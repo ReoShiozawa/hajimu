@@ -100,6 +100,12 @@ typedef struct {
     
     // C拡張プラグインマネージャ
     PluginManager plugin_manager;
+
+    // ランタイム所有権
+    // メイン評価器だけが非同期ランタイムとGC全体の終了処理を担当する。
+    // 非同期ワーカー用の評価器はこのフラグを false にして、他スレッドの
+    // 実行中に共有ランタイムを片付けないようにする。
+    bool owns_runtime_context;
 } Evaluator;
 
 // =============================================================================
@@ -111,6 +117,16 @@ typedef struct {
  * @return 新しい評価器
  */
 Evaluator *evaluator_new(void);
+
+/**
+ * 非同期ワーカーやスケジューラ用の評価器を作成
+ *
+ * 現在のスレッドでは evaluator_current() の対象になりますが、
+ * プロセス全体のメイン評価器や共有ランタイムの所有者にはなりません。
+ *
+ * @return 新しいワーカー用評価器
+ */
+Evaluator *evaluator_new_detached(void);
 
 /**
  * 評価器を解放

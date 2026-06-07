@@ -150,7 +150,7 @@ static void execute_task(AsyncTask *task) {
         task->result = task->function.builtin.fn(task->arg_count, task->args);
         task->status = TASK_COMPLETED;
     } else if (task->function.type == VALUE_FUNCTION) {
-        Evaluator *thread_eval = evaluator_new();
+        Evaluator *thread_eval = evaluator_new_detached();
         
         ASTNode *def = task->function.function.definition;
         Parameter *params;
@@ -178,7 +178,10 @@ static void execute_task(AsyncTask *task) {
         Value result = evaluate(thread_eval, body);
         
         if (thread_eval->returning) {
-            result = thread_eval->return_value;
+            value_free(&result);
+            result = value_copy(thread_eval->return_value);
+            value_free(&thread_eval->return_value);
+            thread_eval->return_value = value_null();
             thread_eval->returning = false;
         }
         
@@ -1702,7 +1705,7 @@ static void *schedule_task_runner(void *arg) {
         if (task->function.type == VALUE_BUILTIN) {
             task->function.builtin.fn(0, NULL);
         } else if (task->function.type == VALUE_FUNCTION) {
-            Evaluator *thread_eval = evaluator_new();
+            Evaluator *thread_eval = evaluator_new_detached();
             
             ASTNode *def = task->function.function.definition;
             ASTNode *body;

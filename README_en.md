@@ -6,19 +6,23 @@
 
 > 🇯🇵 **日本語版 README はこちら:** [README.md](README.md)
 
-**Write in Japanese. Think in Japanese.** A programming language built around natural Japanese expression.
+**Write in Japanese. Think in Japanese. Bridge to English syntax too.**
 
-Hajimu is a programming language with Japanese keywords and natural Japanese grammar —
-practical enough for production development, yet accessible enough for beginners.
+Hajimu is a programming language centered on Japanese keywords and natural Japanese grammar.
+It now also accepts practical English aliases such as `function`, `if`, `for`, and `print`,
+so learners can move between Japanese understanding and English-based programming concepts.
 
 ## ✨ Features
 
-- 🇯🇵 **Fully Japanese syntax**: All keywords are Japanese
-- 📖 **Intuitive grammar**: Code reads like natural Japanese
+- 🇯🇵 **Japanese-centered syntax**: Code can be written with Japanese keywords and natural word order
+- 🌐 **English aliases**: Practical aliases such as `function`, `if`, `for`, and `print`
+- 🧭 **Multiple source extensions**: `.jp`, `.haj`, and `.hajimu` source files are supported
+- 📖 **Intuitive grammar**: Move gradually between Japanese syntax and English-style code
 - ⚡ **Fast**: High-performance interpreter implemented in C
 - 🔧 **Practical**: 143 built-in functions, HTTP client, async/parallel support
 - 📦 **Package manager**: Built-in manager for external packages
 - 🔌 **C extension plugins**: Cross-platform `.hjp` plugin format — write plugins in C, C++, Rust, Go, or Zig
+- 📦 **HJPB bytecode**: Build `.jp/.haj/.hajimu` into directly executable `.hjp` files
 - 🧭 **Friendly diagnostics**: Shows causes, fixes, examples, and "did you mean" suggestions
 - 🎓 **Beginner-friendly**: Designed to be easy to learn even for first-time programmers
 - 🚀 **Modern**: Lambda expressions, list comprehensions, async/await, and more
@@ -291,6 +295,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 - **Issue tracker**: https://github.com/ReoShiozawa/hajimu/issues
 - **Tutorial (English)**: [docs/TUTORIAL_en.md](docs/TUTORIAL_en.md)
 - **Reference (English)**: [docs/REFERENCE_en.md](docs/REFERENCE_en.md)
+- **English alias policy**: [docs/ENGLISH_ALIAS_POLICY.md](docs/ENGLISH_ALIAS_POLICY.md)
 
 ## 📝 License
 
@@ -306,7 +311,8 @@ This project is released under the [MIT License](LICENSE).
 
 | Feature | Hajimu | Python | Ruby | JavaScript |
 |---|---|---|---|---|
-| Full Japanese syntax | ✅ | ❌ | ❌ | ❌ |
+| Japanese-centered syntax | ✅ | ❌ | ❌ | ❌ |
+| English alias syntax | ✅ | - | - | ✅ |
 | Learning difficulty | Low | Medium | Medium | Medium |
 | Type system | Dynamic | Dynamic | Dynamic | Dynamic |
 | Async support | ✅ | ✅ | ✅ | ✅ |

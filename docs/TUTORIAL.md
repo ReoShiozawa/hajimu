@@ -531,7 +531,7 @@ hajimu パッケージ インストール
 ```jp
 表示(システム名)           // → "macOS" / "Linux" / "Windows"
 表示(アーキテクチャ)       // → "arm64" / "x86-64"
-表示(はじむバージョン)     // → "1.3.3"
+表示(はじむバージョン)     // → "1.4.0"
 
 // システム辞書で詳細情報を取得
 表示(システム["OS"])        // → "macOS"
@@ -563,6 +563,100 @@ hajimu パッケージ インストール
 | Windows | `engine_render-windows-x64.hjp` |
 
 外部パッケージの開発方法は[外部パッケージ開発ガイド](外部パッケージ開発ガイド.md)を参照してください。
+
+---
+
+## 英語 alias で書く
+
+はじむは日本語構文を中心にしつつ、`function`、`if`、`for`、`print` などの英語 alias でも書けます。日本語で理解したあと、少しずつ英語圏のプログラミング言語に近い形へ移れるようにするための機能です。
+
+ソース拡張子は従来の `.jp` に加えて、英語教材や海外向けに見せやすい `.haj` / `.hajimu` も使えます。どの拡張子でも同じ実行系で動きます。
+
+### 最初の英語スタイル
+
+```hajimu
+function greet(name):
+    print("Hello, " + name)
+end
+
+greet("Hajimu")
+```
+
+日本語版と同じ AST / 評価器に接続されるため、同じファイル内で混在できます。
+
+```hajimu
+function 合計(numbers):
+    var total = 0
+    for value in numbers:
+        total += value
+    end
+    戻す total
+end
+
+print(to_string(合計([1, 2, 3])))
+```
+
+### 条件分岐とループ
+
+```hajimu
+var score = 82
+
+if score >= 80:
+    print("great")
+else if score >= 60:
+    print("ok")
+else:
+    print("try again")
+end
+
+for i from 1 to 3:
+    print(i)
+end
+
+var fruits = ["apple", "banana", "orange"]
+for fruit in fruits:
+    print(fruit)
+end
+```
+
+### クラスとインポート
+
+```hajimu
+class User:
+    init(name):
+        self.name = name
+    end
+
+    function greet():
+        return "Hello, " + self.name
+    end
+end
+
+var user = new User("Aki")
+print(user.greet())
+
+import "math_utils" as math
+```
+
+### よく使う対応表
+
+| 日本語 | 英語 alias |
+|---|---|
+| `関数` | `function`, `fn` |
+| `終わり` | `end` |
+| `戻す` | `return` |
+| `変数` | `var`, `let` |
+| `定数` | `const` |
+| `もし` / `それ以外` | `if` / `else` |
+| `条件` | `while` |
+| `繰り返す` | `for` |
+| `取り込む` | `import`, `use` |
+| `表示` | `print`, `println` |
+| `長さ` | `len`, `length` |
+| `文字列化` | `to_string` |
+| `数値化` | `to_number` |
+
+英語 alias の衝突方針は [英語 alias 命名・衝突方針](ENGLISH_ALIAS_POLICY.md) にまとめています。
 
 ---
 

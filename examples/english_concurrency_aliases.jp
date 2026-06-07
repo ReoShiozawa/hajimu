@@ -1,0 +1,41 @@
+// English aliases for async, parallel execution, locks, atomics and channels.
+
+function answer():
+    return 42
+end
+
+function double(x):
+    return x * 2
+end
+
+function one():
+    return 1
+end
+
+function two():
+    return 2
+end
+
+var task = async_run(answer)
+print("async result: " + to_string(await_task(task, 2)))
+
+var all_results = parallel_run([one, two, answer])
+print("parallel sum: " + to_string(all_results[0] + all_results[1] + all_results[2]))
+
+var mapped = parallel_map([1, 2, 3], double)
+print("parallel map: " + to_string(mapped))
+
+var mutex = mutex_create()
+print("mutex result: " + to_string(mutex_exec(mutex, answer)))
+
+var semaphore = semaphore_create(1)
+print("semaphore result: " + to_string(semaphore_exec(semaphore, answer)))
+
+var counter = atomic_create(0)
+atomic_add(counter, 5)
+print("counter: " + to_string(atomic_get(counter)))
+
+var ch = channel_create(1)
+channel_try_send(ch, "message")
+print("channel: " + channel_try_receive(ch)["値"])
+channel_close(ch)

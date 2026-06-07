@@ -114,6 +114,22 @@ static void diag_build_advice(
     *fix = NULL;
     *example = NULL;
 
+    if (contains(message, "予約語なので名前に使えません")) {
+        *cause = "`if`、`class`、`for`、`str` などは、構文や型名として先に解釈される予約語です。";
+        *fix = "変数名・関数名には、用途が分かる別名を使ってください。英語なら `name_value`、`class_name`、`items` のような名前が安全です。";
+        *example = "var class_name = \"User\"";
+        return;
+    }
+    if (contains(message, "組み込み関数名") && contains(message, "できません")) {
+        *cause = "`print`、`len`、`map` などは標準ライブラリの関数名として予約されています。";
+        *fix = "標準関数を上書きせず、値の役割が分かる名前に変えてください。例: `output`、`item_count`、`mapped_items`。";
+        return;
+    }
+    if (contains(message, "ランタイム定数") && contains(message, "できません")) {
+        *cause = "`pi`、`e`、`システム` などは実行環境が提供する定数です。";
+        *fix = "計算結果を入れる場合は `pi_value`、`ratio`、`system_info` など別の名前を使ってください。";
+        return;
+    }
     if (contains(message, "未定義の変数")) {
         *cause = "この名前は、現在の場所から見える変数・関数としてまだ登録されていません。";
         *fix = "名前の打ち間違いを直すか、使う前に `変数 名前 = ...` または `関数 名前(...)` で定義してください。";
@@ -126,9 +142,9 @@ static void diag_build_advice(
         return;
     }
     if (contains(message, "'終わり' が必要")) {
-        *cause = "`関数`、`もし`、`繰り返す`、`型` などのブロックが閉じられていません。";
-        *fix = "対応するブロックの最後に `終わり` を追加してください。途中に `それ以外` や `捕獲` がある場合は、最後の節の後に置きます。";
-        *example = "もし 条件 なら\\n    表示(\"OK\")\\n終わり";
+        *cause = "`関数/function`、`もし/if`、`繰り返す/for`、`型/class` などのブロックが閉じられていません。";
+        *fix = "対応するブロックの最後に `終わり` または `end` を追加してください。途中に `それ以外/else` や `捕獲/catch` がある場合は、最後の節の後に置きます。";
+        *example = "if 条件 then\\n    print(\"OK\")\\nend";
         return;
     }
     if (contains(message, "対応する開始文のない '終わり'")) {
@@ -143,15 +159,15 @@ static void diag_build_advice(
         return;
     }
     if (contains(message, "'なら' が必要")) {
-        *cause = "`もし` の条件式の後に、条件の終わりを示す `なら` がありません。";
-        *fix = "`もし 条件 なら` の形にしてください。";
-        *example = "もし 点数 >= 80 なら";
+        *cause = "`もし/if` の条件式の後に、条件の終わりを示す `なら` または `then` がありません。";
+        *fix = "`もし 条件 なら`、`if condition then`、または `if condition:` の形にしてください。";
+        *example = "if score >= 80 then";
         return;
     }
     if (contains(message, "'の間' が必要")) {
-        *cause = "`条件` ループの条件式の後に `の間` がありません。";
-        *fix = "`条件 条件式 の間` の形にしてください。";
-        *example = "条件 i < 10 の間";
+        *cause = "`条件/while` ループの条件式の後に `の間`、`do`、または `:` がありません。";
+        *fix = "`条件 条件式 の間`、`while condition do`、または `while condition:` の形にしてください。";
+        *example = "while i < 10:";
         return;
     }
     if (contains(message, "改行が必要")) {
@@ -178,9 +194,9 @@ static void diag_build_advice(
         return;
     }
     if (contains(message, "取り込むファイルパスが必要")) {
-        *cause = "`取り込む` の後に、読み込むファイル名またはパッケージ名の文字列がありません。";
-        *fix = "`取り込む \"ファイル.jp\"` のように、パスをダブルクォートで囲んでください。";
-        *example = "取り込む \"lib/math.jp\"";
+        *cause = "`取り込む/import/use` の後に、読み込むファイル名またはパッケージ名の文字列がありません。";
+        *fix = "`取り込む \"ファイル.jp\"` または `import \"file.jp\"` のように、パスをダブルクォートで囲んでください。";
+        *example = "import \"lib/math.jp\" as math";
         return;
     }
     if (contains(message, "エイリアス名が必要")) {
@@ -202,15 +218,15 @@ static void diag_build_advice(
         return;
     }
     if (contains(message, "'繰り返す' が必要")) {
-        *cause = "カウンタループの末尾に `繰り返す` がありません。";
-        *fix = "`i を 0 から 10 繰り返す` の形にしてください。";
-        *example = "i を 0 から 10 繰り返す";
+        *cause = "カウンタループの末尾に `繰り返す/repeat` がありません。";
+        *fix = "`i を 0 から 10 繰り返す`、または英語構文なら `for i from 0 to 10:` の形にしてください。";
+        *example = "for i from 0 to 10:";
         return;
     }
     if (contains(message, "'の中' が必要")) {
-        *cause = "`各` 文で、どの配列や辞書を走査するか示す `の中` がありません。";
-        *fix = "`各 要素 を 配列 の中:` の形にしてください。";
-        *example = "各 要素 を 配列 の中:";
+        *cause = "`各/for` 文で、どの配列や辞書を走査するか示す `の中/in` がありません。";
+        *fix = "`各 要素 を 配列 の中:`、または `for item in items:` の形にしてください。";
+        *example = "for item in items:";
         return;
     }
     if (contains(message, "'=>' が必要")) {
@@ -323,9 +339,9 @@ static void diag_build_advice(
         return;
     }
     if (contains(message, "クラスではありません")) {
-        *cause = "`新規` や継承で使った名前が、クラスとして定義されていません。";
-        *fix = "`型 名前:` でクラスを定義してから使うか、クラス名の打ち間違いを直してください。";
-        *example = "型 人:\\n    初期化():\\n    終わり\\n終わり";
+        *cause = "`新規/new` や継承で使った名前が、クラスとして定義されていません。";
+        *fix = "`型 名前:` または `class Name:` でクラスを定義してから使うか、クラス名の打ち間違いを直してください。";
+        *example = "class Person:\\n    init():\\n    end\\nend";
         return;
     }
     if (contains(message, "静的メソッド") && contains(message, "ありません")) {

@@ -39,6 +39,15 @@
 // グローバルevaluatorポインタ（高階関数・toStringプロトコル用）
 static Evaluator *g_eval = NULL;
 
+// スレッドごとの現在評価器。
+// 非同期ワーカーでは detached 評価器をここに入れ、メイン評価器を書き換えない。
+#if defined(_MSC_VER)
+#  define HAJIMU_THREAD_LOCAL __declspec(thread)
+#else
+#  define HAJIMU_THREAD_LOCAL __thread
+#endif
+static HAJIMU_THREAD_LOCAL Evaluator *g_thread_eval = NULL;
+
 // グローバルGCインスタンス
 static GC g_gc_state;
 GC *g_gc = &g_gc_state;
@@ -149,6 +158,10 @@ static Value evaluate_list_comprehension(Evaluator *eval, ASTNode *node);
 static Value evaluate_string_interpolation(Evaluator *eval, const char *str, int line, int column);
 static Value call_function_value(Value *func, Value *args, int argc);
 static void undefined_variable_error(Evaluator *eval, ASTNode *node, const char *name);
+static bool is_protected_runtime_name(const char *name);
+static const char *protected_runtime_name_kind(const char *name);
+static void protected_runtime_name_error(Evaluator *eval, ASTNode *node,
+                                         const char *name, const char *action);
 static bool require_integer_index(Evaluator *eval, ASTNode *node, Value index, const char *target_name);
 static const char *find_similar_dict_key(Value *dict, const char *name);
 static const char *find_similar_instance_member(Value *instance, const char *name);
@@ -359,9 +372,11 @@ static int g_expect_msg_len = 0;
 // 評価器の初期化・解放
 // =============================================================================
 
-Evaluator *evaluator_new(void) {
+static Evaluator *evaluator_new_internal(bool owns_runtime_context) {
     Evaluator *eval = calloc(1, sizeof(Evaluator));
-    gc_init(g_gc);
+    if (owns_runtime_context) {
+        gc_init(g_gc);
+    }
     eval->global = env_new(NULL);
     eval->current = eval->global;
     eval->returning = false;
@@ -381,8 +396,12 @@ Evaluator *evaluator_new(void) {
     eval->error_line = 0;
     eval->recursion_depth = 0;
     eval->call_stack_depth = 0;
+    eval->owns_runtime_context = owns_runtime_context;
     
-    g_eval = eval;  // グローバルポインタ設定
+    if (owns_runtime_context) {
+        g_eval = eval;  // グローバルポインタ設定
+    }
+    g_thread_eval = eval;
     
     // インポートモジュールの初期化
     eval->imported_modules = NULL;
@@ -412,12 +431,23 @@ Evaluator *evaluator_new(void) {
     return eval;
 }
 
+Evaluator *evaluator_new(void) {
+    return evaluator_new_internal(true);
+}
+
+Evaluator *evaluator_new_detached(void) {
+    return evaluator_new_internal(false);
+}
+
 void evaluator_free(Evaluator *eval) {
     if (eval == NULL) return;
     
-    if (eval == g_eval) {
+    if (eval->owns_runtime_context && eval == g_eval) {
         async_runtime_cleanup();
         g_eval = NULL;
+    }
+    if (eval == g_thread_eval) {
+        g_thread_eval = NULL;
     }
     
     // インポートされたモジュールを解放
@@ -437,14 +467,18 @@ void evaluator_free(Evaluator *eval) {
     // プラグインマネージャを解放
     plugin_manager_free(&eval->plugin_manager);
     
-    gc_collect(g_gc);
+    if (eval->owns_runtime_context) {
+        gc_collect(g_gc);
+    }
     env_release(eval->global);
-    gc_shutdown(g_gc);
+    if (eval->owns_runtime_context) {
+        gc_shutdown(g_gc);
+    }
     free(eval);
 }
 
 Evaluator *evaluator_current(void) {
-    return g_eval;
+    return g_thread_eval != NULL ? g_thread_eval : g_eval;
 }
 
 // =============================================================================
@@ -460,171 +494,358 @@ typedef struct {
 
 static const BuiltinEntry builtin_entries[] = {
     {"表示", builtin_print, 0, -1},
+    {"print", builtin_print, 0, -1},
+    {"println", builtin_print, 0, -1},
     {"入力", builtin_input, 0, 1},
+    {"input", builtin_input, 0, 1},
     {"長さ", builtin_length, 1, 1},
+    {"len", builtin_length, 1, 1},
+    {"length", builtin_length, 1, 1},
     {"追加", builtin_append, 2, 2},
+    {"append", builtin_append, 2, 2},
+    {"push", builtin_append, 2, 2},
     {"削除", builtin_remove, 2, 2},
+    {"remove", builtin_remove, 2, 2},
+    {"delete", builtin_remove, 2, 2},
     {"型", builtin_type, 1, 1},
+    {"typeof", builtin_type, 1, 1},
     {"数値化", builtin_to_number, 1, 1},
+    {"to_number", builtin_to_number, 1, 1},
     {"文字列化", builtin_to_string, 1, 1},
+    {"to_string", builtin_to_string, 1, 1},
     {"数値か", builtin_is_number, 1, 1},
+    {"is_number", builtin_is_number, 1, 1},
     {"文字列か", builtin_is_string, 1, 1},
+    {"is_string", builtin_is_string, 1, 1},
     {"真偽か", builtin_is_bool, 1, 1},
+    {"is_bool", builtin_is_bool, 1, 1},
+    {"is_boolean", builtin_is_bool, 1, 1},
     {"配列か", builtin_is_array, 1, 1},
+    {"is_array", builtin_is_array, 1, 1},
+    {"is_list", builtin_is_array, 1, 1},
     {"辞書か", builtin_is_dict, 1, 1},
+    {"is_dict", builtin_is_dict, 1, 1},
+    {"is_object", builtin_is_dict, 1, 1},
     {"関数か", builtin_is_function, 1, 1},
+    {"is_function", builtin_is_function, 1, 1},
     {"無か", builtin_is_null, 1, 1},
+    {"is_null", builtin_is_null, 1, 1},
     {"範囲", builtin_range, 1, 3},
+    {"range", builtin_range, 1, 3},
     {"ビット積", builtin_bit_and, 2, 2},
+    {"bit_and", builtin_bit_and, 2, 2},
     {"ビット和", builtin_bit_or, 2, 2},
+    {"bit_or", builtin_bit_or, 2, 2},
     {"ビット排他", builtin_bit_xor, 2, 2},
+    {"bit_xor", builtin_bit_xor, 2, 2},
     {"ビット否定", builtin_bit_not, 1, 1},
+    {"bit_not", builtin_bit_not, 1, 1},
     {"左シフト", builtin_bit_lshift, 2, 2},
+    {"left_shift", builtin_bit_lshift, 2, 2},
     {"右シフト", builtin_bit_rshift, 2, 2},
+    {"right_shift", builtin_bit_rshift, 2, 2},
     {"部分文字列", builtin_substring, 2, 3},
+    {"substring", builtin_substring, 2, 3},
+    {"slice_text", builtin_substring, 2, 3},
     {"始まる", builtin_starts_with, 2, 2},
+    {"starts_with", builtin_starts_with, 2, 2},
+    {"startsWith", builtin_starts_with, 2, 2},
     {"終わる", builtin_ends_with, 2, 2},
+    {"ends_with", builtin_ends_with, 2, 2},
+    {"endsWith", builtin_ends_with, 2, 2},
     {"文字コード", builtin_char_code, 1, 2},
+    {"char_code", builtin_char_code, 1, 2},
+    {"charCodeAt", builtin_char_code, 1, 2},
     {"コード文字", builtin_from_char_code, 1, 1},
+    {"from_char_code", builtin_from_char_code, 1, 1},
+    {"fromCharCode", builtin_from_char_code, 1, 1},
     {"繰り返し", builtin_string_repeat, 2, 2},
+    {"repeat_string", builtin_string_repeat, 2, 2},
     {"末尾削除", builtin_pop, 1, 1},
+    {"pop", builtin_pop, 1, 1},
     {"探す", builtin_find_item, 2, 2},
+    {"find_item", builtin_find_item, 2, 2},
     {"全て", builtin_every, 2, 2},
+    {"every", builtin_every, 2, 2},
     {"一つでも", builtin_some, 2, 2},
+    {"some", builtin_some, 2, 2},
     {"一意", builtin_unique, 1, 1},
+    {"unique", builtin_unique, 1, 1},
     {"圧縮", builtin_zip, 2, 2},
+    {"zip", builtin_zip, 2, 2},
     {"平坦化", builtin_flat, 1, 1},
+    {"flat", builtin_flat, 1, 1},
     {"挿入", builtin_insert, 3, 3},
+    {"insert", builtin_insert, 3, 3},
     {"比較ソート", builtin_sort_by, 2, 2},
+    {"sort_by", builtin_sort_by, 2, 2},
     {"正弦", builtin_sin, 1, 1},
+    {"sin", builtin_sin, 1, 1},
     {"余弦", builtin_cos, 1, 1},
+    {"cos", builtin_cos, 1, 1},
     {"正接", builtin_tan, 1, 1},
+    {"tan", builtin_tan, 1, 1},
     {"対数", builtin_log, 1, 1},
+    {"log", builtin_log, 1, 1},
     {"常用対数", builtin_log10_fn, 1, 1},
+    {"log10", builtin_log10_fn, 1, 1},
     {"乱数整数", builtin_random_int, 2, 2},
+    {"random_int", builtin_random_int, 2, 2},
+    {"randint", builtin_random_int, 2, 2},
     {"追記", builtin_file_append, 2, 2},
+    {"append_file", builtin_file_append, 2, 2},
     {"ディレクトリ一覧", builtin_dir_list, 1, 1},
+    {"list_dir", builtin_dir_list, 1, 1},
     {"ディレクトリ作成", builtin_dir_create, 1, 1},
+    {"make_dir", builtin_dir_create, 1, 1},
+    {"mkdir", builtin_dir_create, 1, 1},
     {"表明", builtin_assert, 1, 2},
+    {"assert", builtin_assert, 1, 2},
     {"型判定", builtin_typeof_check, 2, 2},
+    {"instanceof", builtin_typeof_check, 2, 2},
+    {"is_instance", builtin_typeof_check, 2, 2},
     {"絶対値", builtin_abs, 1, 1},
+    {"abs", builtin_abs, 1, 1},
     {"平方根", builtin_sqrt, 1, 1},
+    {"sqrt", builtin_sqrt, 1, 1},
     {"切り捨て", builtin_floor, 1, 1},
+    {"floor", builtin_floor, 1, 1},
     {"切り上げ", builtin_ceil, 1, 1},
+    {"ceil", builtin_ceil, 1, 1},
     {"四捨五入", builtin_round, 1, 1},
+    {"round", builtin_round, 1, 1},
     {"乱数", builtin_random, 0, 0},
+    {"random", builtin_random, 0, 0},
     {"最大", builtin_max, 1, -1},
+    {"max", builtin_max, 1, -1},
     {"最小", builtin_min, 1, -1},
+    {"min", builtin_min, 1, -1},
     {"キー", builtin_dict_keys, 1, 1},
+    {"keys", builtin_dict_keys, 1, 1},
     {"値一覧", builtin_dict_values, 1, 1},
+    {"values", builtin_dict_values, 1, 1},
     {"含む", builtin_dict_has, 2, 2},
+    {"has", builtin_dict_has, 2, 2},
     {"分割", builtin_split, 2, 2},
+    {"split", builtin_split, 2, 2},
     {"結合", builtin_join, 2, 2},
+    {"join", builtin_join, 2, 2},
     {"検索", builtin_find, 2, 2},
+    {"find", builtin_find, 2, 2},
     {"置換", builtin_replace, 3, 3},
+    {"replace", builtin_replace, 3, 3},
     {"大文字", builtin_upper, 1, 1},
+    {"upper", builtin_upper, 1, 1},
     {"小文字", builtin_lower, 1, 1},
+    {"lower", builtin_lower, 1, 1},
     {"空白除去", builtin_trim, 1, 1},
+    {"trim", builtin_trim, 1, 1},
     {"ソート", builtin_sort, 1, 1},
+    {"sort", builtin_sort, 1, 1},
     {"逆順", builtin_reverse, 1, 1},
+    {"reverse", builtin_reverse, 1, 1},
     {"スライス", builtin_slice, 2, 3},
+    {"slice", builtin_slice, 2, 3},
     {"位置", builtin_index_of, 2, 2},
+    {"index_of", builtin_index_of, 2, 2},
     {"存在", builtin_contains, 2, 2},
+    {"contains", builtin_contains, 2, 2},
     {"読み込む", builtin_file_read, 1, 1},
+    {"read_file", builtin_file_read, 1, 1},
     {"書き込む", builtin_file_write, 2, 2},
+    {"write_file", builtin_file_write, 2, 2},
     {"ファイル存在", builtin_file_exists, 1, 1},
+    {"file_exists", builtin_file_exists, 1, 1},
     {"現在時刻", builtin_now, 0, 0},
+    {"now", builtin_now, 0, 0},
     {"日付", builtin_date, 0, 1},
+    {"date", builtin_date, 0, 1},
     {"時間", builtin_time, 0, 1},
+    {"time", builtin_time, 0, 1},
     {"JSON化", builtin_json_encode, 1, 1},
+    {"json_encode", builtin_json_encode, 1, 1},
     {"JSON解析", builtin_json_decode, 1, 1},
+    {"json_decode", builtin_json_decode, 1, 1},
     {"HTTP取得", builtin_http_get, 1, 2},
+    {"http_get", builtin_http_get, 1, 2},
     {"HTTP送信", builtin_http_post, 1, 3},
+    {"http_post", builtin_http_post, 1, 3},
     {"HTTP更新", builtin_http_put, 1, 3},
+    {"http_put", builtin_http_put, 1, 3},
     {"HTTP削除", builtin_http_delete, 1, 2},
+    {"http_delete", builtin_http_delete, 1, 2},
     {"HTTPリクエスト", builtin_http_request, 2, 4},
+    {"http_request", builtin_http_request, 2, 4},
     {"サーバー起動", builtin_http_serve, 1, 2},
+    {"server_start", builtin_http_serve, 1, 2},
+    {"serve", builtin_http_serve, 1, 2},
     {"サーバー停止", builtin_http_stop, 0, 0},
+    {"server_stop", builtin_http_stop, 0, 0},
     {"URLエンコード", builtin_url_encode, 1, 1},
+    {"url_encode", builtin_url_encode, 1, 1},
     {"URLデコード", builtin_url_decode, 1, 1},
+    {"url_decode", builtin_url_decode, 1, 1},
     {"変換", builtin_map, 2, 2},
+    {"map", builtin_map, 2, 2},
     {"抽出", builtin_filter, 2, 2},
+    {"filter", builtin_filter, 2, 2},
     {"集約", builtin_reduce, 3, 3},
+    {"reduce", builtin_reduce, 3, 3},
     {"反復", builtin_foreach, 2, 2},
+    {"for_each_value", builtin_foreach, 2, 2},
     {"正規一致", builtin_regex_match, 2, 2},
+    {"regex_match", builtin_regex_match, 2, 2},
     {"正規検索", builtin_regex_search, 2, 2},
+    {"regex_search", builtin_regex_search, 2, 2},
     {"正規置換", builtin_regex_replace, 3, 3},
+    {"regex_replace", builtin_regex_replace, 3, 3},
     {"待つ", builtin_sleep, 1, 1},
+    {"sleep", builtin_sleep, 1, 1},
     {"実行", builtin_exec, 1, 1},
+    {"exec", builtin_exec, 1, 1},
     {"環境変数", builtin_env_get, 1, 1},
+    {"env_get", builtin_env_get, 1, 1},
+    {"get_env", builtin_env_get, 1, 1},
     {"環境変数設定", builtin_env_set, 2, 2},
+    {"env_set", builtin_env_set, 2, 2},
+    {"set_env", builtin_env_set, 2, 2},
     {"終了", builtin_exit_program, 0, 1},
+    {"exit_program", builtin_exit_program, 0, 1},
     {"非同期実行", builtin_async_run, 1, -1},
+    {"async_run", builtin_async_run, 1, -1},
     {"待機", builtin_async_await, 1, 2},
+    {"await_task", builtin_async_await, 1, 2},
     {"全待機", builtin_async_await_all, 1, 1},
+    {"await_all", builtin_async_await_all, 1, 1},
     {"タスク状態", builtin_task_status, 1, 1},
+    {"task_status", builtin_task_status, 1, 1},
     {"競争待機", builtin_async_race, 1, 1},
+    {"race", builtin_async_race, 1, 1},
     {"タスクキャンセル", builtin_task_cancel, 1, 1},
+    {"task_cancel", builtin_task_cancel, 1, 1},
     {"成功時", builtin_then, 2, 2},
+    {"then_do", builtin_then, 2, 2},
     {"失敗時", builtin_catch, 2, 2},
+    {"catch_do", builtin_catch, 2, 2},
     {"プール作成", builtin_pool_create, 0, 1},
+    {"pool_create", builtin_pool_create, 0, 1},
     {"プール情報", builtin_pool_stats, 0, 0},
+    {"pool_stats", builtin_pool_stats, 0, 0},
     {"並列実行", builtin_parallel_run, 1, 1},
+    {"parallel_run", builtin_parallel_run, 1, 1},
     {"並列マップ", builtin_parallel_map, 2, 2},
+    {"parallel_map", builtin_parallel_map, 2, 2},
     {"排他作成", builtin_mutex_create, 0, 0},
+    {"mutex_create", builtin_mutex_create, 0, 0},
     {"排他実行", builtin_mutex_exec, 2, 2},
+    {"mutex_exec", builtin_mutex_exec, 2, 2},
     {"読書ロック作成", builtin_rwlock_create, 0, 0},
+    {"rwlock_create", builtin_rwlock_create, 0, 0},
     {"読取実行", builtin_rwlock_read, 2, 2},
+    {"rwlock_read", builtin_rwlock_read, 2, 2},
     {"書込実行", builtin_rwlock_write, 2, 2},
+    {"rwlock_write", builtin_rwlock_write, 2, 2},
     {"セマフォ作成", builtin_semaphore_create, 1, 1},
+    {"semaphore_create", builtin_semaphore_create, 1, 1},
     {"セマフォ獲得", builtin_semaphore_acquire, 1, 1},
+    {"semaphore_acquire", builtin_semaphore_acquire, 1, 1},
     {"セマフォ解放", builtin_semaphore_release, 1, 1},
+    {"semaphore_release", builtin_semaphore_release, 1, 1},
     {"セマフォ実行", builtin_semaphore_exec, 2, 2},
+    {"semaphore_exec", builtin_semaphore_exec, 2, 2},
     {"カウンター作成", builtin_atomic_create, 0, 1},
+    {"atomic_create", builtin_atomic_create, 0, 1},
     {"カウンター加算", builtin_atomic_add, 1, 2},
+    {"atomic_add", builtin_atomic_add, 1, 2},
     {"カウンター取得", builtin_atomic_get, 1, 1},
+    {"atomic_get", builtin_atomic_get, 1, 1},
     {"カウンター設定", builtin_atomic_set, 2, 2},
+    {"atomic_set", builtin_atomic_set, 2, 2},
     {"チャネル作成", builtin_channel_create, 0, 1},
+    {"channel_create", builtin_channel_create, 0, 1},
     {"チャネル送信", builtin_channel_send, 2, 2},
+    {"channel_send", builtin_channel_send, 2, 2},
     {"チャネル受信", builtin_channel_receive, 1, 1},
+    {"channel_receive", builtin_channel_receive, 1, 1},
     {"チャネル閉じる", builtin_channel_close, 1, 1},
+    {"channel_close", builtin_channel_close, 1, 1},
     {"チャネル試送信", builtin_channel_try_send, 2, 2},
+    {"channel_try_send", builtin_channel_try_send, 2, 2},
     {"チャネル試受信", builtin_channel_try_receive, 1, 1},
+    {"channel_try_receive", builtin_channel_try_receive, 1, 1},
     {"チャネル残量", builtin_channel_count, 1, 1},
+    {"channel_count", builtin_channel_count, 1, 1},
     {"チャネル選択", builtin_channel_select, 1, 2},
+    {"channel_select", builtin_channel_select, 1, 2},
     {"定期実行", builtin_schedule_interval, 2, 2},
+    {"schedule_interval", builtin_schedule_interval, 2, 2},
     {"遅延実行", builtin_schedule_delay, 2, 2},
+    {"schedule_delay", builtin_schedule_delay, 2, 2},
     {"スケジュール停止", builtin_schedule_stop, 1, 1},
+    {"schedule_stop", builtin_schedule_stop, 1, 1},
     {"全スケジュール停止", builtin_schedule_stop_all, 0, 0},
+    {"schedule_stop_all", builtin_schedule_stop_all, 0, 0},
     {"WS接続", builtin_ws_connect, 1, 1},
+    {"ws_connect", builtin_ws_connect, 1, 1},
     {"WS送信", builtin_ws_send, 2, 2},
+    {"ws_send", builtin_ws_send, 2, 2},
     {"WS受信", builtin_ws_receive, 1, 2},
+    {"ws_receive", builtin_ws_receive, 1, 2},
     {"WS切断", builtin_ws_close, 1, 1},
+    {"ws_close", builtin_ws_close, 1, 1},
     {"WS状態", builtin_ws_status, 1, 1},
+    {"ws_status", builtin_ws_status, 1, 1},
     {"次", builtin_generator_next, 1, 1},
+    {"next", builtin_generator_next, 1, 1},
     {"完了", builtin_generator_done, 1, 1},
+    {"done", builtin_generator_done, 1, 1},
     {"全値", builtin_generator_collect, 1, 1},
+    {"collect", builtin_generator_collect, 1, 1},
     {"パス結合", builtin_path_join, 2, 2},
+    {"path_join", builtin_path_join, 2, 2},
     {"ファイル名", builtin_basename, 1, 1},
+    {"basename", builtin_basename, 1, 1},
     {"ディレクトリ名", builtin_dirname, 1, 1},
+    {"dirname", builtin_dirname, 1, 1},
     {"拡張子", builtin_extension, 1, 1},
+    {"extension", builtin_extension, 1, 1},
+    {"extname", builtin_extension, 1, 1},
     {"Base64エンコード", builtin_base64_encode, 1, 1},
+    {"base64_encode", builtin_base64_encode, 1, 1},
     {"Base64デコード", builtin_base64_decode, 1, 1},
+    {"base64_decode", builtin_base64_decode, 1, 1},
     {"集合", builtin_set_create, 0, -1},
+    {"set", builtin_set_create, 0, -1},
     {"集合追加", builtin_set_add, 2, 2},
+    {"set_add", builtin_set_add, 2, 2},
     {"集合削除", builtin_set_remove, 2, 2},
+    {"set_remove", builtin_set_remove, 2, 2},
     {"集合含む", builtin_set_contains, 2, 2},
+    {"set_contains", builtin_set_contains, 2, 2},
     {"和集合", builtin_set_union, 2, 2},
+    {"set_union", builtin_set_union, 2, 2},
     {"積集合", builtin_set_intersection, 2, 2},
+    {"set_intersection", builtin_set_intersection, 2, 2},
     {"差集合", builtin_set_difference, 2, 2},
+    {"set_difference", builtin_set_difference, 2, 2},
     {"テスト", builtin_test_register, 2, 2},
+    {"test", builtin_test_register, 2, 2},
     {"テスト実行", builtin_test_run, 0, 0},
+    {"run_tests", builtin_test_run, 0, 0},
     {"期待", builtin_expect, 2, 3},
+    {"expect", builtin_expect, 2, 3},
     {"期待エラー", builtin_expect_error, 1, 1},
+    {"expect_error", builtin_expect_error, 1, 1},
     {"例外作成", builtin_create_exception, 2, 2},
+    {"create_exception", builtin_create_exception, 2, 2},
     {"文書化", builtin_doc_set, 2, 2},
+    {"doc_set", builtin_doc_set, 2, 2},
+    {"document", builtin_doc_set, 2, 2},
     {"文書", builtin_doc_get, 1, 1},
+    {"doc_get", builtin_doc_get, 1, 1},
+    {"documentation", builtin_doc_get, 1, 1},
     {"型別名", builtin_type_alias, 2, 2},
+    {"type_alias", builtin_type_alias, 2, 2},
 };
 
 static void register_builtin_table(Evaluator *eval) {
@@ -637,12 +858,65 @@ static void register_builtin_table(Evaluator *eval) {
     }
 }
 
+static bool is_runtime_constant_name(const char *name) {
+    static const char *constants[] = {
+        "円周率", "pi", "PI", "自然対数の底", "e",
+        "システム名", "アーキテクチャ", "はじむバージョン", "システム",
+        NULL
+    };
+
+    for (int i = 0; constants[i] != NULL; i++) {
+        if (strcmp(name, constants[i]) == 0) return true;
+    }
+    return false;
+}
+
+static bool is_builtin_alias_name(const char *name) {
+    size_t count = sizeof(builtin_entries) / sizeof(builtin_entries[0]);
+    for (size_t i = 0; i < count; i++) {
+        if (strcmp(name, builtin_entries[i].name) == 0) return true;
+    }
+    return false;
+}
+
+static bool is_protected_runtime_name(const char *name) {
+    return is_builtin_alias_name(name) || is_runtime_constant_name(name);
+}
+
+static const char *protected_runtime_name_kind(const char *name) {
+    if (is_builtin_alias_name(name)) return "組み込み関数名";
+    if (is_runtime_constant_name(name)) return "ランタイム定数";
+    return "定数";
+}
+
+static const char *protected_runtime_name_suggestion(const char *name) {
+    if (strcmp(name, "print") == 0 || strcmp(name, "表示") == 0) return "output や message";
+    if (strcmp(name, "len") == 0 || strcmp(name, "length") == 0 || strcmp(name, "長さ") == 0) return "count や size";
+    if (strcmp(name, "map") == 0 || strcmp(name, "filter") == 0 || strcmp(name, "reduce") == 0) return "items や result";
+    if (strcmp(name, "values") == 0 || strcmp(name, "keys") == 0) return "rows や entries";
+    if (strcmp(name, "date") == 0 || strcmp(name, "time") == 0 || strcmp(name, "now") == 0) return "today や timestamp";
+    if (strcmp(name, "pi") == 0 || strcmp(name, "PI") == 0 || strcmp(name, "e") == 0) return "pi_value や ratio";
+    return "name_value や、用途が分かる具体的な名前";
+}
+
+static void protected_runtime_name_error(Evaluator *eval, ASTNode *node,
+                                         const char *name, const char *action) {
+    runtime_error(eval, node->location.line, node->location.column,
+                  "%s `%s` は%sできません。\n"
+                  "   `%s` ははじむが予約している実行時の名前です。変数や関数には %s など別の名前を使ってください。",
+                  protected_runtime_name_kind(name), name, action, name,
+                  protected_runtime_name_suggestion(name));
+}
+
 void register_builtins(Evaluator *eval) {
     register_builtin_table(eval);
 
     // 数学定数
     env_define(eval->global, "円周率", value_number(3.14159265358979323846), true);
+    env_define(eval->global, "pi", value_number(3.14159265358979323846), true);
+    env_define(eval->global, "PI", value_number(3.14159265358979323846), true);
     env_define(eval->global, "自然対数の底", value_number(2.71828182845904523536), true);
+    env_define(eval->global, "e", value_number(2.71828182845904523536), true);
 
     // ── プラットフォーム定数 ──────────────────────────────
     {
@@ -672,13 +946,13 @@ void register_builtins(Evaluator *eval) {
         env_define(eval->global, "アーキテクチャ",
                    value_string(arch), true);
         env_define(eval->global, "はじむバージョン",
-                   value_string("1.3.3"), true);
+                   value_string("1.4.0"), true);
 
         /* システム辞書: システム["OS"], システム["アーキテクチャ"] 等 */
         Value sys = value_dict();
         dict_set(&sys, "OS",           value_string(os_name));
         dict_set(&sys, "アーキテクチャ",    value_string(arch));
-        dict_set(&sys, "バージョン",       value_string("1.3.3"));
+        dict_set(&sys, "バージョン",       value_string("1.4.0"));
 #if defined(_WIN32)
         dict_set(&sys, "区切り文字",       value_string("\\"));
         dict_set(&sys, "改行",            value_string("\r\n"));
@@ -1452,7 +1726,11 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
     // 組み込み関数で配列を変更するもの（追加、削除）は特別に処理
     if (callee.type == VALUE_BUILTIN && 
         (strcmp(callee.builtin.name, "追加") == 0 || 
-         strcmp(callee.builtin.name, "削除") == 0)) {
+         strcmp(callee.builtin.name, "append") == 0 ||
+         strcmp(callee.builtin.name, "push") == 0 ||
+         strcmp(callee.builtin.name, "削除") == 0 ||
+         strcmp(callee.builtin.name, "remove") == 0 ||
+         strcmp(callee.builtin.name, "delete") == 0)) {
         
         if (node->call.arg_count >= 1 && 
             node->call.arguments[0]->type == NODE_IDENTIFIER) {
@@ -1466,14 +1744,18 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
                 return value_null();
             }
             
-            if (strcmp(callee.builtin.name, "追加") == 0 && 
+            if ((strcmp(callee.builtin.name, "追加") == 0 ||
+                 strcmp(callee.builtin.name, "append") == 0 ||
+                 strcmp(callee.builtin.name, "push") == 0) &&
                 node->call.arg_count == 2) {
                 Value element = evaluate(eval, node->call.arguments[1]);
                 if (eval->had_error) return value_null();
                 array_push(array_ptr, element);
                 return value_null();
             }
-            else if (strcmp(callee.builtin.name, "削除") == 0 && 
+            else if ((strcmp(callee.builtin.name, "削除") == 0 ||
+                      strcmp(callee.builtin.name, "remove") == 0 ||
+                      strcmp(callee.builtin.name, "delete") == 0) &&
                      node->call.arg_count == 2) {
                 Value index = evaluate(eval, node->call.arguments[1]);
                 if (eval->had_error) return value_null();
@@ -1799,7 +2081,16 @@ static Value evaluate_index(Evaluator *eval, ASTNode *node) {
 
 static Value evaluate_function_def(Evaluator *eval, ASTNode *node) {
     Value func = value_function(node, eval->current);
-    env_define(eval->current, node->function.name, func, false);
+    if (!env_define(eval->current, node->function.name, func, false)) {
+        if (env_is_const(eval->current, node->function.name) &&
+            is_protected_runtime_name(node->function.name)) {
+            protected_runtime_name_error(eval, node, node->function.name, "再定義");
+        } else if (env_is_const(eval->current, node->function.name)) {
+            runtime_error(eval, node->location.line, node->location.column,
+                         "定数 %s は関数として再定義できません", node->function.name);
+        }
+        value_free(&func);
+    }
     return value_null();
 }
 
@@ -1811,8 +2102,12 @@ static Value evaluate_var_decl(Evaluator *eval, ASTNode *node) {
     Value copy = value_copy(value);
     if (!env_define(eval->current, node->var_decl.name, copy, node->var_decl.is_const)) {
         if (env_is_const(eval->current, node->var_decl.name)) {
-            runtime_error(eval, node->location.line, node->location.column,
-                         "定数 %s は再定義できません", node->var_decl.name);
+            if (is_protected_runtime_name(node->var_decl.name)) {
+                protected_runtime_name_error(eval, node, node->var_decl.name, "再定義");
+            } else {
+                runtime_error(eval, node->location.line, node->location.column,
+                             "定数 %s は再定義できません", node->var_decl.name);
+            }
         }
         value_free(&copy);  // 失敗した場合はコピーを解放
     }
@@ -1886,8 +2181,12 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
         const char *name = node->assign.target->string_value;
         
         if (env_is_const(eval->current, name)) {
-            runtime_error(eval, node->location.line, node->location.column,
-                         "定数 %s には代入できません", name);
+            if (is_protected_runtime_name(name)) {
+                protected_runtime_name_error(eval, node, name, "代入");
+            } else {
+                runtime_error(eval, node->location.line, node->location.column,
+                             "定数 %s には代入できません", name);
+            }
             return value_null();
         }
         
@@ -2223,6 +2522,75 @@ static bool normalize_path(const char *path, char *out, int max_len) {
     return false;
 }
 
+static bool path_has_suffix(const char *path, const char *suffix) {
+    size_t path_len = strlen(path);
+    size_t suffix_len = strlen(suffix);
+    return path_len >= suffix_len &&
+           strcmp(path + path_len - suffix_len, suffix) == 0;
+}
+
+static bool is_source_script_path(const char *path) {
+    return path_has_suffix(path, ".jp") ||
+           path_has_suffix(path, ".haj") ||
+           path_has_suffix(path, ".hajimu");
+}
+
+static bool file_exists_readable(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    fclose(f);
+    return true;
+}
+
+static bool resolve_source_import_path(Evaluator *eval, const char *module_path,
+                                       char *out, size_t out_size) {
+    char with_jp[EVALUATOR_PATH_BUFFER_SIZE];
+    char with_haj[EVALUATOR_PATH_BUFFER_SIZE];
+    char with_hajimu[EVALUATOR_PATH_BUFFER_SIZE];
+    const char *candidates[4] = {0};
+    int candidate_count = 0;
+
+    if (is_source_script_path(module_path)) {
+        candidates[candidate_count++] = module_path;
+    } else {
+        snprintf(with_jp, sizeof(with_jp), "%s.jp", module_path);
+        snprintf(with_haj, sizeof(with_haj), "%s.haj", module_path);
+        snprintf(with_hajimu, sizeof(with_hajimu), "%s.hajimu", module_path);
+        candidates[candidate_count++] = with_jp;
+        candidates[candidate_count++] = with_haj;
+        candidates[candidate_count++] = with_hajimu;
+    }
+
+    for (int i = 0; i < candidate_count; i++) {
+        const char *candidate = candidates[i];
+        bool absolute = candidate[0] == '/';
+
+        if (!absolute && eval->current_file) {
+            char dir[EVALUATOR_PATH_BUFFER_SIZE];
+            char try_path[EVALUATOR_LONG_PATH_BUFFER_SIZE];
+            snprintf(dir, sizeof(dir), "%s", eval->current_file);
+            char *sep = strrchr(dir, '/');
+            if (sep) {
+                *(sep + 1) = '\0';
+                snprintf(try_path, sizeof(try_path), "%s%s", dir, candidate);
+            } else {
+                snprintf(try_path, sizeof(try_path), "%s", candidate);
+            }
+            if (file_exists_readable(try_path)) {
+                snprintf(out, out_size, "%s", try_path);
+                return true;
+            }
+        }
+
+        if (file_exists_readable(candidate)) {
+            snprintf(out, out_size, "%s", candidate);
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // =============================================================================
 // ソース文字列をモジュールとして評価する共通処理
 // .jp スクリプトインポートと HJPB バイトコードインポートの共通基盤
@@ -2437,51 +2805,14 @@ static Value evaluate_import(Evaluator *eval, ASTNode *node) {
     //   3. パッケージ名としてパッケージディレクトリを検索
     // ============================================================
     
-    // パスに / や .jp が含まれる → ファイルパスとして扱う
+    // パスに / やソース拡張子が含まれる → ファイルパスとして扱う
     bool is_file_path = (strchr(module_path, '/') != NULL || 
-                         strstr(module_path, ".jp") != NULL);
+                         is_source_script_path(module_path));
     
     if (is_file_path) {
         // --- ファイルパスモード ---
-        char try_path[EVALUATOR_LONG_PATH_BUFFER_SIZE];
-        
-        // .jp 拡張子がなければ追加
-        const char *effective = module_path;
-        char with_ext[EVALUATOR_PATH_BUFFER_SIZE];
-        if (strstr(module_path, ".jp") == NULL) {
-            snprintf(with_ext, sizeof(with_ext), "%s.jp", module_path);
-            effective = with_ext;
-        }
-        
-        // 1. 呼び出し元ファイルからの相対パス
-        if (!found && eval->current_file) {
-            char dir[EVALUATOR_PATH_BUFFER_SIZE];
-            snprintf(dir, sizeof(dir), "%s", eval->current_file);
-            char *sep = strrchr(dir, '/');
-            if (sep) {
-                *(sep + 1) = '\0';
-                snprintf(try_path, sizeof(try_path), "%s%s", dir, effective);
-            } else {
-                snprintf(try_path, sizeof(try_path), "%s", effective);
-            }
-            FILE *f = fopen(try_path, "rb");
-            if (f) {
-                fclose(f);
-                snprintf(resolved_path, sizeof(resolved_path), "%s", try_path);
-                found = true;
-            }
-        }
-        
-        // 2. CWD基準
-        if (!found) {
-            snprintf(try_path, sizeof(try_path), "%s", effective);
-            FILE *f = fopen(try_path, "rb");
-            if (f) {
-                fclose(f);
-                snprintf(resolved_path, sizeof(resolved_path), "%s", try_path);
-                found = true;
-            }
-        }
+        found = resolve_source_import_path(eval, module_path,
+                                           resolved_path, sizeof(resolved_path));
     }
     
     // 3. パッケージ名として検索

@@ -1,0 +1,94 @@
+// 英語 built-in alias の標準ライブラリテスト
+
+var passed = 0
+var failed = 0
+
+function check(name, actual, expected):
+    if to_string(actual) == to_string(expected) then
+        passed += 1
+    else:
+        failed += 1
+        print("X " + name + ": expected=" + to_string(expected) + " actual=" + to_string(actual))
+    end
+end
+
+check("type checks number", is_number(42), true)
+check("type checks string", is_string("hajimu"), true)
+check("type checks array", is_array([1, 2]), true)
+check("type checks dict", is_dict({"a": 1}), true)
+check("type checks null", is_null(null), true)
+
+check("bit and", bit_and(12, 10), 8)
+check("bit or", bit_or(12, 10), 14)
+check("left shift", left_shift(1, 4), 16)
+
+check("substring", substring("abcdef", 1, 3), "bcd")
+check("starts_with", starts_with("hajimu", "ha"), true)
+check("ends_with", ends_with("hajimu", "mu"), true)
+check("repeat_string", repeat_string("ha", 3), "hahaha")
+check("char code roundtrip", from_char_code(char_code("A")), "A")
+
+var nested = [[1, 2], [3]]
+check("flat", len(flat(nested)), 3)
+
+var items = [3, 1, 2]
+var inserted = insert(items, 1, 9)
+check("insert", inserted[1], 9)
+check("sort", to_string(sort(inserted)), "[1, 2, 3, 9]")
+check("reverse", to_string(reverse([1, 2, 3])), "[3, 2, 1]")
+check("slice", to_string(slice([1, 2, 3, 4], 1, 3)), "[2, 3]")
+check("index_of", index_of(["a", "b"], "b"), 1)
+check("contains", contains(["a", "b"], "a"), true)
+
+check("abs", abs(-4), 4)
+check("sqrt", sqrt(16), 4)
+check("floor", floor(3.8), 3)
+check("ceil", ceil(3.2), 4)
+check("round", round(3.5), 4)
+check("sin", round(sin(0)), 0)
+check("max", max(1, 5, 3), 5)
+check("min", min(1, 5, 3), 1)
+
+var dict = {"name": "Hajimu", "year": 2026}
+check("keys", contains(keys(dict), "name"), true)
+check("values", contains(values(dict), "Hajimu"), true)
+check("has", has(dict, "year"), true)
+
+check("split", to_string(split("a,b,c", ",")), "[a, b, c]")
+check("join", join(["a", "b"], "-"), "a-b")
+check("replace", replace("hello hajimu", "hello", "hi"), "hi hajimu")
+check("upper", upper("abc"), "ABC")
+check("lower", lower("ABC"), "abc")
+check("trim", trim("  hi  "), "hi")
+
+var encoded = json_encode({"name": "Hajimu"})
+var decoded = json_decode(encoded)
+check("json roundtrip", decoded["name"], "Hajimu")
+
+check("base64", base64_decode(base64_encode("hajimu")), "hajimu")
+check("path_join", path_join("docs", "REFERENCE.md"), "docs/REFERENCE.md")
+check("basename", basename("docs/REFERENCE.md"), "REFERENCE.md")
+check("dirname", dirname("docs/REFERENCE.md"), "docs")
+check("extension", extension("docs/REFERENCE.md"), ".md")
+
+check("regex_match", regex_match("abc123", "^[a-z]+[0-9]+$"), true)
+check("regex_search", to_string(regex_search("abc123", "[0-9]+")), "[123]")
+check("regex_replace", regex_replace("abc123", "[0-9]+", "X"), "abcX")
+
+var a = set(1, 2, 2)
+var b = set(2, 3)
+check("set contains", set_contains(a, 1), true)
+check("set union", len(set_union(a, b)), 3)
+check("set intersection", to_string(set_intersection(a, b)), "[2]")
+check("set difference", to_string(set_difference(a, b)), "[1]")
+
+doc_set("sample", "English alias doc")
+check("doc_get", doc_get("sample"), "English alias doc")
+type_alias("integer_alias", "整数")
+check("type alias", instanceof(1, "integer_alias"), true)
+
+check("env set", env_set("HAJIMU_ALIAS_TEST", "ok"), true)
+check("env get", env_get("HAJIMU_ALIAS_TEST"), "ok")
+
+assert(failed == 0, "english_stdlib_aliases failed: " + to_string(failed))
+print("english_stdlib_aliases: " + to_string(passed) + " passed")

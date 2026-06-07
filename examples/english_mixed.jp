@@ -1,0 +1,20 @@
+// Japanese-first code with English aliases mixed in.
+// This style is useful while moving gradually between both vocabularies.
+
+function 合計(numbers):
+    var total = 0
+    for value in numbers:
+        total += value
+    end
+    戻す total
+end
+
+変数 点数 = [72, 85, 91]
+変数 total = 合計(点数)
+
+if total >= 240:
+    表示("合計: " + to_string(total))
+    print("great")
+else:
+    表示("もう少し")
+end

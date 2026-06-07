@@ -270,13 +270,17 @@ end
 
 ### 5.1 拡張子
 
-当面は既存の `.jp` をそのまま使います。英語構文専用の拡張子は急いで追加しません。
+既存の `.jp` はそのまま標準拡張子として使います。加えて、英語圏向け・教材向けに見せやすいソース拡張子として `.haj` と `.hajimu` も受け付けます。
 
-将来的な候補:
+対応済み:
 
 - `.jp`: 日本語・英語混在を許可する標準拡張子
 - `.haj`: 英語圏向けに見せやすい別名
 - `.hajimu`: 教材やドキュメント向けの明示的な別名
+
+`import "path"` / `取り込む "path"` の拡張子省略時は、ソースファイルとして `.jp`、`.haj`、`.hajimu` の順に探します。パッケージ内の `main.haj` / `<package>.hajimu` もスクリプトパッケージとして扱います。
+
+HJPB バイトコード `.hjp` は、`.jp` / `.haj` / `.hajimu` から `hajimu build` / `nihongo 構築` で作成でき、通常のファイル指定と同じように直接実行できます。
 
 ### 5.2 CLI オプション
 
@@ -321,6 +325,8 @@ hajimu --syntax mixed file.jp
 
 ### Phase 1: lexer keyword alias
 
+ステータス: 実装済み（主要標準ライブラリ alias を広く追加）
+
 目的: parser をほぼ変更せず、英語キーワードを受け付ける。
 
 作業:
@@ -336,6 +342,8 @@ hajimu --syntax mixed file.jp
 - 既存日本語コードのテストが壊れない
 
 ### Phase 2: 最小英語構文の実行
+
+ステータス: 実装済み
 
 目的: 英語キーワードだけで基本プログラムを書けるようにする。
 
@@ -362,6 +370,8 @@ end
 
 ### Phase 3: 組み込み関数の英語 alias
 
+ステータス: 実装済み
+
 目的: `print`, `input`, `len` など、英語だけでも自然に書けるようにする。
 
 作業:
@@ -376,7 +386,17 @@ end
 - `print()`, `input()`, `len()`, `append()`, `random_int()` などが動く
 - 日本語名も引き続き動く
 
+追加済み:
+
+- 文字列、配列、辞書、型判定、数学、JSON、HTTP、正規表現、パス、Base64、集合、テスト、ドキュメント、非同期補助の代表的な英語 alias
+- `tests/english_stdlib_aliases.jp`
+- `tests/english_concurrency_aliases.jp`
+- `examples/english_stdlib_aliases.jp`
+- `examples/english_concurrency_aliases.jp`
+
 ### Phase 4: 英語らしい制御構文
+
+ステータス: 部分実装（主要構文は実装済み、細かな派生形は継続）
 
 目的: 英語ユーザーにとって自然な `for item in items` などを受け付ける。
 
@@ -406,18 +426,68 @@ end
 
 が実行できる。
 
+実装済み:
+
+- `if condition:` / `if condition then`
+- `else:`
+- `else if condition:`
+- `while condition:`
+- `for item in items:`
+- `for i from 1 to 10:`
+- `import "module" as name`
+
+### Phase 4.5: 発展構文の英語 alias 検証
+
+ステータス: 実装済み
+
+目的: 既存の発展機能が英語 alias でも同じ AST / 評価器へ接続されることを確認する。
+
+実装済み:
+
+- `try:` / `catch err:` / `finally:`
+- `throw` / `raise`
+- `switch` / `case` / `default`
+- `match` / `case` / `default`
+- `enum`
+- `generator` / `yield`
+- `static function`
+
+追加済み:
+
+- `tests/english_advanced.jp`
+- `examples/english_advanced.jp`
+
 ### Phase 5: ドキュメントと教育導線
+
+ステータス: 一部実装済み（チュートリアルと alias 方針を追加）
 
 目的: 日本語ユーザーにも英語ユーザーにも分かりやすく説明する。
 
 作業:
 
-- `docs/REFERENCE.md` に英語構文セクションを追加する
-- `docs/REFERENCE_en.md` に English-first examples を追加する
-- `docs/TUTORIAL.md` に日本語/英語混在の学習例を追加する
-- `examples/english_basic.jp` を追加する
-- `examples/english_oop.jp` を追加する
-- `examples/english_mixed.jp` を追加する
+- `docs/REFERENCE.md` に英語構文セクションを追加する（実装済み）
+- `docs/REFERENCE_en.md` に English-first examples を追加する（実装済み）
+- `docs/TUTORIAL.md` に日本語/英語混在の学習例を追加する（実装済み）
+- `docs/TUTORIAL_en.md` に English-first examples を追加する（実装済み）
+- `docs/ENGLISH_ALIAS_POLICY.md` に命名・衝突方針を追加する（実装済み）
+- `examples/english_basic.jp` を追加する（実装済み）
+- `examples/english_oop.jp` を追加する（実装済み）
+- `examples/english_mixed.jp` を追加する（実装済み）
+
+追加済み:
+
+- `docs/TUTORIAL.md` の「英語 alias で書く」
+- `docs/TUTORIAL_en.md` の "Writing With English Aliases"
+- `docs/ENGLISH_ALIAS_POLICY.md`
+- `examples/english_basic.jp`
+- `examples/english_advanced.jp`
+- `examples/english_stdlib_aliases.jp`
+- `examples/english_concurrency_aliases.jp`
+- `examples/english_oop.jp`
+- `examples/english_mixed.jp`
+- `tests/english_source_extensions.jp`
+- `tests/lib_english_haj.haj`
+- `tests/lib_english_hajimu.hajimu`
 
 完了条件:
 
@@ -455,7 +525,8 @@ end
 - 日本語構文が壊れていない
 - 英語構文が同じ AST / 評価結果になる
 - 日本語と英語の混在が動く
-- keyword alias が識別子として使われた場合の扱いが明確である
+- keyword alias が識別子として使われた場合の扱いが明確である（専用エラー実装済み）
+- 組み込み alias / ランタイム定数を再定義・代入しようとした場合に、別名候補を出す（実装済み）
 - エラー文が日本語構文だけを前提にしすぎていない
 
 ### 8.3 注意する衝突
@@ -468,6 +539,8 @@ end
 - 組み込み関数名はキーワードではなく、通常の識別子として登録する
 - `print`, `len`, `append` などは lexer keyword ではなく built-in alias にする
 - `class`, `function`, `if`, `else`, `end` などは構文キーワードとして扱う
+
+詳細は [英語 alias 命名・衝突方針](ENGLISH_ALIAS_POLICY.md) に分離しました。新しい alias を追加するときは、この方針と `tests/english_*` の更新をセットで行います。
 
 ## 9. 互換性方針
 
@@ -517,4 +590,3 @@ class, new, self, this, init, super
 英語構文対応は、はじむの日本語性を弱めるものではなく、むしろ学習者が日本語と本格的なプログラミング言語の間を行き来するための橋を増やす取り組みです。
 
 まずは安全な keyword alias から始め、組み込み関数 alias、自然な英語制御構文、周辺ツール連携の順に進めます。
-

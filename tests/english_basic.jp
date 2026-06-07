@@ -1,0 +1,70 @@
+// 英語構文 alias の基本テスト
+
+var passed = 0
+var failed = 0
+
+function check(name, actual, expected):
+    if to_string(actual) == to_string(expected) then
+        passed = passed + 1
+    else:
+        failed = failed + 1
+        print("X " + name + ": expected=" + to_string(expected) + " actual=" + to_string(actual))
+    end
+end
+
+const greeting = "hello"
+check("const/string", greeting, "hello")
+
+var numbers is array = [1, 2]
+append(numbers, 3)
+push(numbers, 4)
+check("append/push length", len(numbers), 4)
+check("index", numbers[2], 3)
+
+var total = 0
+for item in numbers:
+    total += item
+end
+check("for item in", total, 10)
+
+var range_total = 0
+for i from 1 to 3:
+    range_total += i
+end
+check("for i from", range_total, 6)
+
+var count = 0
+while count < 3:
+    count += 1
+end
+check("while colon", count, 3)
+
+if true and not false:
+    check("logic", 1, 1)
+else:
+    check("logic", 0, 1)
+end
+
+function add(a is number, b is number) is number:
+    return a + b
+end
+check("function return", add(4, 5), 9)
+
+class Person:
+    init(name):
+        self.name = name
+    end
+
+    function greet():
+        return "Hi " + self.name
+    end
+end
+
+var person = new Person("Hajimu")
+check("class/new/self", person.greet(), "Hi Hajimu")
+
+import "tests/lib_math" as math
+check("import as", math["加算"](2, 5), 7)
+
+assert(failed == 0, "english_basic failed: " + to_string(failed))
+print("english_basic: " + to_string(passed) + " passed")

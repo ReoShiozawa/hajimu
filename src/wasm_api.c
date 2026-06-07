@@ -6,7 +6,7 @@
 #include "evaluator.h"
 #include "parser.h"
 
-#define HAJIMU_WASM_VERSION "1.3.3"
+#define HAJIMU_WASM_VERSION "1.4.0"
 
 EMSCRIPTEN_KEEPALIVE
 int hajimu_run_source(const char *source) {

@@ -75,6 +75,60 @@ C言語で実装されたインタプリタにより実行されます。
 変数 名前 は 文字列 = "こんにちは"
 ```
 
+### 英語構文 alias
+
+はじむは日本語構文を基本にしつつ、一部の英語キーワードと組み込み関数 alias も受け付けます。日本語構文との混在も可能です。
+
+```
+function add(a is number, b is number) is number:
+    return a + b
+end
+
+var numbers is array = [1, 2, 3]
+append(numbers, 4)
+
+var total = 0
+for value in numbers:
+    total += value
+end
+
+if total >= 10 then
+    print("OK")
+else:
+    print("NG")
+end
+```
+
+主な対応:
+
+| 日本語 | 英語 |
+|---|---|
+| `関数` | `function`, `fn` |
+| `終わり` | `end` |
+| `戻す` / `返す` | `return` |
+| `変数` | `var`, `let` |
+| `定数` | `const` |
+| `もし` / `なら` / `それ以外` | `if` / `then` / `else` |
+| `条件` / `の間` | `while` / `do` |
+| `各 ... の中` | `for ... in ...:` |
+| `表示` | `print`, `println` |
+| `長さ` | `len`, `length` |
+| `追加` | `append`, `push` |
+
+標準ライブラリにも英語 alias があります。代表例:
+
+| 分野 | 英語 alias |
+|---|---|
+| 型判定 | `is_number`, `is_string`, `is_array`, `is_dict`, `is_null` |
+| 文字列 | `substring`, `starts_with`, `ends_with`, `split`, `join`, `replace`, `upper`, `lower`, `trim` |
+| 配列 | `sort`, `reverse`, `slice`, `index_of`, `contains`, `flat`, `insert`, `unique`, `zip` |
+| 数学 | `abs`, `sqrt`, `floor`, `ceil`, `round`, `sin`, `cos`, `tan`, `log`, `random_int` |
+| JSON / HTTP | `json_encode`, `json_decode`, `http_get`, `http_post`, `http_put`, `http_delete` |
+| 正規表現 | `regex_match`, `regex_search`, `regex_replace` |
+| パス / Base64 | `path_join`, `basename`, `dirname`, `extension`, `base64_encode`, `base64_decode` |
+| 集合 | `set`, `set_add`, `set_contains`, `set_union`, `set_intersection`, `set_difference` |
+| 非同期補助 | `async_run`, `await_task`, `await_all`, `atomic_create`, `channel_create`, `channel_try_send` |
+
 ---
 
 ## データ型
@@ -536,6 +590,7 @@ i を 1 から 10 繰り返す
 // ファイルパスによるインポート
 取り込む "数学.jp"
 取り込む "utils/helpers.jp"
+取り込む "english_module.haj"
 
 // パッケージ名によるインポート（パッケージ管理と連携）
 取り込む "my-package"
@@ -552,9 +607,10 @@ i を 1 から 10 繰り返す
 ### パスの種類
 
 ```
-// ファイルパス（/ または .jp を含む）
-取り込む "lib/math_utils.jp"   // 相対パス
-取り込む "utils/helpers"       // .jp は省略可能
+// ファイルパス（/ または .jp / .haj / .hajimu を含む）
+取り込む "lib/math_utils.jp"       // 相対パス
+取り込む "lib/english_utils.haj"   // 英語向けソース拡張子
+取り込む "utils/helpers"           // .jp / .haj / .hajimu は省略可能
 
 // パッケージ名（/ を含まない）
 取り込む "my-package"          // パッケージとして検索
@@ -919,6 +975,10 @@ libcurlを使ったHTTPクライアント機能です。全ての関数は結果
 | "本文" | レスポンスボディ（文字列） |
 | "ヘッダー" | レスポンスヘッダー（辞書） |
 | "エラー" | エラーメッセージ（失敗時） |
+| "エラーコード" | libcurl のエラーコード（失敗時） |
+| "URL" | リクエスト先URL（失敗時の確認用） |
+
+通信に失敗した場合でも、`"状態"` は `0`、`"本文"` は空文字列、`"ヘッダー"` は空の辞書として返ります。`JSON解析(応答["本文"])` の前に、必要に応じて `"状態"` または `"エラー"` を確認してください。
 
 ### HTTP取得(URL [, ヘッダー])
 
@@ -1288,6 +1348,24 @@ $ nihongo script.jp arg1 arg2 arg3
 各 値 を 引数 の中:
     表示("引数:", 値)
 終わり
+```
+
+---
+
+## バイトコード `.hjp`
+
+`.jp` / `.haj` / `.hajimu` のソースファイルは、HJPB 形式の `.hjp` に構築できます。`.hjp` はソースを内包したクロスプラットフォーム用バイトコードとして直接実行できます。
+
+```bash
+nihongo 構築 main.haj
+nihongo main.hjp
+nihongo 情報 main.hjp
+```
+
+出力ファイル名を省略すると、入力ファイルの拡張子を `.hjp` に置き換えます。明示する場合は次のように指定します。
+
+```bash
+nihongo build main.haj dist/app.hjp
 ```
 
 ---
@@ -1685,6 +1763,10 @@ hajimu pkg install
 1. `hajimu.json` の `メイン` フィールドで指定されたファイル
 2. `main.jp`
 3. `<パッケージ名>.jp`
+4. `main.haj`
+5. `<パッケージ名>.haj`
+6. `main.hajimu`
+7. `<パッケージ名>.hajimu`
 
 ### パッケージの作成
 
@@ -1945,5 +2027,5 @@ $ nihongo hello.jp
 
 ## バージョン情報
 
-- バージョン: 1.2.0
+- バージョン: 1.4.0
 - 作者: Reo Shiozawa

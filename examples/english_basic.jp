@@ -1,0 +1,33 @@
+// Hajimu can accept English aliases while keeping the same runtime.
+
+function add(a is number, b is number) is number:
+    return a + b
+end
+
+var numbers is array = [1, 2, 3]
+append(numbers, 4)
+
+var total = 0
+for value in numbers:
+    total += value
+end
+
+if total >= 10 then
+    print("total = " + to_string(total))
+else:
+    print("too small")
+end
+
+class Greeter:
+    init(name):
+        self.name = name
+    end
+
+    function greet():
+        return "Hello, " + self.name
+    end
+end
+
+var greeter = new Greeter("Hajimu")
+print(greeter.greet())
+print("add(3, 4) = " + to_string(add(3, 4)))

@@ -34,7 +34,7 @@
 // バージョン情報
 // =============================================================================
 
-#define VERSION "1.3.3"
+#define VERSION "1.4.0"
 #define AUTHOR "Reo Shiozawa"
 
 // =============================================================================
@@ -76,12 +76,28 @@ static char *read_file(const char *path) {
     return buffer;
 }
 
+static char *read_program_source(const char *path) {
+    if (hjpb_is_bytecode_file(path)) {
+        HjpbMeta meta = {0};
+        char *source = NULL;
+        size_t source_len = 0;
+        if (!hjpb_decode(path, &meta, &source, &source_len)) {
+            fprintf(stderr, "エラー: バイトコードを読み込めません: %s\n", path);
+            return NULL;
+        }
+        (void)source_len;
+        return source;
+    }
+
+    return read_file(path);
+}
+
 // =============================================================================
 // ファイル実行
 // =============================================================================
 
 static int run_file(const char *path, bool debug_mode, int script_argc, char **script_argv) {
-    char *source = read_file(path);
+    char *source = read_program_source(path);
     if (source == NULL) {
         return 1;
     }
@@ -180,11 +196,16 @@ static void repl_history_free(void) {
 static bool needs_continuation(const char *line) {
     // ブロック開始キーワードの出現をカウント
     const char *keywords[] = {
-        "関数 ", "もし ", "それ以外", "繰り返す",
+        "関数 ", "もし ", "繰り返す",
         "条件 ", "各 ", "試行:", "型 ", "列挙 ",
         "照合 ", "生成関数 ", NULL
     };
-    const char *end_keyword = "終わり";
+    const char *english_keywords[] = {
+        "function ", "fn ", "if ", "for ",
+        "while ", "each ", "try:", "class ", "type ",
+        "enum ", "match ", "generator ", "generator_function ", NULL
+    };
+    const char *end_keywords[] = {"終わり", "end", NULL};
     
     int open_count = 0;
     int close_count = 0;
@@ -192,14 +213,25 @@ static bool needs_continuation(const char *line) {
     // 各行をチェック
     const char *p = line;
     while (*p) {
-        // 終わりをカウント
-        if (strncmp(p, end_keyword, strlen(end_keyword)) == 0) {
-            close_count++;
+        while (*p == ' ' || *p == '\t') p++;
+
+        // 終わり/endをカウント
+        for (int i = 0; end_keywords[i] != NULL; i++) {
+            if (strncmp(p, end_keywords[i], strlen(end_keywords[i])) == 0) {
+                close_count++;
+                break;
+            }
         }
         
         // 開始キーワードをカウント
         for (int i = 0; keywords[i] != NULL; i++) {
             if (strncmp(p, keywords[i], strlen(keywords[i])) == 0) {
+                open_count++;
+                break;
+            }
+        }
+        for (int i = 0; english_keywords[i] != NULL; i++) {
+            if (strncmp(p, english_keywords[i], strlen(english_keywords[i])) == 0) {
                 open_count++;
                 break;
             }
@@ -217,7 +249,7 @@ static void run_repl(void) {
     printf("日本語プログラミング言語 v%s\n", VERSION);
     printf("作者: %s\n", AUTHOR);
     printf("終了するには「終了」と入力してください。\n");
-    printf("複数行入力: 「関数」「もし」等の後、「終わり」まで継続入力\n\n");
+    printf("複数行入力: 「関数」「もし」/ function, if 等の後、「終わり」/ end まで継続入力\n\n");
     
     Evaluator *eval = evaluator_new();
     char line[4096];
@@ -266,8 +298,8 @@ static void run_repl(void) {
             printf("  クリア, clear     - 画面をクリア\n");
             printf("  履歴, history     - 入力履歴を表示\n");
             printf("\n複数行入力:\n");
-            printf("  「関数」「もし」等のブロック開始で自動的に複数行モードに入ります。\n");
-            printf("  「終わり」で対応するブロックを閉じると実行されます。\n");
+            printf("  「関数」「もし」や function, if 等のブロック開始で自動的に複数行モードに入ります。\n");
+            printf("  「終わり」または end で対応するブロックを閉じると実行されます。\n");
             printf("\n");
             continue;
         }
@@ -322,6 +354,11 @@ static void run_repl(void) {
                 "変数 ", "定数 ", "関数 ", "もし ", "繰り返す", "条件 ",
                 "各 ", "試行:", "型 ", "列挙 ", "照合 ", "表示(",
                 "取り込む", "投げる", "戻す ", "生成関数 ", "@",
+                "var ", "let ", "const ", "function ", "fn ", "if ",
+                "for ", "while ", "each ", "try:", "class ", "type ",
+                "enum ", "match ", "print(", "import ", "use ",
+                "throw ", "raise ", "return ", "generator ",
+                "generator_function ",
                 NULL
             };
             for (int i = 0; stmt_prefixes[i] != NULL; i++) {
@@ -399,7 +436,7 @@ static void print_usage(const char *program_name) {
     printf("  -a, --ast      ASTを表示\n");
     printf("\n");
     printf("バイトコード (.hjp) 操作:\n");
-    printf("  %s 構築 <ファイル.jp> [出力.hjp]   .jp をクロスプラットフォーム .hjp にコンパイル\n", program_name);
+    printf("  %s 構築 <ソース> [出力.hjp]       .jp/.haj/.hajimu をクロスプラットフォーム .hjp にコンパイル\n", program_name);
     printf("  %s 情報 <ファイル.hjp>            .hjp の内容、メタデータを表示\n", program_name);
     printf("\n");
     printf("パッケージ管理:\n");
@@ -464,38 +501,40 @@ static void show_ast(const char *source, const char *filename) {
 }
 
 // =============================================================================
-// 構築コマンド: .jp → .hjp バイトコードコンパイル
+// 構築コマンド: .jp/.haj/.hajimu → .hjp バイトコードコンパイル
 // =============================================================================
 
 /**
- * nihongo 構築 <入力.jp> [出力.hjp]
+ * nihongo 構築 <入力ソース> [出力.hjp]
  *
- * .jp ファイルを HJPB バイトコード .hjp にパックする。
+ * .jp / .haj / .hajimu ファイルを HJPB バイトコード .hjp にパックする。
  * まずパースして構文エラーを検出してから書き出す。
  * 出力先を省略した場合は入力の拡張子を .hjp に変えたファイルを作成する。
  */
-static int cmd_build(const char *input_jp, const char *output_hjp_arg) {
+static int cmd_build(const char *input_source, const char *output_hjp_arg) {
     /* ── 出力パスを決定 ── */
     char out_path[1024];
     if (output_hjp_arg != NULL) {
         snprintf(out_path, sizeof(out_path), "%s", output_hjp_arg);
     } else {
         /* 入力拡張子を .hjp に置換 */
-        snprintf(out_path, sizeof(out_path), "%s", input_jp);
+        snprintf(out_path, sizeof(out_path), "%s", input_source);
         char *dot = strrchr(out_path, '.');
-        if (dot && strcmp(dot, ".jp") == 0) {
+        if (dot && (strcmp(dot, ".jp") == 0 ||
+                    strcmp(dot, ".haj") == 0 ||
+                    strcmp(dot, ".hajimu") == 0)) {
             ptrdiff_t base_len = dot - out_path;
             snprintf(out_path + base_len, sizeof(out_path) - base_len, ".hjp");
         } else {
-            /* .jp でない場合は末尾に .hjp を付加 */
+            /* 既知のソース拡張子でない場合は末尾に .hjp を付加 */
             strncat(out_path, ".hjp", sizeof(out_path) - strlen(out_path) - 1);
         }
     }
 
     /* ── ソースを読み込む ── */
-    FILE *f = fopen(input_jp, "rb");
+    FILE *f = fopen(input_source, "rb");
     if (f == NULL) {
-        fprintf(stderr, "エラー: ファイルを開けません: %s\n", input_jp);
+        fprintf(stderr, "エラー: ファイルを開けません: %s\n", input_source);
         return 1;
     }
     fseek(f, 0, SEEK_END);
@@ -509,14 +548,14 @@ static int cmd_build(const char *input_jp, const char *output_hjp_arg) {
 
     /* ── 構文チェック（パース） ── */
     Parser parser;
-    parser_init(&parser, source, input_jp);
+    parser_init(&parser, source, input_source);
     ASTNode *program = parse_program(&parser);
     bool had_error = parser_had_error(&parser);
     parser_free(&parser);
     node_free(program);
 
     if (had_error) {
-        fprintf(stderr, "構築失敗: '%s' に構文エラーがあります\n", input_jp);
+        fprintf(stderr, "構築失敗: '%s' に構文エラーがあります\n", input_source);
         free(source);
         return 1;
     }
@@ -524,12 +563,12 @@ static int cmd_build(const char *input_jp, const char *output_hjp_arg) {
     /* ── メタデータを組み立てる ── */
     HjpbMeta meta = {0};
     /* 名前: 入力ファイルのベース名 (拡張子なし) */
-    const char *base = strrchr(input_jp, '/');
+    const char *base = strrchr(input_source, '/');
 #ifdef _WIN32
-    const char *base2 = strrchr(input_jp, '\\');
+    const char *base2 = strrchr(input_source, '\\');
     if (base2 > base) base = base2;
 #endif
-    base = base ? base + 1 : input_jp;
+    base = base ? base + 1 : input_source;
     snprintf(meta.name, sizeof(meta.name), "%s", base);
     char *edot = strrchr(meta.name, '.');
     if (edot) *edot = '\0';
@@ -543,7 +582,7 @@ static int cmd_build(const char *input_jp, const char *output_hjp_arg) {
     }
     free(source);
 
-    printf("構築完了: %s → %s\n", input_jp, out_path);
+    printf("構築完了: %s → %s\n", input_source, out_path);
     printf("  形式: HJPB v%d.%d (クロスプラットフォームバイトコード)\n",
            HJPB_VERSION_MAJOR, HJPB_VERSION_MINOR);
     return 0;
@@ -672,14 +711,14 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // 構築コマンド: nihongo 構築 <入力.jp> [出力.hjp]
+    // 構築コマンド: nihongo 構築 <入力ソース> [出力.hjp]
     if (argc >= 3 && (strcmp(argv[1], "構築") == 0 || strcmp(argv[1], "build") == 0)) {
         const char *out = (argc >= 4) ? argv[3] : NULL;
         return cmd_build(argv[2], out);
     }
-    // 省略形: nihongo 構築 <入力.jp>
+    // 省略形: nihongo 構築 <入力ソース>
     if (argc == 2 && (strcmp(argv[1], "構築") == 0 || strcmp(argv[1], "build") == 0)) {
-        fprintf(stderr, "使用方法: %s 構築 <入力.jp> [出力.hjp]\n", argv[0]);
+        fprintf(stderr, "使用方法: %s 構築 <入力ソース> [出力.hjp]\n", argv[0]);
         return 1;
     }
 
@@ -739,7 +778,7 @@ int main(int argc, char *argv[]) {
     
     // ファイル指定がある場合
     if (filename != NULL) {
-        char *source = read_file(filename);
+        char *source = read_program_source(filename);
         if (source == NULL) {
             return 1;
         }

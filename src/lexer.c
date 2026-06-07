@@ -22,7 +22,7 @@ typedef struct {
     TokenType type;
 } KeywordEntry;
 
-#define KEYWORD_HASH_TABLE_SIZE 128
+#define KEYWORD_HASH_TABLE_SIZE 256
 
 typedef struct {
     const char *keyword;
@@ -34,76 +34,148 @@ typedef struct {
 static const KeywordEntry keywords[] = {
     // 関数定義
     {"関数", TOKEN_FUNCTION},
+    {"function", TOKEN_FUNCTION},
+    {"fn", TOKEN_FUNCTION},
     {"終わり", TOKEN_END},
+    {"end", TOKEN_END},
     {"戻す", TOKEN_RETURN},
     {"返す", TOKEN_RETURN},
+    {"return", TOKEN_RETURN},
     
     // 変数
     {"変数", TOKEN_VARIABLE},
+    {"var", TOKEN_VARIABLE},
+    {"let", TOKEN_VARIABLE},
     {"定数", TOKEN_CONSTANT},
+    {"const", TOKEN_CONSTANT},
     
     // 条件分岐
     {"もし", TOKEN_IF},
+    {"if", TOKEN_IF},
     {"それ以外もし", TOKEN_ELSE_IF},
+    {"else_if", TOKEN_ELSE_IF},
+    {"elif", TOKEN_ELSE_IF},
     {"それ以外", TOKEN_ELSE},
+    {"else", TOKEN_ELSE},
     {"なら", TOKEN_THEN},
+    {"then", TOKEN_THEN},
     
     // 繰り返し
     {"条件", TOKEN_WHILE_COND},
+    {"while", TOKEN_WHILE_COND},
     {"の間", TOKEN_WHILE_END},
+    {"do", TOKEN_WHILE_END},
     {"繰り返す", TOKEN_FOR},
+    {"repeat", TOKEN_FOR},
+    {"for", TOKEN_FOR},
     {"から", TOKEN_FROM},
+    {"from", TOKEN_FROM},
     {"を", TOKEN_TO},
+    {"to", TOKEN_TO},
     
     // 制御
     {"抜ける", TOKEN_BREAK},
+    {"break", TOKEN_BREAK},
     {"続ける", TOKEN_CONTINUE},
+    {"continue", TOKEN_CONTINUE},
     {"取り込む", TOKEN_IMPORT},
+    {"import", TOKEN_IMPORT},
+    {"use", TOKEN_IMPORT},
     
     // クラス/OOP
     {"型", TOKEN_CLASS},
+    {"クラス", TOKEN_CLASS},
+    {"class", TOKEN_CLASS},
+    {"type", TOKEN_CLASS},
     {"新規", TOKEN_NEW},
+    {"新しい", TOKEN_NEW},
+    {"new", TOKEN_NEW},
     {"継承", TOKEN_EXTENDS},
+    {"extends", TOKEN_EXTENDS},
     {"自分", TOKEN_SELF},
+    {"self", TOKEN_SELF},
+    {"this", TOKEN_SELF},
     {"初期化", TOKEN_INIT},
+    {"init", TOKEN_INIT},
+    {"constructor", TOKEN_INIT},
     {"親", TOKEN_SUPER},
+    {"super", TOKEN_SUPER},
     
     // 例外処理
     {"試行", TOKEN_TRY},
+    {"試す", TOKEN_TRY},
+    {"try", TOKEN_TRY},
     {"捕獲", TOKEN_CATCH},
+    {"捕捉", TOKEN_CATCH},
+    {"catch", TOKEN_CATCH},
+    {"except", TOKEN_CATCH},
     {"最終", TOKEN_FINALLY},
+    {"最後に", TOKEN_FINALLY},
+    {"finally", TOKEN_FINALLY},
     {"投げる", TOKEN_THROW},
+    {"throw", TOKEN_THROW},
+    {"raise", TOKEN_THROW},
     {"列挙", TOKEN_ENUM},
+    {"enum", TOKEN_ENUM},
     {"照合", TOKEN_MATCH},
+    {"match", TOKEN_MATCH},
     {"静的", TOKEN_STATIC},
+    {"static", TOKEN_STATIC},
     {"譲渡", TOKEN_YIELD},
+    {"yield", TOKEN_YIELD},
     {"生成関数", TOKEN_GENERATOR_FUNC},
+    {"generator", TOKEN_GENERATOR_FUNC},
+    {"generator_function", TOKEN_GENERATOR_FUNC},
     
     // 選択文
     {"選択", TOKEN_SWITCH},
+    {"switch", TOKEN_SWITCH},
     {"場合", TOKEN_CASE},
+    {"case", TOKEN_CASE},
     {"既定", TOKEN_DEFAULT},
+    {"default", TOKEN_DEFAULT},
     
     // foreach
     {"各", TOKEN_EACH},
+    {"each", TOKEN_EACH},
+    {"for_each", TOKEN_EACH},
     {"の中", TOKEN_IN},
+    {"in", TOKEN_IN},
     
     // 真偽値
     {"真", TOKEN_TRUE},
+    {"true", TOKEN_TRUE},
     {"偽", TOKEN_FALSE},
+    {"false", TOKEN_FALSE},
     {"無", TOKEN_NULL_LITERAL},
+    {"null", TOKEN_NULL_LITERAL},
+    {"nil", TOKEN_NULL_LITERAL},
+    {"none", TOKEN_NULL_LITERAL},
     
     // 論理演算
     {"かつ", TOKEN_AND},
+    {"and", TOKEN_AND},
     {"または", TOKEN_OR},
+    {"or", TOKEN_OR},
     {"でない", TOKEN_NOT},
+    {"not", TOKEN_NOT},
     
     // 型
     {"は", TOKEN_TYPE_IS},
+    {"is", TOKEN_TYPE_IS},
+    {"as", TOKEN_TYPE_IS},
     {"数値", TOKEN_TYPE_NUMBER},
+    {"number", TOKEN_TYPE_NUMBER},
+    {"num", TOKEN_TYPE_NUMBER},
     {"文字列", TOKEN_TYPE_STRING_T},
+    {"string", TOKEN_TYPE_STRING_T},
+    {"str", TOKEN_TYPE_STRING_T},
     {"真偽", TOKEN_TYPE_BOOL},
+    {"bool", TOKEN_TYPE_BOOL},
+    {"boolean", TOKEN_TYPE_BOOL},
     {"配列", TOKEN_TYPE_ARRAY},
+    {"array", TOKEN_TYPE_ARRAY},
+    {"list", TOKEN_TYPE_ARRAY},
     
     // 終端
     {NULL, TOKEN_EOF}

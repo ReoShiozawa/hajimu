@@ -1,0 +1,15 @@
+// English aliases for class, constructor, self and new.
+
+class Character:
+    init(name, level):
+        self.name = name
+        self.level = level
+    end
+
+    function describe():
+        return self.name + " Lv." + to_string(self.level)
+    end
+end
+
+var hero = new Character("Aki", 5)
+print(hero.describe())
