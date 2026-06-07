@@ -4,32 +4,42 @@
 [![GitHub release](https://img.shields.io/github/v/release/ReoShiozawa/hajimu.svg)](https://github.com/ReoShiozawa/hajimu/releases)
 [![GitHub stars](https://img.shields.io/github/stars/ReoShiozawa/hajimu.svg)](https://github.com/ReoShiozawa/hajimu/stargazers)
 
-> 日本語版 README: [README.md](README.md)
+> Japanese README: [README.md](README.md)
 
-**A Japanese-first programming language with a practical bridge to English syntax.**
+**Hajimu is a Japanese-first programming language with a deliberate bridge into English-style programming.**
 
-Hajimu is an experimental programming language and runtime implemented in C.
-It started from a simple question: what would programming feel like if Japanese
-were not merely comments, variable names, or a teaching layer, but the primary
-syntax of the language?
+It is not a localization layer on top of another language, and it is not just
+English syntax translated word by word. Hajimu has its own lexer, parser, AST,
+runtime, package tools, bytecode format, and VS Code support. The core runtime
+is written in C, while the language design explores a question that most
+mainstream languages do not ask:
 
-At the same time, Hajimu is not trying to isolate learners from the wider
-programming ecosystem. Current builds also accept English aliases such as
-`function`, `var`, `if`, `for`, `return`, `class`, `new`, `print`, `len`,
-`http_get`, and `async_run`. This makes Hajimu useful both as a Japanese-first
-language and as a research playground for localized syntax, language learning,
-runtime design, and tooling.
+> What would a practical programming language look like if Japanese were a
+> first-class syntax, while still helping learners and developers connect to the
+> wider English-based programming ecosystem?
+
+Hajimu accepts Japanese-native code:
+
+```hajimu
+関数 挨拶(名前):
+    表示("こんにちは、" + 名前 + "さん")
+終わり
+
+挨拶("はじむ")
+```
+
+It also accepts English aliases in the same runtime:
 
 ```hajimu
 function add(a is number, b is number) is number:
     return a + b
 end
 
-var numbers = [1, 2, 3]
-append(numbers, 4)
+var values = [1, 2, 3]
+append(values, 4)
 
 var total = 0
-for value in numbers:
+for value in values:
     total += value
 end
 
@@ -40,54 +50,102 @@ else:
 end
 ```
 
-The same runtime also supports Japanese-native code:
+Japanese and English syntax intentionally map into the same AST and evaluator.
+That design makes Hajimu useful as a language project, a learning tool, and a
+research playground for localized syntax, diagnostics, editor tooling, and
+runtime implementation.
 
-```hajimu
-関数 挨拶(名前):
-    表示("こんにちは、" + 名前 + "さん")
-終わり
+## Why Hajimu Exists
 
-挨拶("はじむ")
-```
+Most programming languages quietly assume that core syntax should look like
+English. That assumption affects who feels invited, what beginners have to
+memorize before they can reason about programs, and how programming concepts
+are taught.
 
-## Why This Is Interesting
+Hajimu takes a different stance:
 
-Most programming languages assume English-like keywords and grammar. Hajimu
-explores a different design space:
+- Japanese should be able to carry real program structure, not only comments or
+  variable names.
+- English programming terms should remain reachable, because learners eventually
+  need to read docs, errors, APIs, and code from the wider ecosystem.
+- Error messages should teach. Diagnostics should explain the cause, likely
+  typo, concrete fix, and a nearby example whenever possible.
+- The implementation should stay small enough that contributors can understand
+  the whole language stack.
+- Distribution should matter early: source files, bytecode, plugins, editor
+  support, Windows installers, and WebAssembly builds are all part of the same
+  language experience.
 
-- **Localized syntax as a first-class language design problem**, not a skin.
-- **Gradual transition between Japanese and English programming concepts**.
-- **Friendly diagnostics** that explain causes, fixes, examples, and likely typos.
-- **A compact C interpreter** that is small enough to read and hack on.
-- **Practical batteries included**: HTTP, JSON, files, async tasks, channels,
-  atomics, classes, enums, pattern matching, generators, and a package manager.
-- **Cross-platform distribution work** through HJPB `.hjp` bytecode and Windows
-  installer builds.
+This makes Hajimu less like "a toy Japanese syntax demo" and more like a compact
+language laboratory with a strong educational purpose.
 
-Hajimu is still young, but it is already substantial enough for language
-experiments, educational tools, editor integrations, and small scripts.
+## Current Status
 
-## Quick Start
+Hajimu is young, but it is already more than a sketch.
 
-### Install
+| Area | Status |
+|---|---|
+| Runtime | C AST interpreter |
+| Source extensions | `.jp`, `.haj`, `.hajimu` |
+| Japanese syntax | Primary language surface |
+| English aliases | Practical v1.4.0 subset implemented |
+| Types | Dynamic values with optional type annotations in syntax |
+| Text | UTF-8 aware string helpers |
+| Functions | Closures, lambdas, higher-order helpers, generators |
+| Data structures | Arrays, dictionaries, enums |
+| OOP | Classes, constructors, `self`, inheritance, static methods |
+| Control flow | if/else, while, for, foreach, switch, match |
+| Errors | try/catch/finally, throw, friendlier parser/runtime messages |
+| IO / data | File IO, paths, JSON, HTTP client, regex, Base64 |
+| Concurrency | async tasks, await, parallel map/run, channels, mutexes, semaphores, atomics |
+| Packaging | `hajimu pkg` package manager |
+| Distribution | HJPB `.hjp` bytecode, native plugin loading, Windows builds |
+| Tooling | VS Code extension, syntax highlighting, completions, diagnostics |
+| Web | WASM target for browser-based education tools |
 
-macOS / Linux with Homebrew:
+It is suitable today for:
+
+- language design experiments
+- Japanese-first programming education
+- small scripts and demos
+- editor tooling experiments
+- diagnostics research
+- C runtime hacking
+- package/plugin design experiments
+
+It is not yet a production-stable replacement for Python, JavaScript, Ruby, or
+Go. The grammar, package ecosystem, and cross-platform release process are still
+evolving.
+
+## Install
+
+### macOS / Linux with Homebrew
 
 ```bash
 brew tap ReoShiozawa/hajimu
 brew install hajimu
 ```
 
-Windows:
+### Windows
 
-Download `hajimu_setup-1.4.0.exe` from
-[GitHub Releases](https://github.com/ReoShiozawa/hajimu/releases), run it, and
-open a new terminal.
+Download the latest installer from
+[GitHub Releases](https://github.com/ReoShiozawa/hajimu/releases).
 
-Portable Windows usage is also supported: keep `hajimu-windows-x64.exe`,
-`libcurl-x64.dll`, and `libwinpthread-1.dll` in the same directory.
+For v1.4.0, the main installer asset is:
 
-Build from source:
+```text
+hajimu_setup-1.4.0.exe
+```
+
+Portable Windows usage is also supported. Keep these files in the same folder:
+
+```text
+hajimu-windows-x64.exe
+libcurl-x64.dll
+libwinpthread-1.dll
+```
+
+### Build From Source
 
 ```bash
 git clone https://github.com/ReoShiozawa/hajimu.git
@@ -96,9 +154,10 @@ make
 ./nihongo examples/english_basic.jp
 ```
 
-The installed command is usually `hajimu`; the source-tree binary is `nihongo`.
+The installed command is usually `hajimu`. Inside a source checkout, the local
+interpreter binary is `./nihongo`.
 
-### Run A Program
+## Try It In Two Minutes
 
 Create `hello.haj`:
 
@@ -110,38 +169,42 @@ end
 greet("Hajimu")
 ```
 
-Run:
+Run it:
 
 ```bash
 hajimu hello.haj
-# or from a source checkout:
+# or from this repository:
 ./nihongo hello.haj
 ```
 
-Supported source extensions are `.jp`, `.haj`, and `.hajimu`.
+Supported source extensions:
 
-## Language Snapshot
-
-| Area | Status |
+| Extension | Suggested use |
 |---|---|
-| Japanese syntax | Primary syntax |
-| English aliases | Practical subset implemented |
-| Runtime | AST interpreter in C |
-| Type system | Dynamic |
-| Strings | UTF-8 aware |
-| OOP | Classes, constructors, `self`, inheritance support |
-| Functional features | Lambdas, higher-order functions, list comprehensions |
-| Control flow | if/else, while, for, foreach, switch, match |
-| Error handling | try/catch/finally, throw |
-| Async/concurrency | async tasks, await, parallel map/run, channels, mutexes, semaphores, atomics |
-| Data / IO | JSON, HTTP client, file IO, path helpers, Base64, regex |
-| Packaging | `hajimu pkg` package manager |
-| Distribution | HJPB `.hjp` bytecode and native plugin loading |
-| Plugins | C ABI plugin API, suitable for C/C++/Rust-style native extensions |
+| `.jp` | Japanese-first Hajimu source |
+| `.haj` | English-alias examples and international-facing source |
+| `.hajimu` | Explicit Hajimu source name |
 
-## Examples
+## Language Examples
 
-Object-oriented code:
+### Mixed Japanese And English
+
+```hajimu
+function 合計(numbers):
+    var total = 0
+    for value in numbers:
+        total += value
+    end
+    戻す total
+end
+
+print(to_string(合計([1, 2, 3])))
+```
+
+This is not a translation mode. `function` and `関数`, `return` and `戻す`,
+`print` and `表示` are connected to the same runtime concepts.
+
+### Classes
 
 ```hajimu
 class Character:
@@ -159,7 +222,7 @@ var hero = new Character("Aki", 5)
 print(hero.describe())
 ```
 
-Async and parallel helpers:
+### Async And Parallel Helpers
 
 ```hajimu
 function double(x):
@@ -173,45 +236,94 @@ var task = async_run(double, 21)
 print(to_string(await_task(task, 2)))  // 42
 ```
 
-Japanese and English can be mixed intentionally:
+### HTTP And JSON
 
 ```hajimu
-function 合計(numbers):
-    var total = 0
-    for value in numbers:
-        total += value
-    end
-    戻す total
-end
+var response = http_get("https://example.com")
+print(to_string(response.status))
 
-print(to_string(合計([1, 2, 3])))
+var data = json_decode("{\"name\":\"Hajimu\"}")
+print(data["name"])
 ```
 
-More examples live in [examples/](examples/), especially:
+## English Alias Design
 
-- [examples/english_basic.jp](examples/english_basic.jp)
-- [examples/english_advanced.jp](examples/english_advanced.jp)
-- [examples/english_oop.jp](examples/english_oop.jp)
-- [examples/english_concurrency_aliases.jp](examples/english_concurrency_aliases.jp)
+English support is intentionally built as aliases over the Japanese-first
+language, not as a forked grammar or separate runtime.
 
-## Documentation
+Examples:
 
-Start here:
+| Japanese | English aliases | Runtime meaning |
+|---|---|---|
+| `関数` | `function`, `fn` | function definition |
+| `戻す` / `返す` | `return` | return statement |
+| `変数` | `var`, `let` | variable declaration |
+| `定数` | `const` | constant declaration |
+| `もし` | `if` | conditional |
+| `それ以外` | `else` | fallback branch |
+| `繰り返す` | `for`, `repeat` | loop |
+| `各` / `の中` | `each`, `in` | foreach-style loop |
+| `型` | `class`, `type` | class definition |
+| `新規` | `new` | instance creation |
+| `自分` | `self`, `this` | receiver reference |
+| `試行` / `捕獲` | `try`, `catch` | exception handling |
+| `表示` | `print`, `println` | output |
 
-- [Tutorial](docs/TUTORIAL_en.md)
-- [Reference Manual](docs/REFERENCE_en.md)
+More details:
+
 - [English Syntax Roadmap](docs/ENGLISH_SYNTAX_ROADMAP.md)
 - [English Alias Naming And Collision Policy](docs/ENGLISH_ALIAS_POLICY.md)
-- [Plugin Development Guide](docs/PLUGIN_DEVELOPMENT.md)
-- [Roadmap](docs/ROADMAP_en.md)
-- [Changelog](CHANGELOG.md)
+- [English Reference Manual](docs/REFERENCE_en.md)
 
-Japanese documentation:
+## Tooling
 
-- [日本語 README](README.md)
-- [チュートリアル](docs/TUTORIAL.md)
-- [リファレンス](docs/REFERENCE.md)
-- [ロードマップ](docs/ROADMAP.md)
+### VS Code
+
+The VS Code extension lives in a separate repository:
+
+- https://github.com/ReoShiozawa/hajimu-vscode
+
+It supports `.jp`, `.haj`, and `.hajimu` files, including syntax highlighting,
+completion, hover information, diagnostics, Japanese romaji expansion, and
+English alias highlighting.
+
+### Education And Browser Runtime
+
+Hajimu also has a WebAssembly target used by the education project:
+
+- https://gitlab.com/hajimudev-group/hajimubridge-project
+
+The WASM API is intentionally small and focused on running source code in a
+browser-based learning environment.
+
+## Repository Map
+
+```text
+src/
+├── lexer.c / lexer.h          tokenization and keyword aliases
+├── parser.c / parser.h        recursive descent parser
+├── ast.c / ast.h              AST nodes
+├── evaluator.c / evaluator.h  runtime evaluator and built-ins
+├── value.c / value.h          dynamic value model
+├── environment.c / .h         scopes, constants, closures
+├── gc.c / gc.h                environment cycle collection
+├── async.c / async.h          tasks, channels, locks, atomics
+├── http.c / http.h            JSON, HTTP client, server helpers
+├── package.c / package.h      package manager
+├── plugin.c / plugin.h        native plugin loading
+└── bytecode.c / bytecode.h    HJPB .hjp format
+```
+
+Other useful directories:
+
+```text
+examples/    runnable examples
+tests/       regression and smoke tests
+docs/        reference, tutorial, roadmap, design notes
+scripts/     release and maintenance helpers
+win/         Windows build and installer files
+Formula/     Homebrew formula
+```
 
 ## Build And Test
 
@@ -221,22 +333,22 @@ Requirements:
 - GCC 9+ or Clang 10+
 - `make`
 - libcurl development files
-- MinGW-w64 and NSIS only if you want to build Windows artifacts from macOS/Linux
+- MinGW-w64 and NSIS only if you want to build Windows artifacts
+- Emscripten only if you want to build the WASM target
 
 Common commands:
 
 ```bash
-make                 # build ./nihongo
-make release         # optimized local build
-make windows         # cross-build win/dist/hajimu.exe
-make windows-installer
-make wasm            # build WebAssembly artifacts for jp-edu integration
+make                   # build ./nihongo
+make release           # optimized local build
+make windows           # build win/dist/hajimu.exe
+make windows-installer # build win/dist/hajimu_setup.exe
+make wasm              # build WebAssembly artifacts
 ```
 
-Test commands used for releases:
+Release smoke tests usually include:
 
 ```bash
-# Most tests are standalone .jp files.
 for file in tests/*.jp; do
   [ "$file" = "tests/webhook_test.jp" ] && continue
   ./nihongo "$file"
@@ -249,67 +361,50 @@ done
 tests/english_error_and_bytecode.sh
 ```
 
-`tests/webhook_test.jp` starts a server and waits for an external/manual request,
-so it is intentionally skipped in automated release smoke tests.
+`tests/webhook_test.jp` starts a server and waits for an external/manual
+request, so it is intentionally skipped in automated smoke tests.
 
-## Architecture
+## Documentation
 
-The core is intentionally approachable:
+English:
 
-```text
-src/
-├── lexer.c / lexer.h          tokenization and keyword aliases
-├── parser.c / parser.h        recursive descent parser
-├── ast.c / ast.h              AST nodes
-├── evaluator.c / evaluator.h  runtime evaluator and built-ins
-├── value.c / value.h          dynamic value model
-├── environment.c / .h         scopes and closures
-├── gc.c / gc.h                environment cycle collection
-├── async.c / async.h          async tasks, channels, locks
-├── http.c / http.h            JSON, HTTP client, simple server helpers
-├── package.c / package.h      package manager
-├── plugin.c / plugin.h        native plugin loading
-└── bytecode.c / bytecode.h    HJPB .hjp format
-```
+- [Tutorial](docs/TUTORIAL_en.md)
+- [Reference Manual](docs/REFERENCE_en.md)
+- [Roadmap](docs/ROADMAP_en.md)
+- [English Syntax Roadmap](docs/ENGLISH_SYNTAX_ROADMAP.md)
+- [English Alias Policy](docs/ENGLISH_ALIAS_POLICY.md)
+- [Plugin Development Guide](docs/PLUGIN_DEVELOPMENT.md)
+- [Changelog](CHANGELOG.md)
 
-The parser maps Japanese syntax and English aliases into the same AST. That is
-the key design choice: English support is not a second language mode, and
-Japanese code does not become a translation artifact.
+Japanese:
 
-## Current Maturity
+- [日本語 README](README.md)
+- [チュートリアル](docs/TUTORIAL.md)
+- [リファレンス](docs/REFERENCE.md)
+- [ロードマップ](docs/ROADMAP.md)
 
-Hajimu is open source and usable, but not yet a production-stable general-purpose
-language. Good use cases today:
+Project site:
 
-- language design experiments
-- Japanese-first programming education
-- editor tooling and diagnostics experiments
-- small scripts and demos
-- package/plugin architecture experiments
-- runtime hacking in C
+- https://reoshiozawa.github.io/hajimu-document/
 
-Areas still evolving:
+## How To Contribute
 
-- grammar consistency between Japanese and English aliases
-- package ecosystem maturity
-- Windows/macOS/Linux release automation
-- long-running async workloads
-- formal language specification
+The most useful contributions right now are practical and small:
 
-## Contributing
+- report a crash or confusing error message with a minimal `.jp` / `.haj` file
+- add a regression test for parser, runtime, or English alias behavior
+- improve diagnostics wording
+- improve English documentation so it reads naturally to non-Japanese developers
+- add examples that teach one concept clearly
+- test Windows installer and portable builds
+- explore VS Code extension behavior with real programs
+- review C runtime code for memory safety and portability issues
 
-Contributions are welcome. The most valuable contributions right now are:
+Before opening a pull request, please read:
 
-- small reproducible bug reports
-- diagnostics improvements
-- English and Japanese documentation improvements
-- examples that teach one idea clearly
-- tests for parser/runtime edge cases
-- Windows packaging feedback
-- VS Code tooling ideas and integration feedback
-
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
-For security-sensitive reports, see [SECURITY.md](SECURITY.md).
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- [SECURITY.md](SECURITY.md)
 
 Commit message convention:
 
@@ -319,7 +414,7 @@ Commit message convention:
 - `test:` tests
 - `refactor:` internal cleanup
 - `perf:` performance improvement
-- `chore:` build/release maintenance
+- `chore:` build or release maintenance
 
 ## Project Links
 
