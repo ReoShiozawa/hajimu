@@ -1203,6 +1203,7 @@ static bool is_runtime_constant_name(const char *name) {
     static const char *constants[] = {
         "円周率", "pi", "PI", "自然対数の底", "e",
         "システム名", "アーキテクチャ", "はじむバージョン", "システム",
+        "system_name", "architecture", "arch", "hajimu_version", "system",
         NULL
     };
 
@@ -1284,24 +1285,43 @@ void register_builtins(Evaluator *eval) {
         /* 個別定数 */
         env_define(eval->global, "システム名",
                    value_string(os_name), true);
+        env_define(eval->global, "system_name",
+                   value_string(os_name), true);
         env_define(eval->global, "アーキテクチャ",
+                   value_string(arch), true);
+        env_define(eval->global, "architecture",
+                   value_string(arch), true);
+        env_define(eval->global, "arch",
                    value_string(arch), true);
         env_define(eval->global, "はじむバージョン",
                    value_string("1.5.0"), true);
+        env_define(eval->global, "hajimu_version",
+                   value_string("1.5.0"), true);
 
-        /* システム辞書: システム["OS"], システム["アーキテクチャ"] 等 */
+        /* システム辞書: システム["OS"] / system["architecture"] など二言語で参照できる。 */
         Value sys = value_dict();
         dict_set(&sys, "OS",           value_string(os_name));
+        dict_set(&sys, "os",           value_string(os_name));
+        dict_set(&sys, "システム名",       value_string(os_name));
+        dict_set(&sys, "system_name",  value_string(os_name));
         dict_set(&sys, "アーキテクチャ",    value_string(arch));
+        dict_set(&sys, "architecture", value_string(arch));
+        dict_set(&sys, "arch",         value_string(arch));
         dict_set(&sys, "バージョン",       value_string("1.5.0"));
+        dict_set(&sys, "version",      value_string("1.5.0"));
 #if defined(_WIN32)
         dict_set(&sys, "区切り文字",       value_string("\\"));
+        dict_set(&sys, "path_separator", value_string("\\"));
         dict_set(&sys, "改行",            value_string("\r\n"));
+        dict_set(&sys, "newline",      value_string("\r\n"));
 #else
         dict_set(&sys, "区切り文字",       value_string("/"));
+        dict_set(&sys, "path_separator", value_string("/"));
         dict_set(&sys, "改行",            value_string("\n"));
+        dict_set(&sys, "newline",      value_string("\n"));
 #endif
         env_define(eval->global, "システム", sys, true);
+        env_define(eval->global, "system", value_copy(sys), true);
     }
 
     // 非同期ランタイムの初期化

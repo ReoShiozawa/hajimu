@@ -589,34 +589,35 @@ See the [Reference Manual](REFERENCE_en.md) "Package Management" section for det
 
 Hajimu provides built-in constants to detect the current OS and architecture at runtime.
 
-```jp
-表示(システム名)           // → "macOS" / "Linux" / "Windows"
-表示(アーキテクチャ)       // → "arm64" / "x86-64"
-表示(はじむバージョン)     // → "1.5.0"
+```haj
+print(system_name)      // → "macOS" / "Linux" / "Windows"
+print(architecture)     // → "arm64" / "x86-64"
+print(arch)             // same as architecture
+print(hajimu_version)   // → "1.5.0"
 
-// Detailed info via the システム dictionary
-表示(システム["OS"])        // → "macOS"
-表示(システム["区切り文字"]) // → "/" (Windows: "\\")
-表示(システム["改行"])      // → "\n" (Windows: "\r\n")
+// Detailed info via the system dictionary
+print(system["os"])             // → "macOS"
+print(system["path_separator"]) // → "/" (Windows: "\\")
+print(system["newline"])        // → "\n" (Windows: "\r\n")
 ```
 
 | Constant | Meaning |
 |---|---|
-| `システム名` | OS name |
-| `アーキテクチャ` | CPU architecture |
-| `はじむバージョン` | Hajimu interpreter version |
-| `システム` | dictionary with extended info |
+| `system_name` / `システム名` | OS name |
+| `architecture` / `arch` / `アーキテクチャ` | CPU architecture |
+| `hajimu_version` / `はじむバージョン` | Hajimu interpreter version |
+| `system` / `システム` | dictionary with extended info |
 
 Branch on platform:
 
-```jp
-もし システム名 == "Windows" なら
-    表示("Running on Windows")
-それ以外もし システム名 == "macOS" なら
-    表示("Running on macOS")
-それ以外
-    表示("Running on Linux")
-終わり
+```haj
+if system_name == "Windows" then
+    print("Running on Windows")
+else if system_name == "macOS" then
+    print("Running on macOS")
+else:
+    print("Running on Linux")
+end
 ```
 
 ### Automatic .hjp Plugin Selection

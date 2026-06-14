@@ -539,6 +539,8 @@ hajimu パッケージ インストール
 表示(システム["改行"])      // → "\n" (Windows では "\r\n")
 ```
 
+英語 alias として `system_name`、`architecture` / `arch`、`hajimu_version`、`system` も使えます。`system["version"]`、`system["path_separator"]`、`system["newline"]` のように辞書キーも英語で参照できます。
+
 プラットフォームに応じて処理を分岐する例:
 
 ```jp

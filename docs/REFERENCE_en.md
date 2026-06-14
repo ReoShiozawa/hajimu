@@ -1119,12 +1119,12 @@ Runs a shell command and returns stdout as a string.
 
 | Constant | Description | Example |
 |---|---|---|
-| `システム名` | OS name | `"macOS"` / `"Linux"` / `"Windows"` |
-| `アーキテクチャ` | CPU architecture | `"arm64"` / `"x86-64"` |
-| `はじむバージョン` | Interpreter version | `"1.5.0"` |
-| `システム["OS"]` | Same as `システム名` | |
-| `システム["区切り文字"]` | Path separator | `/` (Windows: `\`) |
-| `システム["改行"]` | Newline | `\n` (Windows: `\r\n`) |
+| `system_name` / `システム名` | OS name | `"macOS"` / `"Linux"` / `"Windows"` |
+| `architecture` / `arch` / `アーキテクチャ` | CPU architecture | `"arm64"` / `"x86-64"` |
+| `hajimu_version` / `はじむバージョン` | Interpreter version | `"1.5.0"` |
+| `system["os"]` / `システム["OS"]` | Same as `system_name` | |
+| `system["path_separator"]` / `システム["区切り文字"]` | Path separator | `/` (Windows: `\`) |
+| `system["newline"]` / `システム["改行"]` | Newline | `\n` (Windows: `\r\n`) |
 
 ---
 
