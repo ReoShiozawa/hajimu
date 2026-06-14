@@ -1,0 +1,19 @@
+関数 確認(名前, 実際, 期待):
+    もし 実際 == 期待 なら
+        表示("✓ " + 名前)
+    それ以外
+        表示("✗ " + 名前 + ": " + 文字列化(実際) + " != " + 文字列化(期待))
+        終了(1)
+    終わり
+終わり
+
+変数 path = "/tmp/hajimu_json_lines_test.jsonl"
+書き込む(path, "{\"name\":\"A\",\"score\":10}\n{\"name\":\"B\",\"score\":20}\n\n")
+
+変数 rows = JSON行読込(path)
+確認("JSON Lines rows", 長さ(rows), 2)
+確認("JSON Lines first name", rows[0]["name"], "A")
+確認("JSON Lines second score", rows[1]["score"], 20)
+
+変数 limited = JSONL読込(path, 2)
+確認("JSONL alias", limited[1]["name"], "B")

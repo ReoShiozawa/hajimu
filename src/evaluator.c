@@ -19,6 +19,12 @@
 #include <time.h>
 #include <errno.h>
 
+#if defined(HAJIMU_USE_ACCELERATE)
+#  include <Accelerate/Accelerate.h>
+#elif defined(HAJIMU_USE_CBLAS)
+#  include <cblas.h>
+#endif
+
 #define EVALUATOR_PATH_BUFFER_SIZE 1024
 #define EVALUATOR_LONG_PATH_BUFFER_SIZE 2048
 #define EVALUATOR_INITIAL_IMPORT_CAPACITY 8
@@ -51,6 +57,10 @@ static HAJIMU_THREAD_LOCAL Evaluator *g_thread_eval = NULL;
 // グローバルGCインスタンス
 static GC g_gc_state;
 GC *g_gc = &g_gc_state;
+
+static double evaluator_now_ms(void) {
+    return (double)clock() * 1000.0 / (double)CLOCKS_PER_SEC;
+}
 
 static void maybe_collect_gc(void) {
     if (g_gc != NULL && g_gc->tracked_count > g_gc->threshold) {
@@ -177,8 +187,14 @@ static Value builtin_length(int argc, Value *argv);
 static Value builtin_append(int argc, Value *argv);
 static Value builtin_remove(int argc, Value *argv);
 static Value builtin_type(int argc, Value *argv);
+static Value builtin_dtype(int argc, Value *argv);
+static Value builtin_dtype_size(int argc, Value *argv);
+static Value builtin_nbytes(int argc, Value *argv);
+static Value builtin_storage_bytes(int argc, Value *argv);
+static Value builtin_astype(int argc, Value *argv);
 static Value builtin_to_number(int argc, Value *argv);
 static Value builtin_to_string(int argc, Value *argv);
+static Value builtin_to_array(int argc, Value *argv);
 static Value builtin_abs(int argc, Value *argv);
 static Value builtin_sqrt(int argc, Value *argv);
 static Value builtin_floor(int argc, Value *argv);
@@ -187,6 +203,74 @@ static Value builtin_round(int argc, Value *argv);
 static Value builtin_random(int argc, Value *argv);
 static Value builtin_max(int argc, Value *argv);
 static Value builtin_min(int argc, Value *argv);
+static Value builtin_vector(int argc, Value *argv);
+static Value builtin_zeros(int argc, Value *argv);
+static Value builtin_ones(int argc, Value *argv);
+static Value builtin_range_vector(int argc, Value *argv);
+static Value builtin_vector_sum(int argc, Value *argv);
+static Value builtin_mean(int argc, Value *argv);
+static Value builtin_variance(int argc, Value *argv);
+static Value builtin_std(int argc, Value *argv);
+static Value builtin_quantile(int argc, Value *argv);
+static Value builtin_median(int argc, Value *argv);
+static Value builtin_normalize(int argc, Value *argv);
+static Value builtin_norm(int argc, Value *argv);
+static Value builtin_minmax_scale(int argc, Value *argv);
+static Value builtin_clip(int argc, Value *argv);
+static Value builtin_covariance(int argc, Value *argv);
+static Value builtin_correlation(int argc, Value *argv);
+static Value builtin_histogram(int argc, Value *argv);
+static Value builtin_train_test_split(int argc, Value *argv);
+static Value builtin_drop_missing(int argc, Value *argv);
+static Value builtin_fill_missing(int argc, Value *argv);
+static Value builtin_is_nan(int argc, Value *argv);
+static Value builtin_mse(int argc, Value *argv);
+static Value builtin_mae(int argc, Value *argv);
+static Value builtin_r2_score(int argc, Value *argv);
+static Value builtin_accuracy(int argc, Value *argv);
+static Value builtin_precision(int argc, Value *argv);
+static Value builtin_recall(int argc, Value *argv);
+static Value builtin_f1_score(int argc, Value *argv);
+static Value builtin_confusion_matrix(int argc, Value *argv);
+static Value builtin_vector_add(int argc, Value *argv);
+static Value builtin_vector_sub(int argc, Value *argv);
+static Value builtin_vector_mul(int argc, Value *argv);
+static Value builtin_vector_div(int argc, Value *argv);
+static Value builtin_vector_abs(int argc, Value *argv);
+static Value builtin_vector_sqrt(int argc, Value *argv);
+static Value builtin_vector_sin(int argc, Value *argv);
+static Value builtin_vector_cos(int argc, Value *argv);
+static Value builtin_vector_log(int argc, Value *argv);
+static Value builtin_dot(int argc, Value *argv);
+static Value builtin_matrix(int argc, Value *argv);
+static Value builtin_shape(int argc, Value *argv);
+static Value builtin_matrix_get(int argc, Value *argv);
+static Value builtin_matrix_set(int argc, Value *argv);
+static Value builtin_matrix_row(int argc, Value *argv);
+static Value builtin_matrix_column(int argc, Value *argv);
+static Value builtin_transpose(int argc, Value *argv);
+static Value builtin_matmul(int argc, Value *argv);
+static Value builtin_matrix_add(int argc, Value *argv);
+static Value builtin_matrix_sub(int argc, Value *argv);
+static Value builtin_matrix_scale(int argc, Value *argv);
+static Value builtin_matrix_hadamard(int argc, Value *argv);
+static Value builtin_identity(int argc, Value *argv);
+static Value builtin_determinant(int argc, Value *argv);
+static Value builtin_inverse(int argc, Value *argv);
+static Value builtin_solve_linear(int argc, Value *argv);
+static Value builtin_linear_regression(int argc, Value *argv);
+static Value builtin_predict_linear(int argc, Value *argv);
+static Value builtin_kmeans(int argc, Value *argv);
+static Value builtin_knn_predict(int argc, Value *argv);
+static Value builtin_logistic_regression(int argc, Value *argv);
+static Value builtin_predict_logistic(int argc, Value *argv);
+static Value builtin_predict_logistic_class(int argc, Value *argv);
+static Value builtin_read_csv_numeric(int argc, Value *argv);
+static Value builtin_read_tsv_numeric(int argc, Value *argv);
+static Value builtin_read_csv(int argc, Value *argv);
+static Value builtin_csv_column(int argc, Value *argv);
+static Value builtin_read_json_lines(int argc, Value *argv);
+static Value builtin_describe(int argc, Value *argv);
 
 // 辞書関数
 static Value builtin_dict_keys(int argc, Value *argv);
@@ -235,6 +319,8 @@ static Value builtin_is_number(int argc, Value *argv);
 static Value builtin_is_string(int argc, Value *argv);
 static Value builtin_is_bool(int argc, Value *argv);
 static Value builtin_is_array(int argc, Value *argv);
+static Value builtin_is_numeric_array(int argc, Value *argv);
+static Value builtin_is_matrix(int argc, Value *argv);
 static Value builtin_is_dict(int argc, Value *argv);
 static Value builtin_is_function(int argc, Value *argv);
 static Value builtin_is_null(int argc, Value *argv);
@@ -396,6 +482,10 @@ static Evaluator *evaluator_new_internal(bool owns_runtime_context) {
     eval->error_line = 0;
     eval->recursion_depth = 0;
     eval->call_stack_depth = 0;
+    eval->ast_profile_enabled = false;
+    eval->ast_profile_entries = NULL;
+    eval->ast_profile_count = 0;
+    eval->ast_profile_capacity = 0;
     eval->owns_runtime_context = owns_runtime_context;
     
     if (owns_runtime_context) {
@@ -466,6 +556,7 @@ void evaluator_free(Evaluator *eval) {
     
     // プラグインマネージャを解放
     plugin_manager_free(&eval->plugin_manager);
+    free(eval->ast_profile_entries);
     
     if (eval->owns_runtime_context) {
         gc_collect(g_gc);
@@ -479,6 +570,99 @@ void evaluator_free(Evaluator *eval) {
 
 Evaluator *evaluator_current(void) {
     return g_thread_eval != NULL ? g_thread_eval : g_eval;
+}
+
+void evaluator_set_ast_profile_enabled(Evaluator *eval, bool enabled) {
+    if (eval != NULL) {
+        eval->ast_profile_enabled = enabled;
+    }
+}
+
+static AstProfileEntry *find_or_add_ast_profile_entry(Evaluator *eval, const ASTNode *node) {
+    if (eval == NULL || node == NULL) return NULL;
+
+    for (int i = 0; i < eval->ast_profile_count; i++) {
+        if (eval->ast_profile_entries[i].node == node) {
+            return &eval->ast_profile_entries[i];
+        }
+    }
+
+    if (eval->ast_profile_count >= eval->ast_profile_capacity) {
+        int new_capacity = eval->ast_profile_capacity < 16 ? 16 : eval->ast_profile_capacity * 2;
+        AstProfileEntry *entries = realloc(eval->ast_profile_entries,
+                                           sizeof(AstProfileEntry) * (size_t)new_capacity);
+        if (entries == NULL) return NULL;
+        eval->ast_profile_entries = entries;
+        eval->ast_profile_capacity = new_capacity;
+    }
+
+    AstProfileEntry *entry = &eval->ast_profile_entries[eval->ast_profile_count++];
+    entry->node = node;
+    entry->type = node->type;
+    entry->line = node->location.line;
+    entry->column = node->location.column;
+    entry->count = 0;
+    entry->total_ms = 0.0;
+    entry->max_ms = 0.0;
+    return entry;
+}
+
+static void record_ast_profile(Evaluator *eval, const ASTNode *node, double elapsed_ms) {
+    if (eval == NULL || !eval->ast_profile_enabled || node == NULL) return;
+    AstProfileEntry *entry = find_or_add_ast_profile_entry(eval, node);
+    if (entry == NULL) return;
+    entry->count++;
+    entry->total_ms += elapsed_ms;
+    if (elapsed_ms > entry->max_ms) {
+        entry->max_ms = elapsed_ms;
+    }
+}
+
+static int compare_ast_profile_entries(const void *a, const void *b) {
+    const AstProfileEntry *left = *(const AstProfileEntry * const *)a;
+    const AstProfileEntry *right = *(const AstProfileEntry * const *)b;
+    if (left->total_ms < right->total_ms) return 1;
+    if (left->total_ms > right->total_ms) return -1;
+    if (left->count < right->count) return 1;
+    if (left->count > right->count) return -1;
+    return 0;
+}
+
+void evaluator_print_ast_profile(Evaluator *eval, int limit) {
+    if (eval == NULL || eval->ast_profile_count <= 0) {
+        fprintf(stderr, "ASTプロファイル: 記録なし\n");
+        return;
+    }
+
+    if (limit <= 0 || limit > eval->ast_profile_count) {
+        limit = eval->ast_profile_count;
+    }
+
+    AstProfileEntry **sorted = malloc(sizeof(AstProfileEntry *) * (size_t)eval->ast_profile_count);
+    if (sorted == NULL) {
+        fprintf(stderr, "ASTプロファイル: 出力用メモリを確保できませんでした\n");
+        return;
+    }
+
+    for (int i = 0; i < eval->ast_profile_count; i++) {
+        sorted[i] = &eval->ast_profile_entries[i];
+    }
+    qsort(sorted, (size_t)eval->ast_profile_count, sizeof(AstProfileEntry *),
+          compare_ast_profile_entries);
+
+    fprintf(stderr, "ASTプロファイル（上位%d件 / 全%d件）:\n", limit, eval->ast_profile_count);
+    fprintf(stderr, "  %-22s %8s %12s %12s %10s\n", "node", "count", "total_ms", "max_ms", "line:col");
+    for (int i = 0; i < limit; i++) {
+        AstProfileEntry *entry = sorted[i];
+        fprintf(stderr, "  %-22s %8ld %12.3f %12.3f %5d:%-4d\n",
+                node_type_name(entry->type),
+                entry->count,
+                entry->total_ms,
+                entry->max_ms,
+                entry->line,
+                entry->column);
+    }
+    free(sorted);
 }
 
 // =============================================================================
@@ -509,10 +693,22 @@ static const BuiltinEntry builtin_entries[] = {
     {"delete", builtin_remove, 2, 2},
     {"型", builtin_type, 1, 1},
     {"typeof", builtin_type, 1, 1},
+    {"データ型", builtin_dtype, 1, 1},
+    {"dtype", builtin_dtype, 1, 1},
+    {"データ型サイズ", builtin_dtype_size, 1, 1},
+    {"dtype_size", builtin_dtype_size, 1, 1},
+    {"論理バイト数", builtin_nbytes, 1, 1},
+    {"nbytes", builtin_nbytes, 1, 1},
+    {"保存バイト数", builtin_storage_bytes, 1, 1},
+    {"storage_bytes", builtin_storage_bytes, 1, 1},
+    {"型変換", builtin_astype, 2, 2},
+    {"astype", builtin_astype, 2, 2},
     {"数値化", builtin_to_number, 1, 1},
     {"to_number", builtin_to_number, 1, 1},
     {"文字列化", builtin_to_string, 1, 1},
     {"to_string", builtin_to_string, 1, 1},
+    {"配列化", builtin_to_array, 1, 1},
+    {"to_array", builtin_to_array, 1, 1},
     {"数値か", builtin_is_number, 1, 1},
     {"is_number", builtin_is_number, 1, 1},
     {"文字列か", builtin_is_string, 1, 1},
@@ -523,6 +719,11 @@ static const BuiltinEntry builtin_entries[] = {
     {"配列か", builtin_is_array, 1, 1},
     {"is_array", builtin_is_array, 1, 1},
     {"is_list", builtin_is_array, 1, 1},
+    {"数値ベクトルか", builtin_is_numeric_array, 1, 1},
+    {"is_numeric_array", builtin_is_numeric_array, 1, 1},
+    {"is_vector", builtin_is_numeric_array, 1, 1},
+    {"行列か", builtin_is_matrix, 1, 1},
+    {"is_matrix", builtin_is_matrix, 1, 1},
     {"辞書か", builtin_is_dict, 1, 1},
     {"is_dict", builtin_is_dict, 1, 1},
     {"is_object", builtin_is_dict, 1, 1},
@@ -620,6 +821,146 @@ static const BuiltinEntry builtin_entries[] = {
     {"max", builtin_max, 1, -1},
     {"最小", builtin_min, 1, -1},
     {"min", builtin_min, 1, -1},
+    {"ベクトル", builtin_vector, 1, 1},
+    {"vector", builtin_vector, 1, 1},
+    {"ゼロ配列", builtin_zeros, 1, 1},
+    {"zeros", builtin_zeros, 1, 1},
+    {"一配列", builtin_ones, 1, 1},
+    {"ones", builtin_ones, 1, 1},
+    {"範囲ベクトル", builtin_range_vector, 1, 3},
+    {"range_vector", builtin_range_vector, 1, 3},
+    {"ベクトル合計", builtin_vector_sum, 1, 1},
+    {"vector_sum", builtin_vector_sum, 1, 1},
+    {"平均", builtin_mean, 1, 1},
+    {"mean", builtin_mean, 1, 1},
+    {"分散", builtin_variance, 1, 1},
+    {"variance", builtin_variance, 1, 1},
+    {"標準偏差", builtin_std, 1, 1},
+    {"std", builtin_std, 1, 1},
+    {"分位点", builtin_quantile, 2, 2},
+    {"quantile", builtin_quantile, 2, 2},
+    {"中央値", builtin_median, 1, 1},
+    {"median", builtin_median, 1, 1},
+    {"標準化", builtin_normalize, 1, 1},
+    {"normalize", builtin_normalize, 1, 1},
+    {"Zスコア", builtin_normalize, 1, 1},
+    {"z_score", builtin_normalize, 1, 1},
+    {"ノルム", builtin_norm, 1, 2},
+    {"norm", builtin_norm, 1, 2},
+    {"最小最大スケール", builtin_minmax_scale, 1, 1},
+    {"minmax_scale", builtin_minmax_scale, 1, 1},
+    {"クリップ", builtin_clip, 3, 3},
+    {"clip", builtin_clip, 3, 3},
+    {"共分散", builtin_covariance, 2, 2},
+    {"covariance", builtin_covariance, 2, 2},
+    {"相関", builtin_correlation, 2, 2},
+    {"correlation", builtin_correlation, 2, 2},
+    {"ヒストグラム", builtin_histogram, 2, 2},
+    {"histogram", builtin_histogram, 2, 2},
+    {"訓練テスト分割", builtin_train_test_split, 2, 3},
+    {"train_test_split", builtin_train_test_split, 2, 3},
+    {"欠損削除", builtin_drop_missing, 1, 1},
+    {"drop_missing", builtin_drop_missing, 1, 1},
+    {"欠損補完", builtin_fill_missing, 2, 2},
+    {"fill_missing", builtin_fill_missing, 2, 2},
+    {"NaNか", builtin_is_nan, 1, 1},
+    {"is_nan", builtin_is_nan, 1, 1},
+    {"平均二乗誤差", builtin_mse, 2, 2},
+    {"mse", builtin_mse, 2, 2},
+    {"平均絶対誤差", builtin_mae, 2, 2},
+    {"mae", builtin_mae, 2, 2},
+    {"決定係数", builtin_r2_score, 2, 2},
+    {"r2_score", builtin_r2_score, 2, 2},
+    {"正解率", builtin_accuracy, 2, 2},
+    {"accuracy", builtin_accuracy, 2, 2},
+    {"適合率", builtin_precision, 2, 2},
+    {"precision", builtin_precision, 2, 2},
+    {"再現率", builtin_recall, 2, 2},
+    {"recall", builtin_recall, 2, 2},
+    {"F1スコア", builtin_f1_score, 2, 2},
+    {"f1_score", builtin_f1_score, 2, 2},
+    {"混同行列", builtin_confusion_matrix, 2, 2},
+    {"confusion_matrix", builtin_confusion_matrix, 2, 2},
+    {"ベクトル加算", builtin_vector_add, 2, 2},
+    {"vector_add", builtin_vector_add, 2, 2},
+    {"ベクトル減算", builtin_vector_sub, 2, 2},
+    {"vector_sub", builtin_vector_sub, 2, 2},
+    {"ベクトル乗算", builtin_vector_mul, 2, 2},
+    {"vector_mul", builtin_vector_mul, 2, 2},
+    {"ベクトル除算", builtin_vector_div, 2, 2},
+    {"vector_div", builtin_vector_div, 2, 2},
+    {"ベクトル絶対値", builtin_vector_abs, 1, 1},
+    {"vector_abs", builtin_vector_abs, 1, 1},
+    {"ベクトル平方根", builtin_vector_sqrt, 1, 1},
+    {"vector_sqrt", builtin_vector_sqrt, 1, 1},
+    {"ベクトル正弦", builtin_vector_sin, 1, 1},
+    {"vector_sin", builtin_vector_sin, 1, 1},
+    {"ベクトル余弦", builtin_vector_cos, 1, 1},
+    {"vector_cos", builtin_vector_cos, 1, 1},
+    {"ベクトル対数", builtin_vector_log, 1, 1},
+    {"vector_log", builtin_vector_log, 1, 1},
+    {"内積", builtin_dot, 2, 2},
+    {"dot", builtin_dot, 2, 2},
+    {"行列", builtin_matrix, 1, 1},
+    {"matrix", builtin_matrix, 1, 1},
+    {"形状", builtin_shape, 1, 1},
+    {"shape", builtin_shape, 1, 1},
+    {"行列取得", builtin_matrix_get, 3, 3},
+    {"matrix_get", builtin_matrix_get, 3, 3},
+    {"行列設定", builtin_matrix_set, 4, 4},
+    {"matrix_set", builtin_matrix_set, 4, 4},
+    {"行取得", builtin_matrix_row, 2, 2},
+    {"matrix_row", builtin_matrix_row, 2, 2},
+    {"列取得", builtin_matrix_column, 2, 2},
+    {"matrix_column", builtin_matrix_column, 2, 2},
+    {"転置", builtin_transpose, 1, 1},
+    {"transpose", builtin_transpose, 1, 1},
+    {"行列積", builtin_matmul, 2, 2},
+    {"matmul", builtin_matmul, 2, 2},
+    {"行列加算", builtin_matrix_add, 2, 2},
+    {"matrix_add", builtin_matrix_add, 2, 2},
+    {"行列減算", builtin_matrix_sub, 2, 2},
+    {"matrix_sub", builtin_matrix_sub, 2, 2},
+    {"行列スケール", builtin_matrix_scale, 2, 2},
+    {"matrix_scale", builtin_matrix_scale, 2, 2},
+    {"行列要素積", builtin_matrix_hadamard, 2, 2},
+    {"matrix_hadamard", builtin_matrix_hadamard, 2, 2},
+    {"単位行列", builtin_identity, 1, 1},
+    {"identity", builtin_identity, 1, 1},
+    {"行列式", builtin_determinant, 1, 1},
+    {"determinant", builtin_determinant, 1, 1},
+    {"逆行列", builtin_inverse, 1, 1},
+    {"inverse", builtin_inverse, 1, 1},
+    {"線形方程式を解く", builtin_solve_linear, 2, 2},
+    {"solve_linear", builtin_solve_linear, 2, 2},
+    {"solve", builtin_solve_linear, 2, 2},
+    {"線形回帰", builtin_linear_regression, 2, 3},
+    {"linear_regression", builtin_linear_regression, 2, 3},
+    {"線形予測", builtin_predict_linear, 2, 2},
+    {"predict_linear", builtin_predict_linear, 2, 2},
+    {"k平均法", builtin_kmeans, 2, 3},
+    {"kmeans", builtin_kmeans, 2, 3},
+    {"k近傍予測", builtin_knn_predict, 4, 4},
+    {"knn_predict", builtin_knn_predict, 4, 4},
+    {"ロジスティック回帰", builtin_logistic_regression, 2, 4},
+    {"logistic_regression", builtin_logistic_regression, 2, 4},
+    {"ロジスティック予測", builtin_predict_logistic, 2, 2},
+    {"predict_logistic", builtin_predict_logistic, 2, 2},
+    {"ロジスティック分類", builtin_predict_logistic_class, 2, 3},
+    {"predict_logistic_class", builtin_predict_logistic_class, 2, 3},
+    {"CSV数値読込", builtin_read_csv_numeric, 1, 3},
+    {"read_csv_numeric", builtin_read_csv_numeric, 1, 3},
+    {"TSV数値読込", builtin_read_tsv_numeric, 1, 3},
+    {"read_tsv_numeric", builtin_read_tsv_numeric, 1, 3},
+    {"CSV読込", builtin_read_csv, 1, 2},
+    {"read_csv", builtin_read_csv, 1, 2},
+    {"CSV列", builtin_csv_column, 2, 2},
+    {"csv_column", builtin_csv_column, 2, 2},
+    {"JSON行読込", builtin_read_json_lines, 1, 2},
+    {"JSONL読込", builtin_read_json_lines, 1, 2},
+    {"read_json_lines", builtin_read_json_lines, 1, 2},
+    {"要約", builtin_describe, 1, 1},
+    {"describe", builtin_describe, 1, 1},
     {"キー", builtin_dict_keys, 1, 1},
     {"keys", builtin_dict_keys, 1, 1},
     {"値一覧", builtin_dict_values, 1, 1},
@@ -946,13 +1287,13 @@ void register_builtins(Evaluator *eval) {
         env_define(eval->global, "アーキテクチャ",
                    value_string(arch), true);
         env_define(eval->global, "はじむバージョン",
-                   value_string("1.4.0"), true);
+                   value_string("1.5.0"), true);
 
         /* システム辞書: システム["OS"], システム["アーキテクチャ"] 等 */
         Value sys = value_dict();
         dict_set(&sys, "OS",           value_string(os_name));
         dict_set(&sys, "アーキテクチャ",    value_string(arch));
-        dict_set(&sys, "バージョン",       value_string("1.4.0"));
+        dict_set(&sys, "バージョン",       value_string("1.5.0"));
 #if defined(_WIN32)
         dict_set(&sys, "区切り文字",       value_string("\\"));
         dict_set(&sys, "改行",            value_string("\r\n"));
@@ -994,7 +1335,9 @@ void runtime_error(Evaluator *eval, int line, int col, const char *format, ...) 
         kind = DIAG_ZERO_DIV;
     else if (strstr(message, "モジュール") || strstr(message, "プラグイン")
              || strstr(message, "バイトコード") || strstr(message, "読み込めません")
-             || strstr(message, "読み込みに失敗"))
+             || strstr(message, "読み込みに失敗") || strstr(message, "長さが一致")
+             || strstr(message, "長が一致") || strstr(message, "サイズが合いません")
+             || strstr(message, "列数が一致") || strstr(message, "定義域外"))
         kind = DIAG_VALUE;
     else if (strstr(message, "未定義") || strstr(message, "見つかりません")
              || strstr(message, "定義されていません"))
@@ -1039,6 +1382,21 @@ void runtime_error(Evaluator *eval, int line, int col, const char *format, ...) 
         }
         fputc('\n', stderr);
     }
+}
+
+// ビルトイン関数内では AST の位置を直接持たないため、現在の評価器へ
+// 説明的な実行時エラーを届けるための薄いラッパーを使う。
+static void builtin_runtime_error(const char *format, ...) {
+    Evaluator *eval = evaluator_current();
+    if (eval == NULL || eval->had_error) return;
+
+    va_list args;
+    va_start(args, format);
+    char message[512];
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+
+    runtime_error(eval, 0, 0, "%s", message);
 }
 
 static void undefined_variable_error(Evaluator *eval, ASTNode *node, const char *name) {
@@ -1315,6 +1673,12 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
     if (eval->returning || eval->breaking || eval->continuing) {
         return value_null();
     }
+
+    double profile_start_ms = 0.0;
+    bool profile_this_node = eval->ast_profile_enabled;
+    if (profile_this_node) {
+        profile_start_ms = evaluator_now_ms();
+    }
     
     // デバッグトレース（文レベルのノードのみ）
     if (node->type == NODE_VAR_DECL || node->type == NODE_ASSIGN ||
@@ -1368,8 +1732,12 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
             result = value_array_with_capacity(node->block.count);
             for (int i = 0; i < node->block.count; i++) {
                 Value elem = evaluate(eval, node->block.statements[i]);
-                if (eval->had_error) break;
+                if (eval->had_error) {
+                    value_free(&elem);
+                    break;
+                }
                 array_push(&result, elem);
+                value_free(&elem);
             }
             break;
         }
@@ -1378,8 +1746,12 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
             result = value_dict_with_capacity(node->dict.count);
             for (int i = 0; i < node->dict.count; i++) {
                 Value val = evaluate(eval, node->dict.values[i]);
-                if (eval->had_error) break;
+                if (eval->had_error) {
+                    value_free(&val);
+                    break;
+                }
                 dict_set(&result, node->dict.keys[i], val);
+                value_free(&val);
             }
             break;
         }
@@ -1525,6 +1897,9 @@ Value evaluate(Evaluator *eval, ASTNode *node) {
     }
     
     eval->recursion_depth--;
+    if (profile_this_node) {
+        record_ast_profile(eval, node, evaluator_now_ms() - profile_start_ms);
+    }
     return result;
 }
 
@@ -1730,7 +2105,9 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
          strcmp(callee.builtin.name, "push") == 0 ||
          strcmp(callee.builtin.name, "削除") == 0 ||
          strcmp(callee.builtin.name, "remove") == 0 ||
-         strcmp(callee.builtin.name, "delete") == 0)) {
+         strcmp(callee.builtin.name, "delete") == 0 ||
+         strcmp(callee.builtin.name, "行列設定") == 0 ||
+         strcmp(callee.builtin.name, "matrix_set") == 0)) {
         
         if (node->call.arg_count >= 1 && 
             node->call.arguments[0]->type == NODE_IDENTIFIER) {
@@ -1739,6 +2116,28 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
             Value *array_ptr = env_get(eval->current, arr_name);
             
             if (array_ptr == NULL || array_ptr->type != VALUE_ARRAY) {
+                if ((strcmp(callee.builtin.name, "行列設定") == 0 ||
+                     strcmp(callee.builtin.name, "matrix_set") == 0) &&
+                    array_ptr != NULL && array_ptr->type == VALUE_MATRIX &&
+                    node->call.arg_count == 4) {
+                    Value row = evaluate(eval, node->call.arguments[1]);
+                    Value col = evaluate(eval, node->call.arguments[2]);
+                    Value element = evaluate(eval, node->call.arguments[3]);
+                    if (eval->had_error) return value_null();
+                    if (row.type != VALUE_NUMBER || col.type != VALUE_NUMBER ||
+                        !row.is_integer || !col.is_integer || element.type != VALUE_NUMBER) {
+                        runtime_error(eval, node->location.line, node->location.column,
+                                     "matrix_set には 行列, 整数行, 整数列, 数値 が必要です");
+                        return value_null();
+                    }
+                    if (!matrix_set(array_ptr, (int)row.number, (int)col.number, element.number)) {
+                        runtime_error(eval, node->location.line, node->location.column,
+                                     "行列インデックスが範囲外です: (%d, %d)",
+                                     (int)row.number, (int)col.number);
+                        return value_null();
+                    }
+                    return value_null();
+                }
                 runtime_error(eval, node->location.line, node->location.column,
                              "%sは配列ではありません", arr_name);
                 return value_null();
@@ -2043,6 +2442,44 @@ static Value evaluate_index(Evaluator *eval, ASTNode *node) {
         
         return array.array.elements[idx];
     }
+
+    if (array.type == VALUE_NUMERIC_ARRAY) {
+        if (!require_integer_index(eval, node, index, "数値ベクトル")) {
+            return value_null();
+        }
+
+        int idx = (int)index.number;
+        if (idx < 0) idx += array.numeric_array.length;
+        if (idx < 0 || idx >= array.numeric_array.length) {
+            runtime_error(eval, node->location.line, node->location.column,
+                         "インデックスが範囲外です: %d（長さ: %d）",
+                         (int)index.number, array.numeric_array.length);
+            return value_null();
+        }
+
+        return value_number(numeric_array_get(&array, idx));
+    }
+
+    if (array.type == VALUE_MATRIX) {
+        if (!require_integer_index(eval, node, index, "数値行列")) {
+            return value_null();
+        }
+
+        int row = (int)index.number;
+        if (row < 0) row += array.matrix.rows;
+        if (row < 0 || row >= array.matrix.rows) {
+            runtime_error(eval, node->location.line, node->location.column,
+                         "行インデックスが範囲外です: %d（行数: %d）",
+                         (int)index.number, array.matrix.rows);
+            return value_null();
+        }
+
+        Value result = value_numeric_array_with_capacity(array.matrix.cols);
+        for (int c = 0; c < array.matrix.cols; c++) {
+            numeric_array_push(&result, matrix_get(&array, row, c));
+        }
+        return result;
+    }
     
     if (array.type == VALUE_STRING) {
         if (!require_integer_index(eval, node, index, "文字列")) {
@@ -2075,7 +2512,7 @@ static Value evaluate_index(Evaluator *eval, ASTNode *node) {
     }
     
     runtime_error(eval, node->location.line, node->location.column,
-                 "インデックスアクセスは配列、文字列、辞書にのみ使用できます");
+                 "インデックスアクセスは配列、文字列、辞書、数値ベクトル、数値行列にのみ使用できます");
     return value_null();
 }
 
@@ -2249,6 +2686,10 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
                     return value_null();
                 }
                 ptr = &ptr->array.elements[aidx];
+            } else if (ptr->type == VALUE_NUMERIC_ARRAY && idx.type == VALUE_NUMBER) {
+                runtime_error(eval, node->location.line, node->location.column,
+                              "数値ベクトルの要素は数値なので、さらにネストした代入はできません");
+                return value_null();
             } else {
                 runtime_error(eval, node->location.line, node->location.column, "配列または辞書が見つかりません");
                 return value_null();
@@ -2268,6 +2709,23 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
                 return value_null();
             }
         }
+        else if (ptr->type == VALUE_NUMERIC_ARRAY) {
+            if (!require_integer_index(eval, node, index, "数値ベクトル")) {
+                return value_null();
+            }
+            if (value.type != VALUE_NUMBER) {
+                runtime_error(eval, node->location.line, node->location.column,
+                             "数値ベクトルには数値だけを代入できます");
+                return value_null();
+            }
+            int idx = (int)index.number;
+            if (idx < 0) idx += ptr->numeric_array.length;
+            if (!numeric_array_set(ptr, idx, value.number)) {
+                runtime_error(eval, node->location.line, node->location.column,
+                             "インデックスが範囲外です: %d", idx);
+                return value_null();
+            }
+        }
         else if (ptr->type == VALUE_DICT) {
             if (index.type != VALUE_STRING) {
                 runtime_error(eval, node->location.line, node->location.column,
@@ -2277,7 +2735,7 @@ static Value evaluate_assign(Evaluator *eval, ASTNode *node) {
             dict_set(ptr, index.string.data, value);
         }
         else {
-            runtime_error(eval, node->location.line, node->location.column, "配列または辞書が見つかりません");
+            runtime_error(eval, node->location.line, node->location.column, "配列、辞書、数値ベクトルが見つかりません");
             return value_null();
         }
     }
@@ -3160,14 +3618,50 @@ static Value evaluate_member(Evaluator *eval, ASTNode *node) {
 // 例外処理の評価
 // =============================================================================
 
+static Value make_runtime_diagnostic_value(Evaluator *eval) {
+    Value diag = value_dict();
+    const char *file = eval->current_file != NULL ? eval->current_file : "<不明>";
+    dict_set(&diag, "message", value_string(eval->error_message));
+    dict_set(&diag, "メッセージ", value_string(eval->error_message));
+    dict_set(&diag, "file", value_string(file));
+    dict_set(&diag, "ファイル", value_string(file));
+    dict_set(&diag, "line", value_number(eval->error_line));
+    dict_set(&diag, "行", value_number(eval->error_line));
+    dict_set(&diag, "column", value_number(eval->error_column));
+    dict_set(&diag, "列", value_number(eval->error_column));
+    dict_set(&diag, "kind", value_string("runtime"));
+    dict_set(&diag, "種類", value_string("runtime"));
+    return diag;
+}
+
 static Value evaluate_try(Evaluator *eval, ASTNode *node) {
     Value result = value_null();
     
     // 試行ブロックを実行
     evaluate(eval, node->try_stmt.try_block);
     
+    bool caught_runtime_error = false;
+    if (eval->had_error && node->try_stmt.catch_block != NULL) {
+        Value diagnostic = make_runtime_diagnostic_value(eval);
+        evaluator_clear_error(eval);
+        caught_runtime_error = true;
+
+        Environment *catch_scope = env_new(eval->current);
+        if (node->try_stmt.catch_var != NULL) {
+            env_define(catch_scope, node->try_stmt.catch_var, diagnostic, false);
+        } else {
+            value_free(&diagnostic);
+        }
+
+        Environment *prev = eval->current;
+        eval->current = catch_scope;
+        evaluate(eval, node->try_stmt.catch_block);
+        eval->current = prev;
+        env_release(catch_scope);
+    }
+
     // 例外が発生した場合
-    if (eval->throwing && node->try_stmt.catch_block != NULL) {
+    if (!caught_runtime_error && eval->throwing && node->try_stmt.catch_block != NULL) {
         // 例外をキャッチ
         eval->throwing = false;
         
@@ -3634,6 +4128,9 @@ static Value builtin_length(int argc, Value *argv) {
     if (argv[0].type == VALUE_ARRAY) {
         return value_number(argv[0].array.length);
     }
+    if (argv[0].type == VALUE_NUMERIC_ARRAY) {
+        return value_number(argv[0].numeric_array.length);
+    }
     if (argv[0].type == VALUE_STRING) {
         return value_number(string_length(&argv[0]));
     }
@@ -3684,6 +4181,138 @@ static Value builtin_type(int argc, Value *argv) {
     return value_string(value_runtime_type_name(argv[0]));
 }
 
+static Value builtin_dtype(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type == VALUE_NUMERIC_ARRAY) {
+        return value_string(numeric_dtype_name(argv[0].numeric_array.dtype));
+    }
+    if (argv[0].type == VALUE_MATRIX) {
+        return value_string(numeric_dtype_name(argv[0].matrix.dtype));
+    }
+    builtin_runtime_error("dtype は数値ベクトルまたは行列に使います（実際: %s）",
+                          value_type_name(argv[0].type));
+    return value_null();
+}
+
+static Value builtin_dtype_size(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type == VALUE_STRING) {
+        NumericDType dtype;
+        if (!numeric_dtype_from_name(argv[0].string.data, &dtype)) {
+            builtin_runtime_error("未知の dtype です: %s（利用可能: f64, f32, i64, i32, bool）",
+                                  argv[0].string.data);
+            return value_null();
+        }
+        return value_number(numeric_dtype_size(dtype));
+    }
+    if (argv[0].type == VALUE_NUMERIC_ARRAY) {
+        return value_number(numeric_dtype_size(argv[0].numeric_array.dtype));
+    }
+    if (argv[0].type == VALUE_MATRIX) {
+        return value_number(numeric_dtype_size(argv[0].matrix.dtype));
+    }
+    builtin_runtime_error("dtype_size は dtype 名、数値ベクトル、行列に使います（実際: %s）",
+                          value_type_name(argv[0].type));
+    return value_null();
+}
+
+static Value builtin_nbytes(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type == VALUE_NUMERIC_ARRAY) {
+        return value_number((double)argv[0].numeric_array.length *
+                            numeric_dtype_size(argv[0].numeric_array.dtype));
+    }
+    if (argv[0].type == VALUE_MATRIX) {
+        return value_number((double)argv[0].matrix.rows * (double)argv[0].matrix.cols *
+                            numeric_dtype_size(argv[0].matrix.dtype));
+    }
+    builtin_runtime_error("nbytes は数値ベクトルまたは行列に使います（実際: %s）",
+                          value_type_name(argv[0].type));
+    return value_null();
+}
+
+static Value builtin_storage_bytes(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type == VALUE_NUMERIC_ARRAY) {
+        return value_number((double)argv[0].numeric_array.capacity *
+                            (double)numeric_dtype_size(argv[0].numeric_array.dtype));
+    }
+    if (argv[0].type == VALUE_MATRIX) {
+        return value_number((double)argv[0].matrix.rows * (double)argv[0].matrix.cols *
+                            (double)numeric_dtype_size(argv[0].matrix.dtype));
+    }
+    builtin_runtime_error("storage_bytes は数値ベクトルまたは行列に使います（実際: %s）",
+                          value_type_name(argv[0].type));
+    return value_null();
+}
+
+static Value builtin_astype(int argc, Value *argv) {
+    (void)argc;
+    if (argv[1].type != VALUE_STRING) {
+        builtin_runtime_error("astype の第2引数は dtype 名の文字列です（例: \"f64\", \"f32\", \"i64\", \"i32\", \"bool\"）");
+        return value_null();
+    }
+
+    NumericDType dtype;
+    if (!numeric_dtype_from_name(argv[1].string.data, &dtype)) {
+        builtin_runtime_error("未知の dtype です: %s（利用可能: f64, f32, i64, i32, bool）",
+                              argv[1].string.data);
+        return value_null();
+    }
+
+    if (argv[0].type == VALUE_NUMERIC_ARRAY) {
+        Value result = value_numeric_array_with_dtype(argv[0].numeric_array.length, dtype);
+        for (int i = 0; i < argv[0].numeric_array.length; i++) {
+            numeric_array_push(&result, numeric_array_get(&argv[0], i));
+        }
+        return result;
+    }
+    if (argv[0].type == VALUE_MATRIX) {
+        Value result = value_matrix_with_dtype(argv[0].matrix.rows, argv[0].matrix.cols, dtype);
+        for (int r = 0; r < argv[0].matrix.rows; r++) {
+            for (int c = 0; c < argv[0].matrix.cols; c++) {
+                matrix_set(&result, r, c, matrix_get(&argv[0], r, c));
+            }
+        }
+        return result;
+    }
+
+    builtin_runtime_error("astype の第1引数は数値ベクトルまたは行列でなければなりません（実際: %s）",
+                          value_type_name(argv[0].type));
+    return value_null();
+}
+
+static Value builtin_to_array(int argc, Value *argv) {
+    (void)argc;
+
+    if (argv[0].type == VALUE_ARRAY) {
+        return value_copy(argv[0]);
+    }
+
+    if (argv[0].type == VALUE_NUMERIC_ARRAY) {
+        Value result = value_array_with_capacity(argv[0].numeric_array.length);
+        for (int i = 0; i < argv[0].numeric_array.length; i++) {
+            array_push(&result, value_number(numeric_array_get(&argv[0], i)));
+        }
+        return result;
+    }
+
+    if (argv[0].type == VALUE_MATRIX) {
+        Value result = value_array_with_capacity(argv[0].matrix.rows);
+        for (int r = 0; r < argv[0].matrix.rows; r++) {
+            Value row = value_array_with_capacity(argv[0].matrix.cols);
+            for (int c = 0; c < argv[0].matrix.cols; c++) {
+                array_push(&row, value_number(matrix_get(&argv[0], r, c)));
+            }
+            array_push(&result, row);
+            value_free(&row);
+        }
+        return result;
+    }
+
+    return value_null();
+}
+
 // 型チェック関数
 #define DEFINE_TYPE_CHECK_BUILTIN(name, condition) \
     static Value builtin_is_##name(int argc, Value *argv) { \
@@ -3695,6 +4324,8 @@ DEFINE_TYPE_CHECK_BUILTIN(number, argv[0].type == VALUE_NUMBER)
 DEFINE_TYPE_CHECK_BUILTIN(string, argv[0].type == VALUE_STRING)
 DEFINE_TYPE_CHECK_BUILTIN(bool, argv[0].type == VALUE_BOOL)
 DEFINE_TYPE_CHECK_BUILTIN(array, argv[0].type == VALUE_ARRAY)
+DEFINE_TYPE_CHECK_BUILTIN(numeric_array, argv[0].type == VALUE_NUMERIC_ARRAY)
+DEFINE_TYPE_CHECK_BUILTIN(matrix, argv[0].type == VALUE_MATRIX)
 DEFINE_TYPE_CHECK_BUILTIN(dict, argv[0].type == VALUE_DICT)
 DEFINE_TYPE_CHECK_BUILTIN(function, argv[0].type == VALUE_FUNCTION || argv[0].type == VALUE_BUILTIN)
 DEFINE_TYPE_CHECK_BUILTIN(null, argv[0].type == VALUE_NULL)
@@ -4040,6 +4671,31 @@ static uint32_t unique_hash_value(Value value) {
             hash = unique_mix_hash(hash, (uint32_t)value.array.length);
             for (int i = 0; i < value.array.length; i++) {
                 hash = unique_mix_hash(hash, unique_hash_value(value.array.elements[i]));
+            }
+            return hash;
+        case VALUE_NUMERIC_ARRAY:
+            hash = unique_mix_hash(hash, (uint32_t)value.numeric_array.length);
+            for (int i = 0; i < value.numeric_array.length; i++) {
+                double item = numeric_array_get(&value, i);
+                double normalized = item == 0.0 ? 0.0 : item;
+                uint64_t bits = 0;
+                memcpy(&bits, &normalized, sizeof(bits));
+                hash = unique_mix_hash(hash, (uint32_t)(bits & 0xffffffffu));
+                hash = unique_mix_hash(hash, (uint32_t)(bits >> 32));
+            }
+            return hash;
+        case VALUE_MATRIX:
+            hash = unique_mix_hash(hash, (uint32_t)value.matrix.rows);
+            hash = unique_mix_hash(hash, (uint32_t)value.matrix.cols);
+            for (int r = 0; r < value.matrix.rows; r++) {
+                for (int c = 0; c < value.matrix.cols; c++) {
+                    double item = matrix_get(&value, r, c);
+                    double normalized = item == 0.0 ? 0.0 : item;
+                    uint64_t bits = 0;
+                    memcpy(&bits, &normalized, sizeof(bits));
+                    hash = unique_mix_hash(hash, (uint32_t)(bits & 0xffffffffu));
+                    hash = unique_mix_hash(hash, (uint32_t)(bits >> 32));
+                }
             }
             return hash;
         case VALUE_DICT:
@@ -4546,6 +5202,18 @@ static Value builtin_random(int argc, Value *argv) {
 
 static Value builtin_max(int argc, Value *argv) {
     if (argc == 0) return value_null();
+
+    if (argc == 1 && argv[0].type == VALUE_NUMERIC_ARRAY) {
+        if (argv[0].numeric_array.length == 0) return value_null();
+        double max = numeric_array_get(&argv[0], 0);
+        for (int i = 1; i < argv[0].numeric_array.length; i++) {
+            double item = numeric_array_get(&argv[0], i);
+            if (item > max) {
+                max = item;
+            }
+        }
+        return value_number(max);
+    }
     
     double max = -INFINITY;
     for (int i = 0; i < argc; i++) {
@@ -4561,6 +5229,18 @@ static Value builtin_max(int argc, Value *argv) {
 
 static Value builtin_min(int argc, Value *argv) {
     if (argc == 0) return value_null();
+
+    if (argc == 1 && argv[0].type == VALUE_NUMERIC_ARRAY) {
+        if (argv[0].numeric_array.length == 0) return value_null();
+        double min = numeric_array_get(&argv[0], 0);
+        for (int i = 1; i < argv[0].numeric_array.length; i++) {
+            double item = numeric_array_get(&argv[0], i);
+            if (item < min) {
+                min = item;
+            }
+        }
+        return value_number(min);
+    }
     
     double min = INFINITY;
     for (int i = 0; i < argc; i++) {
@@ -4573,6 +5253,2702 @@ static Value builtin_min(int argc, Value *argv) {
     
     return value_number(min);
 }
+
+static bool vector_length_arg(Value v, int *out) {
+    if (v.type != VALUE_NUMBER || !v.is_integer) return false;
+    if (v.number < 0 || v.number > 1000000) return false;
+    *out = (int)v.number;
+    return true;
+}
+
+static Value builtin_vector(int argc, Value *argv) {
+    (void)argc;
+
+    if (argv[0].type == VALUE_NUMERIC_ARRAY) {
+        return value_copy(argv[0]);
+    }
+
+    if (argv[0].type != VALUE_ARRAY) {
+        return value_null();
+    }
+
+    Value result = value_numeric_array_with_capacity(argv[0].array.length);
+    for (int i = 0; i < argv[0].array.length; i++) {
+        Value item = argv[0].array.elements[i];
+        if (item.type != VALUE_NUMBER) {
+            value_free(&result);
+            return value_null();
+        }
+        numeric_array_push(&result, item.number);
+    }
+
+    return result;
+}
+
+static Value builtin_zeros(int argc, Value *argv) {
+    (void)argc;
+    int length = 0;
+    if (!vector_length_arg(argv[0], &length)) return value_null();
+
+    Value result = value_numeric_array_with_capacity(length);
+    for (int i = 0; i < length; i++) {
+        numeric_array_push(&result, 0.0);
+    }
+    return result;
+}
+
+static Value builtin_ones(int argc, Value *argv) {
+    (void)argc;
+    int length = 0;
+    if (!vector_length_arg(argv[0], &length)) return value_null();
+
+    Value result = value_numeric_array_with_capacity(length);
+    for (int i = 0; i < length; i++) {
+        numeric_array_push(&result, 1.0);
+    }
+    return result;
+}
+
+static Value builtin_range_vector(int argc, Value *argv) {
+    double start, end, step;
+
+    if (argc == 1) {
+        if (argv[0].type != VALUE_NUMBER) return value_null();
+        start = 0;
+        end = argv[0].number;
+        step = 1;
+    } else if (argc == 2) {
+        if (argv[0].type != VALUE_NUMBER || argv[1].type != VALUE_NUMBER) return value_null();
+        start = argv[0].number;
+        end = argv[1].number;
+        step = (start <= end) ? 1 : -1;
+    } else {
+        if (argv[0].type != VALUE_NUMBER || argv[1].type != VALUE_NUMBER || argv[2].type != VALUE_NUMBER) return value_null();
+        start = argv[0].number;
+        end = argv[1].number;
+        step = argv[2].number;
+        if (step == 0) return value_null();
+    }
+
+    int count = 0;
+    if (step > 0) {
+        for (double i = start; i < end; i += step) count++;
+    } else {
+        for (double i = start; i > end; i += step) count++;
+    }
+
+    if (count <= 0) return value_numeric_array();
+    if (count > 1000000) return value_null();
+
+    Value result = value_numeric_array_with_capacity(count);
+    if (step > 0) {
+        for (double i = start; i < end; i += step) {
+            numeric_array_push(&result, i);
+        }
+    } else {
+        for (double i = start; i > end; i += step) {
+            numeric_array_push(&result, i);
+        }
+    }
+
+    return result;
+}
+
+static Value builtin_vector_sum(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMERIC_ARRAY) return value_null();
+
+    double total = 0.0;
+    for (int i = 0; i < argv[0].numeric_array.length; i++) {
+        total += numeric_array_get(&argv[0], i);
+    }
+    return value_number(total);
+}
+
+static Value builtin_mean(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type == VALUE_NUMERIC_ARRAY) {
+        int n = argv[0].numeric_array.length;
+        if (n == 0) return value_null();
+        double total = 0.0;
+        for (int i = 0; i < n; i++) total += numeric_array_get(&argv[0], i);
+        return value_number(total / n);
+    }
+
+    if (argv[0].type == VALUE_ARRAY) {
+        int n = argv[0].array.length;
+        if (n == 0) return value_null();
+        double total = 0.0;
+        for (int i = 0; i < n; i++) {
+            if (argv[0].array.elements[i].type != VALUE_NUMBER) return value_null();
+            total += argv[0].array.elements[i].number;
+        }
+        return value_number(total / n);
+    }
+
+    return value_null();
+}
+
+static Value builtin_variance(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMERIC_ARRAY) return value_null();
+
+    int n = argv[0].numeric_array.length;
+    if (n == 0) return value_null();
+
+    double mean = 0.0;
+    for (int i = 0; i < n; i++) mean += numeric_array_get(&argv[0], i);
+    mean /= n;
+
+    double total = 0.0;
+    for (int i = 0; i < n; i++) {
+        double delta = numeric_array_get(&argv[0], i) - mean;
+        total += delta * delta;
+    }
+
+    return value_number(total / n);
+}
+
+static Value builtin_std(int argc, Value *argv) {
+    Value variance = builtin_variance(argc, argv);
+    if (variance.type != VALUE_NUMBER) return value_null();
+    return value_number(sqrt(variance.number));
+}
+
+static int compare_double_values(const void *a, const void *b) {
+    double da = *(const double *)a;
+    double db = *(const double *)b;
+    return (da > db) - (da < db);
+}
+
+static bool copy_numeric_values(Value input, const char *name, double **out, int *length) {
+    *out = NULL;
+    *length = 0;
+
+    if (input.type == VALUE_NUMERIC_ARRAY) {
+        int n = input.numeric_array.length;
+        if (n <= 0) {
+            builtin_runtime_error("%s は空の数値ベクトルを扱えません", name);
+            return false;
+        }
+        double *data = malloc(sizeof(double) * (size_t)n);
+        if (data == NULL) {
+            builtin_runtime_error("%s の作業メモリを確保できませんでした", name);
+            return false;
+        }
+        for (int i = 0; i < n; i++) {
+            data[i] = numeric_array_get(&input, i);
+        }
+        *out = data;
+        *length = n;
+        return true;
+    }
+
+    if (input.type == VALUE_ARRAY) {
+        int n = input.array.length;
+        if (n <= 0) {
+            builtin_runtime_error("%s は空の配列を扱えません", name);
+            return false;
+        }
+        double *data = malloc(sizeof(double) * (size_t)n);
+        if (data == NULL) {
+            builtin_runtime_error("%s の作業メモリを確保できませんでした", name);
+            return false;
+        }
+        for (int i = 0; i < n; i++) {
+            if (input.array.elements[i].type != VALUE_NUMBER) {
+                free(data);
+                builtin_runtime_error("%s の配列要素はすべて数値でなければなりません（%d番目: %s）",
+                                      name, i, value_type_name(input.array.elements[i].type));
+                return false;
+            }
+            data[i] = input.array.elements[i].number;
+        }
+        *out = data;
+        *length = n;
+        return true;
+    }
+
+    builtin_runtime_error("%s の引数は数値ベクトルまたは数値配列でなければなりません（実際: %s）",
+                          name, value_type_name(input.type));
+    return false;
+}
+
+static Value builtin_quantile(int argc, Value *argv) {
+    (void)argc;
+    if (argv[1].type != VALUE_NUMBER) {
+        builtin_runtime_error("quantile の第2引数は 0 から 1 の数値でなければなりません（実際: %s）",
+                              value_type_name(argv[1].type));
+        return value_null();
+    }
+
+    double q = argv[1].number;
+    if (q < 0.0 || q > 1.0 || isnan(q)) {
+        builtin_runtime_error("quantile の第2引数は 0 から 1 の範囲で指定してください（実際: %g）", q);
+        return value_null();
+    }
+
+    double *data = NULL;
+    int n = 0;
+    if (!copy_numeric_values(argv[0], "quantile", &data, &n)) return value_null();
+
+    qsort(data, (size_t)n, sizeof(double), compare_double_values);
+    double pos = q * (double)(n - 1);
+    int lower = (int)floor(pos);
+    int upper = (int)ceil(pos);
+    double frac = pos - lower;
+    double value = data[lower] * (1.0 - frac) + data[upper] * frac;
+    free(data);
+    return value_number(value);
+}
+
+static Value builtin_median(int argc, Value *argv) {
+    (void)argc;
+    Value q = value_number(0.5);
+    Value args[2] = { argv[0], q };
+    return builtin_quantile(2, args);
+}
+
+static Value builtin_normalize(int argc, Value *argv) {
+    (void)argc;
+    double *data = NULL;
+    int n = 0;
+    if (!copy_numeric_values(argv[0], "normalize", &data, &n)) return value_null();
+
+    double total = 0.0;
+    for (int i = 0; i < n; i++) total += data[i];
+    double mean = total / n;
+
+    double variance = 0.0;
+    for (int i = 0; i < n; i++) {
+        double delta = data[i] - mean;
+        variance += delta * delta;
+    }
+    variance /= n;
+    double std = sqrt(variance);
+
+    Value result = value_numeric_array_with_capacity(n);
+    for (int i = 0; i < n; i++) {
+        numeric_array_push(&result, std == 0.0 ? 0.0 : (data[i] - mean) / std);
+    }
+    free(data);
+    return result;
+}
+
+static Value builtin_norm(int argc, Value *argv) {
+    double *data = NULL;
+    int n = 0;
+    if (!copy_numeric_values(argv[0], "norm", &data, &n)) return value_null();
+
+    double p = 2.0;
+    if (argc >= 2) {
+        if (argv[1].type != VALUE_NUMBER || argv[1].number <= 0.0 || isnan(argv[1].number)) {
+            free(data);
+            builtin_runtime_error("norm の第2引数 p は 0 より大きい数値でなければなりません（実際: %s）",
+                                  value_type_name(argv[1].type));
+            return value_null();
+        }
+        p = argv[1].number;
+    }
+
+    double result = 0.0;
+    if (p == 1.0) {
+        for (int i = 0; i < n; i++) result += fabs(data[i]);
+    } else if (p == 2.0) {
+        for (int i = 0; i < n; i++) result += data[i] * data[i];
+        result = sqrt(result);
+    } else {
+        for (int i = 0; i < n; i++) result += pow(fabs(data[i]), p);
+        result = pow(result, 1.0 / p);
+    }
+    free(data);
+    return value_number(result);
+}
+
+static Value builtin_minmax_scale(int argc, Value *argv) {
+    (void)argc;
+    double *data = NULL;
+    int n = 0;
+    if (!copy_numeric_values(argv[0], "minmax_scale", &data, &n)) return value_null();
+
+    double min_value = data[0];
+    double max_value = data[0];
+    for (int i = 1; i < n; i++) {
+        if (data[i] < min_value) min_value = data[i];
+        if (data[i] > max_value) max_value = data[i];
+    }
+
+    double range = max_value - min_value;
+    Value result = value_numeric_array_with_capacity(n);
+    for (int i = 0; i < n; i++) {
+        numeric_array_push(&result, range == 0.0 ? 0.0 : (data[i] - min_value) / range);
+    }
+    free(data);
+    return result;
+}
+
+static Value builtin_clip(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMERIC_ARRAY) {
+        builtin_runtime_error("clip の第1引数は数値ベクトルでなければなりません（実際: %s）",
+                              value_type_name(argv[0].type));
+        return value_null();
+    }
+    if (argv[1].type != VALUE_NUMBER || argv[2].type != VALUE_NUMBER) {
+        builtin_runtime_error("clip は (数値ベクトル, 最小値, 最大値) の形で呼び出してください");
+        return value_null();
+    }
+    double min_value = argv[1].number;
+    double max_value = argv[2].number;
+    if (min_value > max_value) {
+        builtin_runtime_error("clip の最小値は最大値以下でなければなりません（最小: %g, 最大: %g）",
+                              min_value, max_value);
+        return value_null();
+    }
+
+    Value result = value_numeric_array_with_capacity(argv[0].numeric_array.length);
+    for (int i = 0; i < argv[0].numeric_array.length; i++) {
+        double value = numeric_array_get(&argv[0], i);
+        if (value < min_value) value = min_value;
+        if (value > max_value) value = max_value;
+        numeric_array_push(&result, value);
+    }
+    return result;
+}
+
+static bool copy_numeric_pair(Value left_value, Value right_value, const char *name,
+                              double **left_out, double **right_out, int *length_out) {
+    double *left = NULL;
+    double *right = NULL;
+    int n = 0;
+    int m = 0;
+    if (!copy_numeric_values(left_value, name, &left, &n)) return false;
+    if (!copy_numeric_values(right_value, name, &right, &m)) {
+        free(left);
+        return false;
+    }
+    if (n != m) {
+        free(left);
+        free(right);
+        builtin_runtime_error("%s の左右のベクトル長が一致しません（左: %d, 右: %d）", name, n, m);
+        return false;
+    }
+    *left_out = left;
+    *right_out = right;
+    *length_out = n;
+    return true;
+}
+
+static double numeric_covariance_population(const double *left, const double *right, int n,
+                                            double *var_left_out, double *var_right_out) {
+    double mean_left = 0.0;
+    double mean_right = 0.0;
+    for (int i = 0; i < n; i++) {
+        mean_left += left[i];
+        mean_right += right[i];
+    }
+    mean_left /= n;
+    mean_right /= n;
+
+    double covariance = 0.0;
+    double var_left = 0.0;
+    double var_right = 0.0;
+    for (int i = 0; i < n; i++) {
+        double dl = left[i] - mean_left;
+        double dr = right[i] - mean_right;
+        covariance += dl * dr;
+        var_left += dl * dl;
+        var_right += dr * dr;
+    }
+
+    if (var_left_out != NULL) *var_left_out = var_left;
+    if (var_right_out != NULL) *var_right_out = var_right;
+    return covariance / n;
+}
+
+static Value builtin_covariance(int argc, Value *argv) {
+    (void)argc;
+    double *left = NULL;
+    double *right = NULL;
+    int n = 0;
+    if (!copy_numeric_pair(argv[0], argv[1], "covariance", &left, &right, &n)) {
+        return value_null();
+    }
+
+    double covariance = numeric_covariance_population(left, right, n, NULL, NULL);
+    free(left);
+    free(right);
+    return value_number(covariance);
+}
+
+static Value builtin_correlation(int argc, Value *argv) {
+    (void)argc;
+    double *left = NULL;
+    double *right = NULL;
+    int n = 0;
+    if (!copy_numeric_pair(argv[0], argv[1], "correlation", &left, &right, &n)) {
+        return value_null();
+    }
+
+    double var_left = 0.0;
+    double var_right = 0.0;
+    double covariance = numeric_covariance_population(left, right, n, &var_left, &var_right);
+    free(left);
+    free(right);
+
+    double denom = sqrt(var_left * var_right);
+    if (denom == 0.0) {
+        builtin_runtime_error("correlation は分散が0のデータでは計算できません");
+        return value_null();
+    }
+    return value_number((covariance * n) / denom);
+}
+
+static Value builtin_histogram(int argc, Value *argv) {
+    (void)argc;
+    if (argv[1].type != VALUE_NUMBER || !argv[1].is_integer) {
+        builtin_runtime_error("histogram の第2引数はビン数を表す整数でなければなりません（実際: %s）",
+                              value_type_name(argv[1].type));
+        return value_null();
+    }
+
+    int bins = (int)argv[1].number;
+    if (bins <= 0 || bins > 100000) {
+        builtin_runtime_error("histogram のビン数は 1 から 100000 の範囲で指定してください（実際: %d）", bins);
+        return value_null();
+    }
+
+    double *data = NULL;
+    int n = 0;
+    if (!copy_numeric_values(argv[0], "histogram", &data, &n)) return value_null();
+
+    double min_value = data[0];
+    double max_value = data[0];
+    for (int i = 1; i < n; i++) {
+        if (data[i] < min_value) min_value = data[i];
+        if (data[i] > max_value) max_value = data[i];
+    }
+
+    Value counts = value_numeric_array_with_capacity(bins);
+    Value edges = value_numeric_array_with_capacity(bins + 1);
+    if (counts.type != VALUE_NUMERIC_ARRAY || edges.type != VALUE_NUMERIC_ARRAY) {
+        free(data);
+        value_free(&counts);
+        value_free(&edges);
+        builtin_runtime_error("histogram の結果配列を作成できませんでした");
+        return value_null();
+    }
+
+    for (int i = 0; i < bins; i++) numeric_array_push(&counts, 0.0);
+
+    double width = (max_value - min_value) / bins;
+    if (width == 0.0) width = 1.0;
+    for (int i = 0; i <= bins; i++) {
+        numeric_array_push(&edges, min_value + width * i);
+    }
+
+    for (int i = 0; i < n; i++) {
+        int index = (int)((data[i] - min_value) / width);
+        if (index < 0) index = 0;
+        if (index >= bins) index = bins - 1;
+        numeric_array_set(&counts, index, numeric_array_get(&counts, index) + 1.0);
+    }
+    free(data);
+
+    Value result = value_dict();
+    dict_set(&result, "counts", counts);
+    dict_set(&result, "件数", counts);
+    dict_set(&result, "edges", edges);
+    dict_set(&result, "境界", edges);
+    dict_set(&result, "min", value_number(min_value));
+    dict_set(&result, "最小", value_number(min_value));
+    dict_set(&result, "max", value_number(max_value));
+    dict_set(&result, "最大", value_number(max_value));
+    dict_set(&result, "bin_width", value_number(width));
+    dict_set(&result, "ビン幅", value_number(width));
+    value_free(&counts);
+    value_free(&edges);
+    return result;
+}
+
+static Value split_numeric_array(Value input, int start, int length) {
+    if (length <= 0) return value_numeric_array();
+    Value result = value_numeric_array_with_dtype(length, input.numeric_array.dtype);
+    for (int i = 0; i < length; i++) {
+        numeric_array_push(&result, numeric_array_get(&input, start + i));
+    }
+    return result;
+}
+
+static Value split_matrix_rows(Value input, int start, int rows) {
+    if (rows <= 0) return value_matrix(0, input.matrix.cols);
+    int cols = input.matrix.cols;
+    Value result = value_matrix_with_dtype(rows, cols, input.matrix.dtype);
+    for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+            matrix_set(&result, r, c, matrix_get(&input, start + r, c));
+        }
+    }
+    return result;
+}
+
+static unsigned int split_next_random(unsigned int *state) {
+    *state = (*state * 1664525u) + 1013904223u;
+    return *state;
+}
+
+static void split_shuffle_indices(int *indices, int count, unsigned int seed) {
+    unsigned int state = seed == 0 ? 1u : seed;
+    for (int i = count - 1; i > 0; i--) {
+        int j = (int)(split_next_random(&state) % (unsigned int)(i + 1));
+        int tmp = indices[i];
+        indices[i] = indices[j];
+        indices[j] = tmp;
+    }
+}
+
+static Value split_numeric_array_by_indices(Value input, int *indices, int start, int length) {
+    Value result = value_numeric_array_with_capacity(length > 0 ? length : 0);
+    if (result.type != VALUE_NUMERIC_ARRAY) return result;
+    for (int i = 0; i < length; i++) {
+        numeric_array_push(&result, numeric_array_get(&input, indices[start + i]));
+    }
+    return result;
+}
+
+static Value split_matrix_rows_by_indices(Value input, int *indices, int start, int rows) {
+    Value result = value_matrix(rows, input.matrix.cols);
+    if (result.type != VALUE_MATRIX) return result;
+    for (int r = 0; r < rows; r++) {
+        int src = indices[start + r];
+        for (int c = 0; c < input.matrix.cols; c++) {
+            matrix_set(&result, r, c, matrix_get(&input, src, c));
+        }
+    }
+    return result;
+}
+
+static Value builtin_train_test_split(int argc, Value *argv) {
+    if (argv[1].type != VALUE_NUMBER) {
+        builtin_runtime_error("train_test_split の第2引数はテスト比率の数値でなければなりません（実際: %s）",
+                              value_type_name(argv[1].type));
+        return value_null();
+    }
+
+    double test_ratio = argv[1].number;
+    if (test_ratio < 0.0 || test_ratio > 1.0 || isnan(test_ratio)) {
+        builtin_runtime_error("train_test_split のテスト比率は 0 から 1 の範囲で指定してください（実際: %g）",
+                              test_ratio);
+        return value_null();
+    }
+
+    int total = 0;
+    if (argv[0].type == VALUE_NUMERIC_ARRAY) {
+        total = argv[0].numeric_array.length;
+    } else if (argv[0].type == VALUE_MATRIX) {
+        total = argv[0].matrix.rows;
+    } else {
+        builtin_runtime_error("train_test_split の第1引数は数値ベクトルまたは行列でなければなりません（実際: %s）",
+                              value_type_name(argv[0].type));
+        return value_null();
+    }
+
+    int test_count = (int)floor(total * test_ratio);
+    if (test_ratio > 0.0 && test_count == 0 && total > 0) test_count = 1;
+    if (test_count > total) test_count = total;
+    int train_count = total - test_count;
+
+    int *indices = malloc(sizeof(int) * (size_t)(total > 0 ? total : 1));
+    if (indices == NULL) {
+        builtin_runtime_error("train_test_split の作業メモリを確保できませんでした");
+        return value_null();
+    }
+    for (int i = 0; i < total; i++) indices[i] = i;
+
+    bool shuffled = false;
+    if (argc >= 3) {
+        if (argv[2].type != VALUE_NUMBER || !argv[2].is_integer) {
+            free(indices);
+            builtin_runtime_error("train_test_split の第3引数はシャッフル用 seed の整数でなければなりません（実際: %s）",
+                                  value_type_name(argv[2].type));
+            return value_null();
+        }
+        split_shuffle_indices(indices, total, (unsigned int)argv[2].number);
+        shuffled = true;
+    }
+
+    Value train;
+    Value test;
+    if (!shuffled && argv[0].type == VALUE_NUMERIC_ARRAY) {
+        train = split_numeric_array(argv[0], 0, train_count);
+        test = split_numeric_array(argv[0], train_count, test_count);
+    } else if (!shuffled && argv[0].type == VALUE_MATRIX) {
+        train = split_matrix_rows(argv[0], 0, train_count);
+        test = split_matrix_rows(argv[0], train_count, test_count);
+    } else if (argv[0].type == VALUE_NUMERIC_ARRAY) {
+        train = split_numeric_array_by_indices(argv[0], indices, 0, train_count);
+        test = split_numeric_array_by_indices(argv[0], indices, train_count, test_count);
+    } else {
+        train = split_matrix_rows_by_indices(argv[0], indices, 0, train_count);
+        test = split_matrix_rows_by_indices(argv[0], indices, train_count, test_count);
+    }
+    free(indices);
+
+    Value result = value_dict();
+    dict_set(&result, "train", train);
+    dict_set(&result, "訓練", train);
+    dict_set(&result, "test", test);
+    dict_set(&result, "テスト", test);
+    dict_set(&result, "train_count", value_number(train_count));
+    dict_set(&result, "訓練件数", value_number(train_count));
+    dict_set(&result, "test_count", value_number(test_count));
+    dict_set(&result, "テスト件数", value_number(test_count));
+    dict_set(&result, "shuffled", value_bool(shuffled));
+    dict_set(&result, "シャッフル済み", value_bool(shuffled));
+    value_free(&train);
+    value_free(&test);
+    return result;
+}
+
+static Value builtin_is_nan(int argc, Value *argv) {
+    (void)argc;
+    return value_bool(argv[0].type == VALUE_NUMBER && isnan(argv[0].number));
+}
+
+static Value builtin_drop_missing(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type == VALUE_NUMERIC_ARRAY) {
+        Value result = value_numeric_array_with_capacity(argv[0].numeric_array.length);
+        for (int i = 0; i < argv[0].numeric_array.length; i++) {
+            double value = numeric_array_get(&argv[0], i);
+            if (!isnan(value)) numeric_array_push(&result, value);
+        }
+        return result;
+    }
+    if (argv[0].type == VALUE_MATRIX) {
+        int keep_rows = 0;
+        for (int r = 0; r < argv[0].matrix.rows; r++) {
+            bool keep = true;
+            for (int c = 0; c < argv[0].matrix.cols; c++) {
+                if (isnan(matrix_get(&argv[0], r, c))) {
+                    keep = false;
+                    break;
+                }
+            }
+            if (keep) keep_rows++;
+        }
+        Value result = value_matrix(keep_rows, argv[0].matrix.cols);
+        int out_r = 0;
+        for (int r = 0; r < argv[0].matrix.rows; r++) {
+            bool keep = true;
+            for (int c = 0; c < argv[0].matrix.cols; c++) {
+                if (isnan(matrix_get(&argv[0], r, c))) {
+                    keep = false;
+                    break;
+                }
+            }
+            if (!keep) continue;
+            for (int c = 0; c < argv[0].matrix.cols; c++) {
+                matrix_set(&result, out_r, c, matrix_get(&argv[0], r, c));
+            }
+            out_r++;
+        }
+        return result;
+    }
+    builtin_runtime_error("drop_missing の引数は数値ベクトルまたは行列でなければなりません（実際: %s）",
+                          value_type_name(argv[0].type));
+    return value_null();
+}
+
+static Value builtin_fill_missing(int argc, Value *argv) {
+    (void)argc;
+    if (argv[1].type != VALUE_NUMBER) {
+        builtin_runtime_error("fill_missing の第2引数は補完値の数値でなければなりません（実際: %s）",
+                              value_type_name(argv[1].type));
+        return value_null();
+    }
+    double fill = argv[1].number;
+    if (argv[0].type == VALUE_NUMERIC_ARRAY) {
+        Value result = value_numeric_array_with_capacity(argv[0].numeric_array.length);
+        for (int i = 0; i < argv[0].numeric_array.length; i++) {
+            double value = numeric_array_get(&argv[0], i);
+            numeric_array_push(&result, isnan(value) ? fill : value);
+        }
+        return result;
+    }
+    if (argv[0].type == VALUE_MATRIX) {
+        Value result = value_matrix(argv[0].matrix.rows, argv[0].matrix.cols);
+        for (int r = 0; r < argv[0].matrix.rows; r++) {
+            for (int c = 0; c < argv[0].matrix.cols; c++) {
+                double value = matrix_get(&argv[0], r, c);
+                matrix_set(&result, r, c, isnan(value) ? fill : value);
+            }
+        }
+        return result;
+    }
+    builtin_runtime_error("fill_missing の第1引数は数値ベクトルまたは行列でなければなりません（実際: %s）",
+                          value_type_name(argv[0].type));
+    return value_null();
+}
+
+static Value metric_pair(const char *name, Value left_value, Value right_value,
+                         double (*fn)(const double *, const double *, int)) {
+    double *left = NULL;
+    double *right = NULL;
+    int n = 0;
+    if (!copy_numeric_pair(left_value, right_value, name, &left, &right, &n)) return value_null();
+    double value = fn(left, right, n);
+    free(left);
+    free(right);
+    return value_number(value);
+}
+
+static double metric_mse_impl(const double *actual, const double *pred, int n) {
+    double total = 0.0;
+    for (int i = 0; i < n; i++) {
+        double d = actual[i] - pred[i];
+        total += d * d;
+    }
+    return total / n;
+}
+
+static double metric_mae_impl(const double *actual, const double *pred, int n) {
+    double total = 0.0;
+    for (int i = 0; i < n; i++) total += fabs(actual[i] - pred[i]);
+    return total / n;
+}
+
+static double metric_r2_impl(const double *actual, const double *pred, int n) {
+    double mean = 0.0;
+    for (int i = 0; i < n; i++) mean += actual[i];
+    mean /= n;
+    double ss_res = 0.0;
+    double ss_tot = 0.0;
+    for (int i = 0; i < n; i++) {
+        double d = actual[i] - pred[i];
+        ss_res += d * d;
+        double t = actual[i] - mean;
+        ss_tot += t * t;
+    }
+    return ss_tot == 0.0 ? 0.0 : 1.0 - (ss_res / ss_tot);
+}
+
+static Value builtin_mse(int argc, Value *argv) {
+    (void)argc;
+    return metric_pair("mse", argv[0], argv[1], metric_mse_impl);
+}
+
+static Value builtin_mae(int argc, Value *argv) {
+    (void)argc;
+    return metric_pair("mae", argv[0], argv[1], metric_mae_impl);
+}
+
+static Value builtin_r2_score(int argc, Value *argv) {
+    (void)argc;
+    return metric_pair("r2_score", argv[0], argv[1], metric_r2_impl);
+}
+
+static bool classification_counts(const char *name, Value actual_value, Value pred_value,
+                                  int *tp_out, int *fp_out, int *tn_out, int *fn_out) {
+    double *actual = NULL;
+    double *pred = NULL;
+    int n = 0;
+    if (!copy_numeric_pair(actual_value, pred_value, name, &actual, &pred, &n)) return false;
+
+    int tp = 0, fp = 0, tn = 0, fn = 0;
+    for (int i = 0; i < n; i++) {
+        bool a = actual[i] >= 0.5;
+        bool p = pred[i] >= 0.5;
+        if (a && p) tp++;
+        else if (!a && p) fp++;
+        else if (!a && !p) tn++;
+        else fn++;
+    }
+    free(actual);
+    free(pred);
+
+    *tp_out = tp;
+    *fp_out = fp;
+    *tn_out = tn;
+    *fn_out = fn;
+    return true;
+}
+
+static Value classification_metric(const char *name, Value actual_value, Value pred_value, const char *kind) {
+    int tp = 0, fp = 0, tn = 0, fn = 0;
+    if (!classification_counts(name, actual_value, pred_value, &tp, &fp, &tn, &fn)) {
+        return value_null();
+    }
+
+    int n = tp + fp + tn + fn;
+    if (strcmp(kind, "accuracy") == 0) return value_number((double)(tp + tn) / n);
+    if (strcmp(kind, "precision") == 0) return value_number((tp + fp) == 0 ? 0.0 : (double)tp / (tp + fp));
+    if (strcmp(kind, "f1_score") == 0) {
+        double precision = (tp + fp) == 0 ? 0.0 : (double)tp / (tp + fp);
+        double recall = (tp + fn) == 0 ? 0.0 : (double)tp / (tp + fn);
+        return value_number((precision + recall) == 0.0 ? 0.0 : 2.0 * precision * recall / (precision + recall));
+    }
+    return value_number((tp + fn) == 0 ? 0.0 : (double)tp / (tp + fn));
+}
+
+static Value builtin_accuracy(int argc, Value *argv) {
+    (void)argc;
+    return classification_metric("accuracy", argv[0], argv[1], "accuracy");
+}
+
+static Value builtin_precision(int argc, Value *argv) {
+    (void)argc;
+    return classification_metric("precision", argv[0], argv[1], "precision");
+}
+
+static Value builtin_recall(int argc, Value *argv) {
+    (void)argc;
+    return classification_metric("recall", argv[0], argv[1], "recall");
+}
+
+static Value builtin_f1_score(int argc, Value *argv) {
+    (void)argc;
+    return classification_metric("f1_score", argv[0], argv[1], "f1_score");
+}
+
+static Value builtin_confusion_matrix(int argc, Value *argv) {
+    (void)argc;
+    int tp = 0, fp = 0, tn = 0, fn = 0;
+    if (!classification_counts("confusion_matrix", argv[0], argv[1], &tp, &fp, &tn, &fn)) {
+        return value_null();
+    }
+
+    Value result = value_matrix(2, 2);
+    matrix_set(&result, 0, 0, (double)tn);
+    matrix_set(&result, 0, 1, (double)fp);
+    matrix_set(&result, 1, 0, (double)fn);
+    matrix_set(&result, 1, 1, (double)tp);
+    return result;
+}
+
+typedef double (*VectorBinaryOp)(double a, double b);
+
+static double vector_op_add(double a, double b) { return a + b; }
+static double vector_op_sub(double a, double b) { return a - b; }
+static double vector_op_mul(double a, double b) { return a * b; }
+static double vector_op_div(double a, double b) { return b == 0.0 ? NAN : a / b; }
+
+static Value vector_binary(const char *name, Value left, Value right, VectorBinaryOp op) {
+    if (left.type != VALUE_NUMERIC_ARRAY) {
+        builtin_runtime_error("%s の第1引数は数値ベクトルでなければなりません（実際: %s）",
+                              name, value_type_name(left.type));
+        return value_null();
+    }
+
+    int n = left.numeric_array.length;
+    Value result = value_numeric_array_with_capacity(n);
+
+    if (right.type == VALUE_NUMBER) {
+        for (int i = 0; i < n; i++) {
+            double value = op(numeric_array_get(&left, i), right.number);
+            if (isnan(value)) {
+                value_free(&result);
+                builtin_runtime_error("%s の計算結果が不正です（%d番目の要素）。0除算や定義域外の値を確認してください",
+                                      name, i);
+                return value_null();
+            }
+            numeric_array_push(&result, value);
+        }
+        return result;
+    }
+
+    if (right.type == VALUE_NUMERIC_ARRAY) {
+        if (n != right.numeric_array.length) {
+            value_free(&result);
+            builtin_runtime_error("%s の左右のベクトル長が一致しません（左: %d, 右: %d）",
+                                  name, n, right.numeric_array.length);
+            return value_null();
+        }
+        for (int i = 0; i < n; i++) {
+            double value = op(numeric_array_get(&left, i), numeric_array_get(&right, i));
+            if (isnan(value)) {
+                value_free(&result);
+                builtin_runtime_error("%s の計算結果が不正です（%d番目の要素）。0除算や定義域外の値を確認してください",
+                                      name, i);
+                return value_null();
+            }
+            numeric_array_push(&result, value);
+        }
+        return result;
+    }
+
+    value_free(&result);
+    builtin_runtime_error("%s の第2引数は数値または数値ベクトルでなければなりません（実際: %s）",
+                          name, value_type_name(right.type));
+    return value_null();
+}
+
+static Value builtin_vector_add(int argc, Value *argv) {
+    (void)argc;
+    return vector_binary("vector_add", argv[0], argv[1], vector_op_add);
+}
+
+static Value builtin_vector_sub(int argc, Value *argv) {
+    (void)argc;
+    return vector_binary("vector_sub", argv[0], argv[1], vector_op_sub);
+}
+
+static Value builtin_vector_mul(int argc, Value *argv) {
+    (void)argc;
+    return vector_binary("vector_mul", argv[0], argv[1], vector_op_mul);
+}
+
+static Value builtin_vector_div(int argc, Value *argv) {
+    (void)argc;
+    return vector_binary("vector_div", argv[0], argv[1], vector_op_div);
+}
+
+typedef double (*VectorUnaryOp)(double x);
+
+static Value vector_unary(const char *name, Value input, VectorUnaryOp op) {
+    if (input.type != VALUE_NUMERIC_ARRAY) {
+        builtin_runtime_error("%s の引数は数値ベクトルでなければなりません（実際: %s）",
+                              name, value_type_name(input.type));
+        return value_null();
+    }
+
+    Value result = value_numeric_array_with_capacity(input.numeric_array.length);
+    for (int i = 0; i < input.numeric_array.length; i++) {
+        double input_value = numeric_array_get(&input, i);
+        double value = op(input_value);
+        if (isnan(value)) {
+            value_free(&result);
+            builtin_runtime_error("%s の計算結果が不正です（%d番目の要素: %g）。平方根や対数の定義域を確認してください",
+                                  name, i, input_value);
+            return value_null();
+        }
+        numeric_array_push(&result, value);
+    }
+    return result;
+}
+
+static Value builtin_vector_abs(int argc, Value *argv) {
+    (void)argc;
+    return vector_unary("vector_abs", argv[0], fabs);
+}
+
+static Value builtin_vector_sqrt(int argc, Value *argv) {
+    (void)argc;
+    return vector_unary("vector_sqrt", argv[0], sqrt);
+}
+
+static Value builtin_vector_sin(int argc, Value *argv) {
+    (void)argc;
+    return vector_unary("vector_sin", argv[0], sin);
+}
+
+static Value builtin_vector_cos(int argc, Value *argv) {
+    (void)argc;
+    return vector_unary("vector_cos", argv[0], cos);
+}
+
+static Value builtin_vector_log(int argc, Value *argv) {
+    (void)argc;
+    return vector_unary("vector_log", argv[0], log);
+}
+
+static Value builtin_dot(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMERIC_ARRAY || argv[1].type != VALUE_NUMERIC_ARRAY) {
+        builtin_runtime_error("dot の引数はどちらも数値ベクトルでなければなりません（第1引数: %s, 第2引数: %s）",
+                              value_type_name(argv[0].type), value_type_name(argv[1].type));
+        return value_null();
+    }
+
+    int n = argv[0].numeric_array.length;
+    if (n != argv[1].numeric_array.length) {
+        builtin_runtime_error("dot の左右のベクトル長が一致しません（左: %d, 右: %d）",
+                              n, argv[1].numeric_array.length);
+        return value_null();
+    }
+
+    double total = 0.0;
+    for (int i = 0; i < n; i++) {
+        total += numeric_array_get(&argv[0], i) * numeric_array_get(&argv[1], i);
+    }
+    return value_number(total);
+}
+
+static Value builtin_matrix(int argc, Value *argv) {
+    (void)argc;
+
+    if (argv[0].type == VALUE_MATRIX) {
+        return value_copy(argv[0]);
+    }
+
+    if (argv[0].type == VALUE_NUMERIC_ARRAY) {
+        Value result = value_matrix_with_dtype(1, argv[0].numeric_array.length, argv[0].numeric_array.dtype);
+        for (int c = 0; c < argv[0].numeric_array.length; c++) {
+            matrix_set(&result, 0, c, numeric_array_get(&argv[0], c));
+        }
+        return result;
+    }
+
+    if (argv[0].type != VALUE_ARRAY) {
+        builtin_runtime_error("matrix の引数は配列、数値ベクトル、または行列でなければなりません（実際: %s）",
+                              value_type_name(argv[0].type));
+        return value_null();
+    }
+
+    int rows = argv[0].array.length;
+    if (rows == 0) return value_matrix(0, 0);
+
+    int cols = -1;
+    for (int r = 0; r < rows; r++) {
+        Value row = argv[0].array.elements[r];
+        if (row.type == VALUE_NUMERIC_ARRAY) {
+            if (cols < 0) cols = row.numeric_array.length;
+            if (row.numeric_array.length != cols) {
+                builtin_runtime_error("matrix の各行の長さが一致しません（1行目: %d列, %d行目: %d列）",
+                                      cols, r + 1, row.numeric_array.length);
+                return value_null();
+            }
+        } else if (row.type == VALUE_ARRAY) {
+            if (cols < 0) cols = row.array.length;
+            if (row.array.length != cols) {
+                builtin_runtime_error("matrix の各行の長さが一致しません（1行目: %d列, %d行目: %d列）",
+                                      cols, r + 1, row.array.length);
+                return value_null();
+            }
+            for (int c = 0; c < row.array.length; c++) {
+                if (row.array.elements[c].type != VALUE_NUMBER) {
+                    builtin_runtime_error("matrix の要素はすべて数値でなければなりません（%d行%d列: %s）",
+                                          r + 1, c + 1, value_type_name(row.array.elements[c].type));
+                    return value_null();
+                }
+            }
+        } else {
+            builtin_runtime_error("matrix の各行は配列または数値ベクトルでなければなりません（%d行目: %s）",
+                                  r + 1, value_type_name(row.type));
+            return value_null();
+        }
+    }
+
+    if (cols < 0) {
+        builtin_runtime_error("matrix を作れません。行の列数を判定できませんでした");
+        return value_null();
+    }
+    Value result = value_matrix(rows, cols);
+    if (result.type != VALUE_MATRIX) {
+        builtin_runtime_error("matrix の作成に失敗しました（%d x %d）", rows, cols);
+        return value_null();
+    }
+
+    for (int r = 0; r < rows; r++) {
+        Value row = argv[0].array.elements[r];
+        for (int c = 0; c < cols; c++) {
+            double value = row.type == VALUE_NUMERIC_ARRAY
+                ? numeric_array_get(&row, c)
+                : row.array.elements[c].number;
+            matrix_set(&result, r, c, value);
+        }
+    }
+
+    return result;
+}
+
+static Value builtin_shape(int argc, Value *argv) {
+    (void)argc;
+    Value result = value_array_with_capacity(2);
+    if (argv[0].type == VALUE_MATRIX) {
+        array_push(&result, value_number(argv[0].matrix.rows));
+        array_push(&result, value_number(argv[0].matrix.cols));
+        return result;
+    }
+    if (argv[0].type == VALUE_NUMERIC_ARRAY) {
+        array_push(&result, value_number(argv[0].numeric_array.length));
+        return result;
+    }
+    if (argv[0].type == VALUE_ARRAY) {
+        array_push(&result, value_number(argv[0].array.length));
+        return result;
+    }
+    return value_null();
+}
+
+static bool matrix_index_args(Value row, Value col, int *r, int *c) {
+    if (row.type != VALUE_NUMBER || col.type != VALUE_NUMBER) return false;
+    if (!row.is_integer || !col.is_integer) return false;
+    *r = (int)row.number;
+    *c = (int)col.number;
+    return true;
+}
+
+static Value builtin_matrix_get(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_MATRIX) {
+        builtin_runtime_error("matrix_get の第1引数は行列でなければなりません（実際: %s）",
+                              value_type_name(argv[0].type));
+        return value_null();
+    }
+    int r, c;
+    if (!matrix_index_args(argv[1], argv[2], &r, &c)) {
+        builtin_runtime_error("matrix_get の行・列インデックスは整数でなければなりません");
+        return value_null();
+    }
+    if (r < 0 || r >= argv[0].matrix.rows || c < 0 || c >= argv[0].matrix.cols) {
+        builtin_runtime_error("matrix_get のインデックスが範囲外です（指定: %d行%d列, 行列: %d x %d）",
+                              r, c, argv[0].matrix.rows, argv[0].matrix.cols);
+        return value_null();
+    }
+    return value_number(matrix_get(&argv[0], r, c));
+}
+
+static Value builtin_matrix_set(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_MATRIX || argv[3].type != VALUE_NUMBER) {
+        builtin_runtime_error("matrix_set は (行列, 整数行, 整数列, 数値) の形で呼び出してください（第1引数: %s, 第4引数: %s）",
+                              value_type_name(argv[0].type), value_type_name(argv[3].type));
+        return value_null();
+    }
+    int r, c;
+    if (!matrix_index_args(argv[1], argv[2], &r, &c)) {
+        builtin_runtime_error("matrix_set の行・列インデックスは整数でなければなりません");
+        return value_null();
+    }
+    Value result = value_copy(argv[0]);
+    if (!matrix_set(&result, r, c, argv[3].number)) {
+        value_free(&result);
+        builtin_runtime_error("matrix_set のインデックスが範囲外です（指定: %d行%d列, 行列: %d x %d）",
+                              r, c, argv[0].matrix.rows, argv[0].matrix.cols);
+        return value_null();
+    }
+    return result;
+}
+
+static Value builtin_matrix_row(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_MATRIX || argv[1].type != VALUE_NUMBER || !argv[1].is_integer) {
+        builtin_runtime_error("matrix_row は (行列, 整数行) の形で呼び出してください");
+        return value_null();
+    }
+    int row = (int)argv[1].number;
+    if (row < 0) row += argv[0].matrix.rows;
+    if (row < 0 || row >= argv[0].matrix.rows) {
+        builtin_runtime_error("matrix_row の行インデックスが範囲外です（指定: %d, 行数: %d）",
+                              row, argv[0].matrix.rows);
+        return value_null();
+    }
+
+    Value result = value_numeric_array_with_dtype(argv[0].matrix.cols, argv[0].matrix.dtype);
+    for (int c = 0; c < argv[0].matrix.cols; c++) {
+        numeric_array_push(&result, matrix_get(&argv[0], row, c));
+    }
+    return result;
+}
+
+static Value builtin_matrix_column(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_MATRIX || argv[1].type != VALUE_NUMBER || !argv[1].is_integer) {
+        builtin_runtime_error("matrix_column は (行列, 整数列) の形で呼び出してください");
+        return value_null();
+    }
+    int col = (int)argv[1].number;
+    if (col < 0) col += argv[0].matrix.cols;
+    if (col < 0 || col >= argv[0].matrix.cols) {
+        builtin_runtime_error("matrix_column の列インデックスが範囲外です（指定: %d, 列数: %d）",
+                              col, argv[0].matrix.cols);
+        return value_null();
+    }
+
+    Value result = value_numeric_array_with_dtype(argv[0].matrix.rows, argv[0].matrix.dtype);
+    for (int r = 0; r < argv[0].matrix.rows; r++) {
+        numeric_array_push(&result, matrix_get(&argv[0], r, col));
+    }
+    return result;
+}
+
+static Value builtin_transpose(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_MATRIX) return value_null();
+
+    if (argv[0].matrix.ref_count != NULL) {
+        Value result;
+        result.type = VALUE_MATRIX;
+        result.is_const = false;
+        result.is_integer = false;
+        result.ref_count = 1;
+        result.matrix.dtype = argv[0].matrix.dtype;
+        result.matrix.data = argv[0].matrix.data;
+        result.matrix.rows = argv[0].matrix.cols;
+        result.matrix.cols = argv[0].matrix.rows;
+        result.matrix.row_stride = argv[0].matrix.col_stride;
+        result.matrix.col_stride = argv[0].matrix.row_stride;
+        result.matrix.offset = argv[0].matrix.offset;
+        result.matrix.ref_count = argv[0].matrix.ref_count;
+        (*result.matrix.ref_count)++;
+        return result;
+    }
+
+    Value result = value_matrix_with_dtype(argv[0].matrix.cols, argv[0].matrix.rows, argv[0].matrix.dtype);
+    if (result.type != VALUE_MATRIX) return value_null();
+    for (int r = 0; r < argv[0].matrix.rows; r++) {
+        for (int c = 0; c < argv[0].matrix.cols; c++) {
+            matrix_set(&result, c, r, matrix_get(&argv[0], r, c));
+        }
+    }
+    return result;
+}
+
+static Value builtin_matmul(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_MATRIX || argv[1].type != VALUE_MATRIX) {
+        builtin_runtime_error("matmul の引数はどちらも行列でなければなりません（第1引数: %s, 第2引数: %s）",
+                              value_type_name(argv[0].type), value_type_name(argv[1].type));
+        return value_null();
+    }
+    if (argv[0].matrix.cols != argv[1].matrix.rows) {
+        builtin_runtime_error("matmul の行列サイズが合いません（左: %d x %d, 右: %d x %d）。左の列数と右の行数を一致させてください",
+                              argv[0].matrix.rows, argv[0].matrix.cols,
+                              argv[1].matrix.rows, argv[1].matrix.cols);
+        return value_null();
+    }
+
+    int rows = argv[0].matrix.rows;
+    int inner = argv[0].matrix.cols;
+    int cols = argv[1].matrix.cols;
+    Value result = value_matrix(rows, cols);
+    if (result.type != VALUE_MATRIX) {
+        builtin_runtime_error("matmul の結果行列を作成できませんでした（%d x %d）", rows, cols);
+        return value_null();
+    }
+
+#if defined(HAJIMU_USE_ACCELERATE) || defined(HAJIMU_USE_CBLAS)
+    if (argv[0].matrix.dtype == NUMERIC_DTYPE_F64 &&
+        argv[1].matrix.dtype == NUMERIC_DTYPE_F64 &&
+        result.matrix.dtype == NUMERIC_DTYPE_F64 &&
+        matrix_is_contiguous(&argv[0]) &&
+        matrix_is_contiguous(&argv[1]) &&
+        matrix_is_contiguous(&result)) {
+        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
+                    rows, cols, inner,
+                    1.0,
+                    (const double *)matrix_raw_data(&argv[0]), inner,
+                    (const double *)matrix_raw_data(&argv[1]), cols,
+                    0.0,
+                    (double *)matrix_raw_data(&result), cols);
+        return result;
+    }
+#endif
+
+    for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+            double total = 0.0;
+            for (int k = 0; k < inner; k++) {
+                total += matrix_get(&argv[0], r, k) * matrix_get(&argv[1], k, c);
+            }
+            matrix_set(&result, r, c, total);
+        }
+    }
+    return result;
+}
+
+typedef double (*MatrixBinaryOp)(double a, double b);
+
+static double matrix_op_add(double a, double b) { return a + b; }
+static double matrix_op_sub(double a, double b) { return a - b; }
+static double matrix_op_mul(double a, double b) { return a * b; }
+
+static Value matrix_binary(const char *name, Value left, Value right, MatrixBinaryOp op) {
+    if (left.type != VALUE_MATRIX || right.type != VALUE_MATRIX) {
+        builtin_runtime_error("%s の引数はどちらも行列でなければなりません（第1引数: %s, 第2引数: %s）",
+                              name, value_type_name(left.type), value_type_name(right.type));
+        return value_null();
+    }
+    if (left.matrix.rows != right.matrix.rows || left.matrix.cols != right.matrix.cols) {
+        builtin_runtime_error("%s の行列サイズが一致しません（左: %d x %d, 右: %d x %d）",
+                              name, left.matrix.rows, left.matrix.cols, right.matrix.rows, right.matrix.cols);
+        return value_null();
+    }
+
+    Value result = value_matrix(left.matrix.rows, left.matrix.cols);
+    if (result.type != VALUE_MATRIX) return value_null();
+    for (int r = 0; r < left.matrix.rows; r++) {
+        for (int c = 0; c < left.matrix.cols; c++) {
+            matrix_set(&result, r, c, op(matrix_get(&left, r, c), matrix_get(&right, r, c)));
+        }
+    }
+    return result;
+}
+
+static Value builtin_matrix_add(int argc, Value *argv) {
+    (void)argc;
+    return matrix_binary("matrix_add", argv[0], argv[1], matrix_op_add);
+}
+
+static Value builtin_matrix_sub(int argc, Value *argv) {
+    (void)argc;
+    return matrix_binary("matrix_sub", argv[0], argv[1], matrix_op_sub);
+}
+
+static Value builtin_matrix_hadamard(int argc, Value *argv) {
+    (void)argc;
+    return matrix_binary("matrix_hadamard", argv[0], argv[1], matrix_op_mul);
+}
+
+static Value builtin_matrix_scale(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_MATRIX || argv[1].type != VALUE_NUMBER) {
+        builtin_runtime_error("matrix_scale は (行列, 数値) の形で呼び出してください（第1引数: %s, 第2引数: %s）",
+                              value_type_name(argv[0].type), value_type_name(argv[1].type));
+        return value_null();
+    }
+
+    Value result = value_matrix(argv[0].matrix.rows, argv[0].matrix.cols);
+    if (result.type != VALUE_MATRIX) return value_null();
+    for (int r = 0; r < argv[0].matrix.rows; r++) {
+        for (int c = 0; c < argv[0].matrix.cols; c++) {
+            matrix_set(&result, r, c, matrix_get(&argv[0], r, c) * argv[1].number);
+        }
+    }
+    return result;
+}
+
+static bool require_square_matrix(Value matrix, const char *name) {
+    if (matrix.type != VALUE_MATRIX) {
+        builtin_runtime_error("%s の引数は行列でなければなりません（実際: %s）",
+                              name, value_type_name(matrix.type));
+        return false;
+    }
+    if (matrix.matrix.rows != matrix.matrix.cols) {
+        builtin_runtime_error("%s は正方行列だけを扱えます（実際: %d x %d）",
+                              name, matrix.matrix.rows, matrix.matrix.cols);
+        return false;
+    }
+    return true;
+}
+
+static Value builtin_identity(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_NUMBER || !argv[0].is_integer) {
+        builtin_runtime_error("identity の引数は行列サイズを表す整数でなければなりません（実際: %s）",
+                              value_type_name(argv[0].type));
+        return value_null();
+    }
+
+    int n = (int)argv[0].number;
+    if (n < 0 || n > 10000) {
+        builtin_runtime_error("identity のサイズは 0 から 10000 の範囲で指定してください（実際: %d）", n);
+        return value_null();
+    }
+
+    Value result = value_matrix(n, n);
+    if (result.type != VALUE_MATRIX) {
+        builtin_runtime_error("identity の行列を作成できませんでした（%d x %d）", n, n);
+        return value_null();
+    }
+    for (int i = 0; i < n; i++) {
+        matrix_set(&result, i, i, 1.0);
+    }
+    return result;
+}
+
+static Value builtin_determinant(int argc, Value *argv) {
+    (void)argc;
+    if (!require_square_matrix(argv[0], "determinant")) return value_null();
+
+    int n = argv[0].matrix.rows;
+    if (n == 0) return value_number(1.0);
+
+    double *a = malloc(sizeof(double) * (size_t)n * (size_t)n);
+    if (a == NULL) {
+        builtin_runtime_error("determinant の作業メモリを確保できませんでした");
+        return value_null();
+    }
+    for (int r = 0; r < n; r++) {
+        for (int c = 0; c < n; c++) {
+            a[(size_t)r * (size_t)n + (size_t)c] = matrix_get(&argv[0], r, c);
+        }
+    }
+
+    double det = 1.0;
+    int sign = 1;
+    for (int col = 0; col < n; col++) {
+        int pivot = col;
+        double best = fabs(a[(size_t)col * (size_t)n + (size_t)col]);
+        for (int r = col + 1; r < n; r++) {
+            double candidate = fabs(a[(size_t)r * (size_t)n + (size_t)col]);
+            if (candidate > best) {
+                best = candidate;
+                pivot = r;
+            }
+        }
+        if (best < 1e-12) {
+            free(a);
+            return value_number(0.0);
+        }
+        if (pivot != col) {
+            for (int c = 0; c < n; c++) {
+                double tmp = a[(size_t)col * (size_t)n + (size_t)c];
+                a[(size_t)col * (size_t)n + (size_t)c] = a[(size_t)pivot * (size_t)n + (size_t)c];
+                a[(size_t)pivot * (size_t)n + (size_t)c] = tmp;
+            }
+            sign = -sign;
+        }
+
+        double pivot_value = a[(size_t)col * (size_t)n + (size_t)col];
+        det *= pivot_value;
+        for (int r = col + 1; r < n; r++) {
+            double factor = a[(size_t)r * (size_t)n + (size_t)col] / pivot_value;
+            for (int c = col + 1; c < n; c++) {
+                a[(size_t)r * (size_t)n + (size_t)c] -= factor * a[(size_t)col * (size_t)n + (size_t)c];
+            }
+        }
+    }
+
+    free(a);
+    return value_number(det * sign);
+}
+
+static bool matrix_inverse_data(Value input, double **out, int *n_out, const char *name) {
+    if (!require_square_matrix(input, name)) return false;
+    int n = input.matrix.rows;
+    int width = n * 2;
+    double *aug = calloc((size_t)n * (size_t)width, sizeof(double));
+    if (aug == NULL) {
+        builtin_runtime_error("%s の作業メモリを確保できませんでした", name);
+        return false;
+    }
+
+    for (int r = 0; r < n; r++) {
+        for (int c = 0; c < n; c++) {
+            aug[(size_t)r * (size_t)width + (size_t)c] = matrix_get(&input, r, c);
+        }
+        aug[(size_t)r * (size_t)width + (size_t)(n + r)] = 1.0;
+    }
+
+    for (int col = 0; col < n; col++) {
+        int pivot = col;
+        double best = fabs(aug[(size_t)col * (size_t)width + (size_t)col]);
+        for (int r = col + 1; r < n; r++) {
+            double candidate = fabs(aug[(size_t)r * (size_t)width + (size_t)col]);
+            if (candidate > best) {
+                best = candidate;
+                pivot = r;
+            }
+        }
+        if (best < 1e-12) {
+            free(aug);
+            builtin_runtime_error("%s は特異行列を扱えません。行列式が0に近いため逆行列を計算できません", name);
+            return false;
+        }
+        if (pivot != col) {
+            for (int c = 0; c < width; c++) {
+                double tmp = aug[(size_t)col * (size_t)width + (size_t)c];
+                aug[(size_t)col * (size_t)width + (size_t)c] = aug[(size_t)pivot * (size_t)width + (size_t)c];
+                aug[(size_t)pivot * (size_t)width + (size_t)c] = tmp;
+            }
+        }
+
+        double pivot_value = aug[(size_t)col * (size_t)width + (size_t)col];
+        for (int c = 0; c < width; c++) {
+            aug[(size_t)col * (size_t)width + (size_t)c] /= pivot_value;
+        }
+        for (int r = 0; r < n; r++) {
+            if (r == col) continue;
+            double factor = aug[(size_t)r * (size_t)width + (size_t)col];
+            for (int c = 0; c < width; c++) {
+                aug[(size_t)r * (size_t)width + (size_t)c] -= factor * aug[(size_t)col * (size_t)width + (size_t)c];
+            }
+        }
+    }
+
+    double *inverse = malloc(sizeof(double) * (size_t)n * (size_t)n);
+    if (inverse == NULL) {
+        free(aug);
+        builtin_runtime_error("%s の結果メモリを確保できませんでした", name);
+        return false;
+    }
+    for (int r = 0; r < n; r++) {
+        for (int c = 0; c < n; c++) {
+            inverse[(size_t)r * (size_t)n + (size_t)c] = aug[(size_t)r * (size_t)width + (size_t)(n + c)];
+        }
+    }
+    free(aug);
+    *out = inverse;
+    *n_out = n;
+    return true;
+}
+
+static Value builtin_inverse(int argc, Value *argv) {
+    (void)argc;
+    double *inverse = NULL;
+    int n = 0;
+    if (!matrix_inverse_data(argv[0], &inverse, &n, "inverse")) return value_null();
+    Value result = value_matrix_from_data(inverse, n, n);
+    free(inverse);
+    return result;
+}
+
+static Value builtin_solve_linear(int argc, Value *argv) {
+    (void)argc;
+    double *inverse = NULL;
+    int n = 0;
+    if (!matrix_inverse_data(argv[0], &inverse, &n, "solve_linear")) return value_null();
+
+    Value inv = value_matrix_from_data(inverse, n, n);
+    free(inverse);
+    if (inv.type != VALUE_MATRIX) return value_null();
+
+    Value result;
+    if (argv[1].type == VALUE_NUMERIC_ARRAY) {
+        if (argv[1].numeric_array.length != n) {
+            value_free(&inv);
+            builtin_runtime_error("solve_linear の右辺ベクトル長が行列サイズと一致しません（行列: %d x %d, 右辺: %d）",
+                                  n, n, argv[1].numeric_array.length);
+            return value_null();
+        }
+        result = value_numeric_array_with_capacity(n);
+        for (int r = 0; r < n; r++) {
+            double total = 0.0;
+            for (int c = 0; c < n; c++) {
+                total += matrix_get(&inv, r, c) * numeric_array_get(&argv[1], c);
+            }
+            numeric_array_push(&result, total);
+        }
+    } else if (argv[1].type == VALUE_MATRIX) {
+        if (argv[1].matrix.rows != n) {
+            value_free(&inv);
+            builtin_runtime_error("solve_linear の右辺行列の行数が係数行列と一致しません（係数: %d x %d, 右辺: %d x %d）",
+                                  n, n, argv[1].matrix.rows, argv[1].matrix.cols);
+            return value_null();
+        }
+        Value args[2] = { inv, argv[1] };
+        result = builtin_matmul(2, args);
+    } else {
+        value_free(&inv);
+        builtin_runtime_error("solve_linear の第2引数は数値ベクトルまたは行列でなければなりません（実際: %s）",
+                              value_type_name(argv[1].type));
+        return value_null();
+    }
+    value_free(&inv);
+    return result;
+}
+
+static Value builtin_linear_regression(int argc, Value *argv) {
+    if (argv[0].type != VALUE_MATRIX) {
+        builtin_runtime_error("linear_regression の第1引数は特徴量行列でなければなりません（実際: %s）",
+                              value_type_name(argv[0].type));
+        return value_null();
+    }
+    if (argv[1].type != VALUE_NUMERIC_ARRAY) {
+        builtin_runtime_error("linear_regression の第2引数は目的変数の数値ベクトルでなければなりません（実際: %s）",
+                              value_type_name(argv[1].type));
+        return value_null();
+    }
+
+    int rows = argv[0].matrix.rows;
+    int features = argv[0].matrix.cols;
+    if (argv[1].numeric_array.length != rows) {
+        builtin_runtime_error("linear_regression の行数と目的変数の長さが一致しません（X: %d行, y: %d）",
+                              rows, argv[1].numeric_array.length);
+        return value_null();
+    }
+
+    bool fit_intercept = true;
+    if (argc >= 3) {
+        if (argv[2].type != VALUE_BOOL) {
+            builtin_runtime_error("linear_regression の第3引数は切片を学習するかどうかの真偽値でなければなりません（実際: %s）",
+                                  value_type_name(argv[2].type));
+            return value_null();
+        }
+        fit_intercept = argv[2].boolean;
+    }
+
+    int cols = features + (fit_intercept ? 1 : 0);
+    Value design = value_matrix(rows, cols);
+    if (design.type != VALUE_MATRIX) {
+        builtin_runtime_error("linear_regression の設計行列を作成できませんでした");
+        return value_null();
+    }
+
+    for (int r = 0; r < rows; r++) {
+        int offset = 0;
+        if (fit_intercept) {
+            matrix_set(&design, r, 0, 1.0);
+            offset = 1;
+        }
+        for (int c = 0; c < features; c++) {
+            matrix_set(&design, r, c + offset, matrix_get(&argv[0], r, c));
+        }
+    }
+
+    Value design_t_args[1] = { design };
+    Value design_t = builtin_transpose(1, design_t_args);
+    if (design_t.type != VALUE_MATRIX) {
+        value_free(&design);
+        return value_null();
+    }
+
+    Value xtx_args[2] = { design_t, design };
+    Value xtx = builtin_matmul(2, xtx_args);
+    if (xtx.type != VALUE_MATRIX) {
+        value_free(&design);
+        value_free(&design_t);
+        return value_null();
+    }
+
+    Value xty = value_numeric_array_with_capacity(cols);
+    for (int c = 0; c < cols; c++) {
+        double total = 0.0;
+        for (int r = 0; r < rows; r++) {
+            total += matrix_get(&design_t, c, r) * numeric_array_get(&argv[1], r);
+        }
+        numeric_array_push(&xty, total);
+    }
+
+    Value solve_args[2] = { xtx, xty };
+    Value beta = builtin_solve_linear(2, solve_args);
+    value_free(&design);
+    value_free(&design_t);
+    value_free(&xtx);
+    value_free(&xty);
+    if (beta.type != VALUE_NUMERIC_ARRAY) {
+        return value_null();
+    }
+
+    double intercept = 0.0;
+    int weight_start = 0;
+    if (fit_intercept) {
+        intercept = numeric_array_get(&beta, 0);
+        weight_start = 1;
+    }
+
+    Value weights = value_numeric_array_with_capacity(features);
+    for (int i = 0; i < features; i++) {
+        numeric_array_push(&weights, numeric_array_get(&beta, i + weight_start));
+    }
+
+    Value model = value_dict();
+    dict_set(&model, "weights", weights);
+    dict_set(&model, "重み", weights);
+    dict_set(&model, "intercept", value_number(intercept));
+    dict_set(&model, "切片", value_number(intercept));
+    dict_set(&model, "feature_count", value_number(features));
+    dict_set(&model, "特徴量数", value_number(features));
+    dict_set(&model, "fit_intercept", value_bool(fit_intercept));
+    dict_set(&model, "切片あり", value_bool(fit_intercept));
+    value_free(&weights);
+    value_free(&beta);
+    return model;
+}
+
+static bool model_get_numeric_array(Value model, const char *key_en, const char *key_ja, Value *out) {
+    if (model.type != VALUE_DICT) return false;
+    Value value = dict_get(&model, key_en);
+    if (value.type == VALUE_NULL) value = dict_get(&model, key_ja);
+    if (value.type != VALUE_NUMERIC_ARRAY) return false;
+    *out = value;
+    return true;
+}
+
+static bool model_get_number(Value model, const char *key_en, const char *key_ja, double *out) {
+    if (model.type != VALUE_DICT) return false;
+    Value value = dict_get(&model, key_en);
+    if (value.type == VALUE_NULL) value = dict_get(&model, key_ja);
+    if (value.type != VALUE_NUMBER) return false;
+    *out = value.number;
+    return true;
+}
+
+static Value builtin_predict_linear(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_DICT) {
+        builtin_runtime_error("predict_linear の第1引数は linear_regression が返したモデル辞書でなければなりません（実際: %s）",
+                              value_type_name(argv[0].type));
+        return value_null();
+    }
+
+    Value weights;
+    if (!model_get_numeric_array(argv[0], "weights", "重み", &weights)) {
+        builtin_runtime_error("predict_linear のモデルに weights / 重み が見つかりません");
+        return value_null();
+    }
+    double intercept = 0.0;
+    (void)model_get_number(argv[0], "intercept", "切片", &intercept);
+
+    if (argv[1].type == VALUE_NUMERIC_ARRAY) {
+        if (argv[1].numeric_array.length != weights.numeric_array.length) {
+            builtin_runtime_error("predict_linear の特徴量数がモデルと一致しません（モデル: %d, 入力: %d）",
+                                  weights.numeric_array.length, argv[1].numeric_array.length);
+            return value_null();
+        }
+        double total = intercept;
+        for (int i = 0; i < weights.numeric_array.length; i++) {
+            total += numeric_array_get(&weights, i) * numeric_array_get(&argv[1], i);
+        }
+        return value_number(total);
+    }
+
+    if (argv[1].type == VALUE_MATRIX) {
+        if (argv[1].matrix.cols != weights.numeric_array.length) {
+            builtin_runtime_error("predict_linear の特徴量列数がモデルと一致しません（モデル: %d, 入力: %d列）",
+                                  weights.numeric_array.length, argv[1].matrix.cols);
+            return value_null();
+        }
+        Value result = value_numeric_array_with_capacity(argv[1].matrix.rows);
+        for (int r = 0; r < argv[1].matrix.rows; r++) {
+            double total = intercept;
+            for (int c = 0; c < argv[1].matrix.cols; c++) {
+                total += numeric_array_get(&weights, c) * matrix_get(&argv[1], r, c);
+            }
+            numeric_array_push(&result, total);
+        }
+        return result;
+    }
+
+    builtin_runtime_error("predict_linear の第2引数は数値ベクトルまたは行列でなければなりません（実際: %s）",
+                          value_type_name(argv[1].type));
+    return value_null();
+}
+
+static Value builtin_kmeans(int argc, Value *argv) {
+    if (argv[0].type != VALUE_MATRIX) {
+        builtin_runtime_error("kmeans の第1引数は行列でなければなりません（実際: %s）",
+                              value_type_name(argv[0].type));
+        return value_null();
+    }
+    if (argv[1].type != VALUE_NUMBER || !argv[1].is_integer) {
+        builtin_runtime_error("kmeans の第2引数はクラスタ数の整数でなければなりません（実際: %s）",
+                              value_type_name(argv[1].type));
+        return value_null();
+    }
+    int k = (int)argv[1].number;
+    int iterations = 20;
+    if (argc >= 3) {
+        if (argv[2].type != VALUE_NUMBER || !argv[2].is_integer) {
+            builtin_runtime_error("kmeans の第3引数は反復回数の整数でなければなりません（実際: %s）",
+                                  value_type_name(argv[2].type));
+            return value_null();
+        }
+        iterations = (int)argv[2].number;
+    }
+    int rows = argv[0].matrix.rows;
+    int cols = argv[0].matrix.cols;
+    if (k <= 0 || k > rows) {
+        builtin_runtime_error("kmeans のクラスタ数は 1 以上かつ行数以下でなければなりません（k: %d, 行数: %d）",
+                              k, rows);
+        return value_null();
+    }
+    if (iterations <= 0) iterations = 1;
+
+    Value centers = value_matrix(k, cols);
+    Value labels = value_numeric_array_with_capacity(rows);
+    for (int r = 0; r < rows; r++) numeric_array_push(&labels, 0.0);
+    for (int c = 0; c < k; c++) {
+        for (int j = 0; j < cols; j++) {
+            matrix_set(&centers, c, j, matrix_get(&argv[0], c, j));
+        }
+    }
+
+    for (int iter = 0; iter < iterations; iter++) {
+        for (int r = 0; r < rows; r++) {
+            int best = 0;
+            double best_dist = INFINITY;
+            for (int cluster = 0; cluster < k; cluster++) {
+                double dist = 0.0;
+                for (int c = 0; c < cols; c++) {
+                    double d = matrix_get(&argv[0], r, c) - matrix_get(&centers, cluster, c);
+                    dist += d * d;
+                }
+                if (dist < best_dist) {
+                    best_dist = dist;
+                    best = cluster;
+                }
+            }
+            numeric_array_set(&labels, r, best);
+        }
+
+        Value next = value_matrix(k, cols);
+        int *counts = calloc((size_t)k, sizeof(int));
+        if (counts == NULL) {
+            value_free(&centers);
+            value_free(&labels);
+            value_free(&next);
+            builtin_runtime_error("kmeans の作業メモリを確保できませんでした");
+            return value_null();
+        }
+        for (int r = 0; r < rows; r++) {
+            int cluster = (int)numeric_array_get(&labels, r);
+            counts[cluster]++;
+            for (int c = 0; c < cols; c++) {
+                matrix_set(&next, cluster, c, matrix_get(&next, cluster, c) + matrix_get(&argv[0], r, c));
+            }
+        }
+        for (int cluster = 0; cluster < k; cluster++) {
+            if (counts[cluster] == 0) {
+                for (int c = 0; c < cols; c++) matrix_set(&next, cluster, c, matrix_get(&centers, cluster, c));
+                continue;
+            }
+            for (int c = 0; c < cols; c++) {
+                matrix_set(&next, cluster, c, matrix_get(&next, cluster, c) / counts[cluster]);
+            }
+        }
+        free(counts);
+        value_free(&centers);
+        centers = next;
+    }
+
+    Value result = value_dict();
+    dict_set(&result, "centers", centers);
+    dict_set(&result, "中心", centers);
+    dict_set(&result, "labels", labels);
+    dict_set(&result, "ラベル", labels);
+    dict_set(&result, "k", value_number(k));
+    value_free(&centers);
+    value_free(&labels);
+    return result;
+}
+
+static double knn_predict_one(Value train_x, Value train_y, Value query, int query_row, int k, bool *ok) {
+    int rows = train_x.matrix.rows;
+    int cols = train_x.matrix.cols;
+    double *best_dist = malloc(sizeof(double) * (size_t)k);
+    double *best_label = malloc(sizeof(double) * (size_t)k);
+    if (best_dist == NULL || best_label == NULL) {
+        free(best_dist);
+        free(best_label);
+        *ok = false;
+        return 0.0;
+    }
+
+    int used = 0;
+    for (int r = 0; r < rows; r++) {
+        double dist = 0.0;
+        for (int c = 0; c < cols; c++) {
+            double q = query.type == VALUE_NUMERIC_ARRAY
+                ? numeric_array_get(&query, c)
+                : matrix_get(&query, query_row, c);
+            double d = matrix_get(&train_x, r, c) - q;
+            dist += d * d;
+        }
+
+        int pos = -1;
+        if (used < k) {
+            pos = used++;
+        } else if (dist < best_dist[used - 1]) {
+            pos = used - 1;
+        }
+        if (pos < 0) continue;
+
+        while (pos > 0 && dist < best_dist[pos - 1]) {
+            best_dist[pos] = best_dist[pos - 1];
+            best_label[pos] = best_label[pos - 1];
+            pos--;
+        }
+        best_dist[pos] = dist;
+        best_label[pos] = numeric_array_get(&train_y, r);
+    }
+
+    if (used <= 0) {
+        free(best_dist);
+        free(best_label);
+        *ok = false;
+        return 0.0;
+    }
+
+    double chosen_label = best_label[0];
+    int chosen_votes = 0;
+    double chosen_dist_sum = INFINITY;
+    for (int i = 0; i < used; i++) {
+        int votes = 0;
+        double dist_sum = 0.0;
+        for (int j = 0; j < used; j++) {
+            if (best_label[j] == best_label[i]) {
+                votes++;
+                dist_sum += best_dist[j];
+            }
+        }
+        if (votes > chosen_votes ||
+            (votes == chosen_votes && dist_sum < chosen_dist_sum) ||
+            (votes == chosen_votes && dist_sum == chosen_dist_sum && best_label[i] < chosen_label)) {
+            chosen_label = best_label[i];
+            chosen_votes = votes;
+            chosen_dist_sum = dist_sum;
+        }
+    }
+
+    free(best_dist);
+    free(best_label);
+    *ok = true;
+    return chosen_label;
+}
+
+static Value builtin_knn_predict(int argc, Value *argv) {
+    (void)argc;
+    if (argv[0].type != VALUE_MATRIX) {
+        builtin_runtime_error("knn_predict の第1引数は訓練特徴量の行列でなければなりません（実際: %s）",
+                              value_type_name(argv[0].type));
+        return value_null();
+    }
+    if (argv[1].type != VALUE_NUMERIC_ARRAY) {
+        builtin_runtime_error("knn_predict の第2引数は訓練ラベルの数値ベクトルでなければなりません（実際: %s）",
+                              value_type_name(argv[1].type));
+        return value_null();
+    }
+    if (argv[3].type != VALUE_NUMBER || !argv[3].is_integer) {
+        builtin_runtime_error("knn_predict の第4引数 k は整数でなければなりません（実際: %s）",
+                              value_type_name(argv[3].type));
+        return value_null();
+    }
+
+    int rows = argv[0].matrix.rows;
+    int cols = argv[0].matrix.cols;
+    int k = (int)argv[3].number;
+    if (rows <= 0 || cols <= 0) {
+        builtin_runtime_error("knn_predict の訓練行列は 1 行 1 列以上でなければなりません");
+        return value_null();
+    }
+    if (argv[1].numeric_array.length != rows) {
+        builtin_runtime_error("knn_predict の訓練行数とラベル長が一致しません（X: %d行, y: %d）",
+                              rows, argv[1].numeric_array.length);
+        return value_null();
+    }
+    if (k <= 0 || k > rows) {
+        builtin_runtime_error("knn_predict の k は 1 以上かつ訓練行数以下でなければなりません（k: %d, 行数: %d）",
+                              k, rows);
+        return value_null();
+    }
+
+    if (argv[2].type == VALUE_NUMERIC_ARRAY) {
+        if (argv[2].numeric_array.length != cols) {
+            builtin_runtime_error("knn_predict の入力ベクトル長が訓練列数と一致しません（入力: %d, 訓練: %d列）",
+                                  argv[2].numeric_array.length, cols);
+            return value_null();
+        }
+        bool ok = false;
+        double label = knn_predict_one(argv[0], argv[1], argv[2], 0, k, &ok);
+        if (!ok) {
+            builtin_runtime_error("knn_predict の作業メモリを確保できませんでした");
+            return value_null();
+        }
+        return value_number(label);
+    }
+
+    if (argv[2].type == VALUE_MATRIX) {
+        if (argv[2].matrix.cols != cols) {
+            builtin_runtime_error("knn_predict の入力行列の列数が訓練列数と一致しません（入力: %d列, 訓練: %d列）",
+                                  argv[2].matrix.cols, cols);
+            return value_null();
+        }
+        Value result = value_numeric_array_with_capacity(argv[2].matrix.rows);
+        for (int r = 0; r < argv[2].matrix.rows; r++) {
+            bool ok = false;
+            double label = knn_predict_one(argv[0], argv[1], argv[2], r, k, &ok);
+            if (!ok) {
+                value_free(&result);
+                builtin_runtime_error("knn_predict の作業メモリを確保できませんでした");
+                return value_null();
+            }
+            numeric_array_push(&result, label);
+        }
+        return result;
+    }
+
+    builtin_runtime_error("knn_predict の第3引数は入力ベクトルまたは入力行列でなければなりません（実際: %s）",
+                          value_type_name(argv[2].type));
+    return value_null();
+}
+
+static double logistic_sigmoid(double x) {
+    if (x >= 0.0) {
+        double z = exp(-x);
+        return 1.0 / (1.0 + z);
+    }
+    double z = exp(x);
+    return z / (1.0 + z);
+}
+
+static Value builtin_logistic_regression(int argc, Value *argv) {
+    if (argv[0].type != VALUE_MATRIX || argv[1].type != VALUE_NUMERIC_ARRAY) {
+        builtin_runtime_error("logistic_regression は (特徴量行列, 0/1ラベルベクトル [, 学習率] [, 反復回数]) の形で呼び出してください");
+        return value_null();
+    }
+    int rows = argv[0].matrix.rows;
+    int cols = argv[0].matrix.cols;
+    if (argv[1].numeric_array.length != rows) {
+        builtin_runtime_error("logistic_regression の行数とラベル長が一致しません（X: %d行, y: %d）",
+                              rows, argv[1].numeric_array.length);
+        return value_null();
+    }
+    double lr = 0.1;
+    int iterations = 200;
+    if (argc >= 3) {
+        if (argv[2].type != VALUE_NUMBER) return value_null();
+        lr = argv[2].number;
+    }
+    if (argc >= 4) {
+        if (argv[3].type != VALUE_NUMBER || !argv[3].is_integer) return value_null();
+        iterations = (int)argv[3].number;
+    }
+    if (iterations <= 0) iterations = 1;
+
+    Value weights = value_numeric_array_with_capacity(cols);
+    for (int c = 0; c < cols; c++) numeric_array_push(&weights, 0.0);
+    double intercept = 0.0;
+
+    for (int iter = 0; iter < iterations; iter++) {
+        double grad_b = 0.0;
+        double *grad_w = calloc((size_t)cols, sizeof(double));
+        if (grad_w == NULL) {
+            value_free(&weights);
+            builtin_runtime_error("logistic_regression の作業メモリを確保できませんでした");
+            return value_null();
+        }
+        for (int r = 0; r < rows; r++) {
+            double z = intercept;
+            for (int c = 0; c < cols; c++) z += numeric_array_get(&weights, c) * matrix_get(&argv[0], r, c);
+            double p = logistic_sigmoid(z);
+            double error = p - numeric_array_get(&argv[1], r);
+            grad_b += error;
+            for (int c = 0; c < cols; c++) grad_w[c] += error * matrix_get(&argv[0], r, c);
+        }
+        intercept -= lr * grad_b / rows;
+        for (int c = 0; c < cols; c++) {
+            numeric_array_set(&weights, c, numeric_array_get(&weights, c) - lr * grad_w[c] / rows);
+        }
+        free(grad_w);
+    }
+
+    Value model = value_dict();
+    dict_set(&model, "weights", weights);
+    dict_set(&model, "重み", weights);
+    dict_set(&model, "intercept", value_number(intercept));
+    dict_set(&model, "切片", value_number(intercept));
+    dict_set(&model, "feature_count", value_number(cols));
+    dict_set(&model, "特徴量数", value_number(cols));
+    value_free(&weights);
+    return model;
+}
+
+static Value builtin_predict_logistic(int argc, Value *argv) {
+    (void)argc;
+    Value weights;
+    if (!model_get_numeric_array(argv[0], "weights", "重み", &weights)) {
+        builtin_runtime_error("predict_logistic のモデルに weights / 重み が見つかりません");
+        return value_null();
+    }
+    double intercept = 0.0;
+    (void)model_get_number(argv[0], "intercept", "切片", &intercept);
+
+    if (argv[1].type == VALUE_NUMERIC_ARRAY) {
+        if (argv[1].numeric_array.length != weights.numeric_array.length) {
+            builtin_runtime_error("predict_logistic の特徴量数がモデルと一致しません");
+            return value_null();
+        }
+        double z = intercept;
+        for (int c = 0; c < weights.numeric_array.length; c++) {
+            z += numeric_array_get(&weights, c) * numeric_array_get(&argv[1], c);
+        }
+        return value_number(logistic_sigmoid(z));
+    }
+    if (argv[1].type == VALUE_MATRIX) {
+        if (argv[1].matrix.cols != weights.numeric_array.length) {
+            builtin_runtime_error("predict_logistic の特徴量列数がモデルと一致しません");
+            return value_null();
+        }
+        Value result = value_numeric_array_with_capacity(argv[1].matrix.rows);
+        for (int r = 0; r < argv[1].matrix.rows; r++) {
+            double z = intercept;
+            for (int c = 0; c < argv[1].matrix.cols; c++) z += numeric_array_get(&weights, c) * matrix_get(&argv[1], r, c);
+            numeric_array_push(&result, logistic_sigmoid(z));
+        }
+        return result;
+    }
+    builtin_runtime_error("predict_logistic の第2引数は数値ベクトルまたは行列でなければなりません（実際: %s）",
+                          value_type_name(argv[1].type));
+    return value_null();
+}
+
+static Value builtin_predict_logistic_class(int argc, Value *argv) {
+    double threshold = 0.5;
+    if (argc >= 3) {
+        if (argv[2].type != VALUE_NUMBER || isnan(argv[2].number)) {
+            builtin_runtime_error("predict_logistic_class の第3引数は分類閾値の数値でなければなりません（実際: %s）",
+                                  value_type_name(argv[2].type));
+            return value_null();
+        }
+        threshold = argv[2].number;
+    }
+
+    Value predict_args[2] = { argv[0], argv[1] };
+    Value probabilities = builtin_predict_logistic(2, predict_args);
+    if (probabilities.type == VALUE_NULL) return value_null();
+
+    if (probabilities.type == VALUE_NUMBER) {
+        return value_number(probabilities.number >= threshold ? 1.0 : 0.0);
+    }
+
+    if (probabilities.type == VALUE_NUMERIC_ARRAY) {
+        Value result = value_numeric_array_with_dtype(probabilities.numeric_array.length, NUMERIC_DTYPE_BOOL);
+        for (int i = 0; i < probabilities.numeric_array.length; i++) {
+            numeric_array_push(&result, numeric_array_get(&probabilities, i) >= threshold ? 1.0 : 0.0);
+        }
+        value_free(&probabilities);
+        return result;
+    }
+
+    value_free(&probabilities);
+    builtin_runtime_error("predict_logistic_class の内部予測結果が想定外です（実際: %s）",
+                          value_type_name(probabilities.type));
+    return value_null();
+}
+
+static bool parse_text_delimited_fields(const char *line, char delimiter, Value *out_fields,
+                                        const char *name, int line_no);
+
+static Value read_delimited_numeric(int argc, Value *argv, char delimiter, const char *name, const char *label) {
+    if (argv[0].type != VALUE_STRING) {
+        builtin_runtime_error("%s の第1引数はファイルパス文字列でなければなりません（実際: %s）",
+                              name, value_type_name(argv[0].type));
+        return value_null();
+    }
+
+    bool has_header = false;
+    if (argc >= 2) {
+        if (argv[1].type != VALUE_BOOL) {
+            builtin_runtime_error("%s の第2引数はヘッダー有無を表す真偽値でなければなりません（実際: %s）",
+                                  name, value_type_name(argv[1].type));
+            return value_null();
+        }
+        has_header = argv[1].boolean;
+    }
+
+    const char *missing_mode = "error";
+    if (argc >= 3) {
+        if (argv[2].type != VALUE_STRING) {
+            builtin_runtime_error("%s の第3引数は missing mode 文字列でなければなりません（実際: %s）",
+                                  name, value_type_name(argv[2].type));
+            return value_null();
+        }
+        missing_mode = argv[2].string.data;
+        if (strcmp(missing_mode, "error") != 0 &&
+            strcmp(missing_mode, "nan") != 0 &&
+            strcmp(missing_mode, "zero") != 0) {
+            builtin_runtime_error("%s の missing mode は \"error\" / \"nan\" / \"zero\" のいずれかです（実際: %s）",
+                                  name, missing_mode);
+            return value_null();
+        }
+    }
+
+    FILE *f = fopen(argv[0].string.data, "r");
+    if (f == NULL) {
+        builtin_runtime_error("%sファイルを読み込めません: %s", label, argv[0].string.data);
+        return value_null();
+    }
+
+    double *data = NULL;
+    int data_count = 0;
+    int data_capacity = 0;
+    int rows = 0;
+    int cols = -1;
+    char line[8192];
+    int line_no = 0;
+    bool skipped_header = false;
+
+    while (fgets(line, sizeof(line), f) != NULL) {
+        line_no++;
+        if (has_header && !skipped_header) {
+            skipped_header = true;
+            continue;
+        }
+
+        size_t line_len = strlen(line);
+        if (line_len == sizeof(line) - 1 && line[line_len - 1] != '\n') {
+            free(data);
+            fclose(f);
+            builtin_runtime_error("%sの%d行目が長すぎます。1行は8191バイト以内にしてください", label, line_no);
+            return value_null();
+        }
+
+        char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '\0' || *p == '\n' || *p == '\r') continue;
+
+        Value fields = value_null();
+        if (!parse_text_delimited_fields(line, delimiter, &fields, label, line_no)) {
+            free(data);
+            fclose(f);
+            return value_null();
+        }
+
+        double row_values[1024];
+        int row_cols = fields.array.length;
+        if (row_cols > (int)(sizeof(row_values) / sizeof(row_values[0]))) {
+            value_free(&fields);
+            free(data);
+            fclose(f);
+            builtin_runtime_error("%sの%d行目の列数が多すぎます。現在は1行1024列まで対応しています", label, line_no);
+            return value_null();
+        }
+
+        for (int i = 0; i < row_cols; i++) {
+            Value *field = &fields.array.elements[i];
+            if (field->type != VALUE_STRING) {
+                value_free(&fields);
+                free(data);
+                fclose(f);
+                builtin_runtime_error("%sの%d行%d列目を文字列セルとして扱えません", label, line_no, i + 1);
+                return value_null();
+            }
+            char *token = field->string.data;
+            while (*token == ' ' || *token == '\t') token++;
+            char *endptr = NULL;
+            errno = 0;
+            double value = strtod(token, &endptr);
+            while (endptr != NULL && (*endptr == ' ' || *endptr == '\t' || *endptr == '\r' || *endptr == '\n')) {
+                endptr++;
+            }
+            char *token_end = token + strlen(token);
+            while (token_end > token && (token_end[-1] == ' ' || token_end[-1] == '\t' ||
+                   token_end[-1] == '\r' || token_end[-1] == '\n')) {
+                token_end--;
+            }
+            int token_len = (int)(token_end - token);
+            bool missing = token_len == 0 || (endptr == token &&
+                ((token_len == 2 && strncmp(token, "NA", 2) == 0) ||
+                 (token_len == 3 && strncmp(token, "NaN", 3) == 0) ||
+                 (token_len == 3 && strncmp(token, "nan", 3) == 0) ||
+                 (token_len == 4 && strncmp(token, "null", 4) == 0)));
+            if (missing) {
+                if (strcmp(missing_mode, "nan") == 0) {
+                    value = NAN;
+                } else if (strcmp(missing_mode, "zero") == 0) {
+                    value = 0.0;
+                } else {
+                    value_free(&fields);
+                    free(data);
+                    fclose(f);
+                    builtin_runtime_error("%sの%d行%d列目に欠損値があります。第3引数に \"nan\" または \"zero\" を指定すると読み込めます",
+                                          label, line_no, i + 1);
+                    return value_null();
+                }
+            } else if (errno != 0 || endptr == token || (endptr != NULL && *endptr != '\0')) {
+                value_free(&fields);
+                free(data);
+                fclose(f);
+                builtin_runtime_error("%sの%d行%d列目を数値として読めません: %s",
+                                      label, line_no, i + 1, token);
+                return value_null();
+            }
+            row_values[i] = value;
+        }
+
+        if (row_cols == 0) continue;
+        if (cols < 0) cols = row_cols;
+        if (row_cols != cols) {
+            value_free(&fields);
+            free(data);
+            fclose(f);
+            builtin_runtime_error("%sの列数が一致しません（期待: %d列, %d行目: %d列）",
+                                  label, cols, line_no, row_cols);
+            return value_null();
+        }
+
+        for (int c = 0; c < cols; c++) {
+            if (data_count >= data_capacity) {
+                ARRAY_GROW(data, data_count, data_capacity, double,
+                           value_free(&fields); free(data); fclose(f);
+                           builtin_runtime_error("CSVデータのメモリ確保に失敗しました");
+                           return value_null());
+            }
+            data[data_count++] = row_values[c];
+        }
+        value_free(&fields);
+        rows++;
+    }
+
+    fclose(f);
+
+    if (cols < 0) {
+        free(data);
+        return value_matrix(0, 0);
+    }
+
+    Value result = value_matrix_from_data(data, rows, cols);
+    free(data);
+    return result;
+}
+
+static Value builtin_read_csv_numeric(int argc, Value *argv) {
+    return read_delimited_numeric(argc, argv, ',', "read_csv_numeric", "CSV");
+}
+
+static Value builtin_read_tsv_numeric(int argc, Value *argv) {
+    return read_delimited_numeric(argc, argv, '\t', "read_tsv_numeric", "TSV");
+}
+
+static bool parse_text_delimited_fields(const char *line, char delimiter, Value *out_fields,
+                                        const char *name, int line_no) {
+    size_t line_len = strlen(line);
+    char *buffer = (char *)malloc(line_len + 1);
+    if (buffer == NULL) {
+        builtin_runtime_error("%s の%d行目を読むためのメモリを確保できませんでした", name, line_no);
+        return false;
+    }
+
+    Value fields = value_array_with_capacity(8);
+    bool in_quotes = false;
+    bool field_started = false;
+    size_t field_len = 0;
+
+    for (size_t i = 0; i < line_len; i++) {
+        char c = line[i];
+        if (!in_quotes && (c == '\n' || c == '\r')) {
+            break;
+        }
+
+        if (in_quotes) {
+            if (c == '"') {
+                if (i + 1 < line_len && line[i + 1] == '"') {
+                    buffer[field_len++] = '"';
+                    i++;
+                } else {
+                    in_quotes = false;
+                }
+            } else {
+                buffer[field_len++] = c;
+            }
+            continue;
+        }
+
+        if (c == '"' && !field_started) {
+            in_quotes = true;
+            field_started = true;
+            continue;
+        }
+
+        if (c == delimiter) {
+            Value cell = value_string_n(buffer, field_len);
+            array_push(&fields, cell);
+            value_free(&cell);
+            field_len = 0;
+            field_started = false;
+            continue;
+        }
+
+        buffer[field_len++] = c;
+        field_started = true;
+    }
+
+    if (in_quotes) {
+        value_free(&fields);
+        free(buffer);
+        builtin_runtime_error("%s の%d行目に閉じていない引用符があります", name, line_no);
+        return false;
+    }
+
+    Value cell = value_string_n(buffer, field_len);
+    array_push(&fields, cell);
+    value_free(&cell);
+    free(buffer);
+    *out_fields = fields;
+    return true;
+}
+
+static bool is_blank_csv_line(const char *line) {
+    for (const char *p = line; *p != '\0'; p++) {
+        if (*p != ' ' && *p != '\t' && *p != '\r' && *p != '\n') {
+            return false;
+        }
+    }
+    return true;
+}
+
+static Value builtin_read_csv(int argc, Value *argv) {
+    if (argv[0].type != VALUE_STRING) {
+        builtin_runtime_error("read_csv の第1引数はファイルパス文字列でなければなりません（実際: %s）",
+                              value_type_name(argv[0].type));
+        return value_null();
+    }
+
+    bool has_header = true;
+    if (argc >= 2) {
+        if (argv[1].type != VALUE_BOOL) {
+            builtin_runtime_error("read_csv の第2引数はヘッダー有無を表す真偽値でなければなりません（実際: %s）",
+                                  value_type_name(argv[1].type));
+            return value_null();
+        }
+        has_header = argv[1].boolean;
+    }
+
+    FILE *f = fopen(argv[0].string.data, "r");
+    if (f == NULL) {
+        builtin_runtime_error("CSVファイルを読み込めません: %s", argv[0].string.data);
+        return value_null();
+    }
+
+    Value rows = value_array();
+    Value headers = value_null();
+    int expected_cols = -1;
+    int line_no = 0;
+    bool header_seen = false;
+    char line[8192];
+
+    while (fgets(line, sizeof(line), f) != NULL) {
+        line_no++;
+        size_t line_len = strlen(line);
+        if (line_len == sizeof(line) - 1 && line[line_len - 1] != '\n') {
+            value_free(&rows);
+            value_free(&headers);
+            fclose(f);
+            builtin_runtime_error("CSVの%d行目が長すぎます。1行は8191バイト以内にしてください", line_no);
+            return value_null();
+        }
+        if (is_blank_csv_line(line)) continue;
+
+        Value fields = value_null();
+        if (!parse_text_delimited_fields(line, ',', &fields, "CSV", line_no)) {
+            value_free(&rows);
+            value_free(&headers);
+            fclose(f);
+            return value_null();
+        }
+
+        if (expected_cols < 0) {
+            expected_cols = fields.array.length;
+        } else if (fields.array.length != expected_cols) {
+            int actual_cols = fields.array.length;
+            value_free(&fields);
+            value_free(&rows);
+            value_free(&headers);
+            fclose(f);
+            builtin_runtime_error("CSVの列数が一致しません（期待: %d列, %d行目: %d列）",
+                                  expected_cols, line_no, actual_cols);
+            return value_null();
+        }
+
+        if (has_header && !header_seen) {
+            headers = fields;
+            header_seen = true;
+            continue;
+        }
+
+        if (has_header) {
+            Value row = value_dict();
+            for (int i = 0; i < fields.array.length; i++) {
+                Value *key = &headers.array.elements[i];
+                if (key->type != VALUE_STRING) continue;
+                dict_set(&row, key->string.data, fields.array.elements[i]);
+            }
+            array_push(&rows, row);
+            value_free(&row);
+            value_free(&fields);
+        } else {
+            array_push(&rows, fields);
+            value_free(&fields);
+        }
+    }
+
+    fclose(f);
+    value_free(&headers);
+    return rows;
+}
+
+static Value builtin_csv_column(int argc, Value *argv) {
+    (void)argc;
+
+    if (argv[0].type != VALUE_ARRAY) {
+        builtin_runtime_error("csv_column の第1引数は read_csv が返した行配列でなければなりません（実際: %s）",
+                              value_type_name(argv[0].type));
+        return value_null();
+    }
+
+    Value result = value_array_with_capacity(argv[0].array.length);
+    for (int r = 0; r < argv[0].array.length; r++) {
+        Value row = argv[0].array.elements[r];
+        if (row.type == VALUE_DICT && argv[1].type == VALUE_STRING) {
+            Value cell = dict_get(&row, argv[1].string.data);
+            array_push(&result, cell);
+            continue;
+        }
+
+        if (row.type == VALUE_ARRAY && argv[1].type == VALUE_NUMBER && floor(argv[1].number) == argv[1].number) {
+            int index = (int)argv[1].number;
+            if (index < 0) index += row.array.length;
+            if (index < 0 || index >= row.array.length) {
+                value_free(&result);
+                builtin_runtime_error("csv_column の列番号が範囲外です（指定: %d, %d行目の列数: %d）",
+                                      (int)argv[1].number, r + 1, row.array.length);
+                return value_null();
+            }
+            array_push(&result, row.array.elements[index]);
+            continue;
+        }
+
+        value_free(&result);
+        builtin_runtime_error("csv_column は、辞書行には列名文字列、配列行には列番号整数を指定してください（%d行目: %s, 指定: %s）",
+                              r + 1, value_type_name(row.type), value_type_name(argv[1].type));
+        return value_null();
+    }
+
+    return result;
+}
+
+static Value builtin_read_json_lines(int argc, Value *argv) {
+    if (argv[0].type != VALUE_STRING) {
+        builtin_runtime_error("read_json_lines の第1引数はファイルパス文字列でなければなりません（実際: %s）",
+                              value_type_name(argv[0].type));
+        return value_null();
+    }
+
+    int max_lines = 100000;
+    if (argc >= 2) {
+        if (argv[1].type != VALUE_NUMBER || floor(argv[1].number) != argv[1].number) {
+            builtin_runtime_error("read_json_lines の第2引数は最大行数を表す整数でなければなりません（実際: %s）",
+                                  value_type_name(argv[1].type));
+            return value_null();
+        }
+        max_lines = (int)argv[1].number;
+        if (max_lines < 0) {
+            builtin_runtime_error("read_json_lines の最大行数は0以上でなければなりません（実際: %d）", max_lines);
+            return value_null();
+        }
+    }
+
+    FILE *f = fopen(argv[0].string.data, "r");
+    if (f == NULL) {
+        builtin_runtime_error("JSON Linesファイルを読み込めません: %s", argv[0].string.data);
+        return value_null();
+    }
+
+    Value rows = value_array();
+    char line[8192];
+    int line_no = 0;
+    int parsed_lines = 0;
+
+    while (fgets(line, sizeof(line), f) != NULL) {
+        line_no++;
+        size_t line_len = strlen(line);
+        if (line_len == sizeof(line) - 1 && line[line_len - 1] != '\n') {
+            value_free(&rows);
+            fclose(f);
+            builtin_runtime_error("JSON Linesの%d行目が長すぎます。1行は8191バイト以内にしてください", line_no);
+            return value_null();
+        }
+        if (is_blank_csv_line(line)) continue;
+
+        if (parsed_lines >= max_lines) {
+            value_free(&rows);
+            fclose(f);
+            builtin_runtime_error("JSON Linesの読み込み行数が上限を超えました（上限: %d行）。第2引数で上限を調整できます",
+                                  max_lines);
+            return value_null();
+        }
+
+        Value item = value_null();
+        if (!json_decode_checked(line, (int)line_len, &item)) {
+            value_free(&rows);
+            fclose(f);
+            builtin_runtime_error("JSON Linesの%d行目をJSONとして解析できません", line_no);
+            return value_null();
+        }
+        array_push(&rows, item);
+        value_free(&item);
+        parsed_lines++;
+    }
+
+    fclose(f);
+    return rows;
+}
+
+static Value describe_numeric_buffer(const double *data, int length) {
+    Value result = value_dict();
+    dict_set(&result, "count", value_number(length));
+    dict_set(&result, "件数", value_number(length));
+
+    if (length <= 0) {
+        dict_set(&result, "mean", value_null());
+        dict_set(&result, "平均", value_null());
+        dict_set(&result, "std", value_null());
+        dict_set(&result, "標準偏差", value_null());
+        dict_set(&result, "min", value_null());
+        dict_set(&result, "最小", value_null());
+        dict_set(&result, "max", value_null());
+        dict_set(&result, "最大", value_null());
+        return result;
+    }
+
+    double min = data[0];
+    double max = data[0];
+    double total = 0.0;
+    for (int i = 0; i < length; i++) {
+        double value = data[i];
+        if (value < min) min = value;
+        if (value > max) max = value;
+        total += value;
+    }
+    double mean = total / length;
+
+    double variance = 0.0;
+    for (int i = 0; i < length; i++) {
+        double delta = data[i] - mean;
+        variance += delta * delta;
+    }
+    variance /= length;
+
+    dict_set(&result, "mean", value_number(mean));
+    dict_set(&result, "平均", value_number(mean));
+    dict_set(&result, "std", value_number(sqrt(variance)));
+    dict_set(&result, "標準偏差", value_number(sqrt(variance)));
+    dict_set(&result, "min", value_number(min));
+    dict_set(&result, "最小", value_number(min));
+    dict_set(&result, "max", value_number(max));
+    dict_set(&result, "最大", value_number(max));
+    return result;
+}
+
+static Value builtin_describe(int argc, Value *argv) {
+    (void)argc;
+
+    if (argv[0].type == VALUE_NUMERIC_ARRAY) {
+        double *data = malloc(sizeof(double) * (size_t)argv[0].numeric_array.length);
+        if (data == NULL) {
+            builtin_runtime_error("describe の作業メモリを確保できませんでした");
+            return value_null();
+        }
+        for (int i = 0; i < argv[0].numeric_array.length; i++) {
+            data[i] = numeric_array_get(&argv[0], i);
+        }
+        Value result = describe_numeric_buffer(data, argv[0].numeric_array.length);
+        free(data);
+        return result;
+    }
+
+    if (argv[0].type == VALUE_MATRIX) {
+        Value result = value_array_with_capacity(argv[0].matrix.cols);
+        for (int c = 0; c < argv[0].matrix.cols; c++) {
+            Value col = value_numeric_array_with_capacity(argv[0].matrix.rows);
+            for (int r = 0; r < argv[0].matrix.rows; r++) {
+                numeric_array_push(&col, matrix_get(&argv[0], r, c));
+            }
+            double *data = malloc(sizeof(double) * (size_t)col.numeric_array.length);
+            if (data == NULL) {
+                value_free(&col);
+                value_free(&result);
+                builtin_runtime_error("describe の作業メモリを確保できませんでした");
+                return value_null();
+            }
+            for (int i = 0; i < col.numeric_array.length; i++) {
+                data[i] = numeric_array_get(&col, i);
+            }
+            Value summary = describe_numeric_buffer(data, col.numeric_array.length);
+            free(data);
+            array_push(&result, summary);
+            value_free(&summary);
+            value_free(&col);
+        }
+        return result;
+    }
+
+    return value_null();
+}
+
 // =============================================================================
 // 辞書関数
 // =============================================================================

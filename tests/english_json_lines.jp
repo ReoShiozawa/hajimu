@@ -1,0 +1,17 @@
+function check(name, actual, expected):
+    if actual == expected then
+        print("✓ " + name)
+    else:
+        print("✗ " + name + ": " + to_string(actual) + " != " + to_string(expected))
+        exit_program(1)
+    end
+end
+
+var path = "/tmp/hajimu_english_json_lines_test.jsonl"
+write_file(path, "{\"name\":\"A\",\"score\":10}\n{\"name\":\"B\",\"score\":20}\n\n")
+
+var rows = read_json_lines(path)
+check("json lines rows", length(rows), 2)
+check("json lines first name", rows[0]["name"], "A")
+check("json lines second score", rows[1]["score"], 20)
+check("json lines limit", read_json_lines(path, 2)[1]["name"], "B")

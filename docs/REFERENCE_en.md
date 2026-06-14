@@ -680,12 +680,186 @@ Circular imports are detected automatically to prevent infinite loops.
 | `挿入(arr, pos, val)` | Insert at position |
 | `比較ソート(arr, fn)` | Sort with custom comparator |
 
+### Numeric Vectors
+
+Numeric vectors store only numbers in contiguous memory. They are less flexible than normal arrays, but operations such as sum, mean, and dot product run as C loops instead of per-element Hajimu calls.
+
+| Function | Description |
+|---|---|
+| `vector(array)` | Create a numeric vector from a numeric array |
+| `to_array(vector)` | Convert a numeric vector back to a normal array |
+| `dtype(vector)` | Return the vector dtype. The default is `"f64"` |
+| `dtype_size(vectorOrDtypeName)` | Return the logical element size in bytes |
+| `nbytes(vector)` | Return logical byte size based on dtype |
+| `storage_bytes(vector)` | Return the current internal storage byte size |
+| `astype(vector, dtype)` | Return a vector converted to `"f64"`, `"f32"`, `"i64"`, `"i32"`, or `"bool"` |
+| `zeros(length)` | Create a zero-filled numeric vector |
+| `ones(length)` | Create a one-filled numeric vector |
+| `range_vector(end)` | Numeric vector from `0` to `end` exclusive |
+| `range_vector(start, end [, step])` | Numeric vector over a half-open range |
+| `vector_sum(vector)` | Sum |
+| `mean(vector)` | Mean |
+| `variance(vector)` | Variance |
+| `std(vector)` | Standard deviation |
+| `quantile(vector, q)` | Linearly interpolated quantile, with `q` from 0 to 1 |
+| `median(vector)` | Median |
+| `normalize(vector)` | Return a numeric vector normalized to mean 0 and standard deviation 1 |
+| `z_score(vector)` | Alias of `normalize` |
+| `norm(vector [, p])` | p-norm. Defaults to L2 |
+| `minmax_scale(vector)` | Scale min to 0 and max to 1 |
+| `clip(vector, min, max)` | Clamp every element to the given range |
+| `covariance(vector1, vector2)` | Population covariance |
+| `correlation(vector1, vector2)` | Pearson correlation coefficient |
+| `histogram(vector, bins)` | Histogram dictionary containing `counts` and `edges` |
+| `train_test_split(vectorOrMatrix, testRatio)` | Split the leading rows/items into train and the tail into test |
+| `drop_missing(vectorOrMatrix)` | Drop `NaN` values or matrix rows containing `NaN` |
+| `fill_missing(vectorOrMatrix, value)` | Replace `NaN` with a numeric value |
+| `is_nan(value)` | Check whether a number is `NaN` |
+| `mse(actual, predicted)` | Mean squared error |
+| `mae(actual, predicted)` | Mean absolute error |
+| `r2_score(actual, predicted)` | R2 score |
+| `accuracy(actual, predicted)` | Accuracy with a 0.5 threshold |
+| `precision(actual, predicted)` | Precision with a 0.5 threshold |
+| `recall(actual, predicted)` | Recall with a 0.5 threshold |
+| `f1_score(actual, predicted)` | F1 score with a 0.5 threshold |
+| `confusion_matrix(actual, predicted)` | Return a 2x2 `[[TN, FP], [FN, TP]]` matrix |
+| `max(vector)` | Maximum |
+| `min(vector)` | Minimum |
+| `vector_add(vector, numberOrVector)` | Element-wise addition |
+| `vector_sub(vector, numberOrVector)` | Element-wise subtraction |
+| `vector_mul(vector, numberOrVector)` | Element-wise multiplication |
+| `vector_div(vector, numberOrVector)` | Element-wise division |
+| `vector_abs(vector)` | Element-wise absolute value |
+| `vector_sqrt(vector)` | Element-wise square root |
+| `vector_sin(vector)` | Element-wise sine |
+| `vector_cos(vector)` | Element-wise cosine |
+| `vector_log(vector)` | Element-wise natural logarithm |
+| `dot(vector1, vector2)` | Dot product |
+| `describe(vector)` | Return count, mean, std, min, and max as a dictionary |
+| `is_vector(value)` | Check whether a value is a numeric vector |
+
+Japanese aliases: `ベクトル`, `配列化`, `データ型`, `データ型サイズ`, `論理バイト数`, `保存バイト数`, `型変換`, `ゼロ配列`, `一配列`, `範囲ベクトル`, `ベクトル合計`, `平均`, `分散`, `標準偏差`, `分位点`, `中央値`, `標準化`, `Zスコア`, `ノルム`, `最小最大スケール`, `クリップ`, `共分散`, `相関`, `ヒストグラム`, `訓練テスト分割`, `欠損削除`, `欠損補完`, `NaNか`, `平均二乗誤差`, `平均絶対誤差`, `決定係数`, `正解率`, `適合率`, `再現率`, `F1スコア`, `混同行列`, `最大`, `最小`, `ベクトル加算`, `ベクトル減算`, `ベクトル乗算`, `ベクトル除算`, `ベクトル絶対値`, `ベクトル平方根`, `ベクトル正弦`, `ベクトル余弦`, `ベクトル対数`, `内積`, `数値ベクトルか`
+
+The current dtype implementation is reflected in the actual storage buffer: `f64` uses `double`, `f32` uses `float`, `i64` / `i32` use integer buffers, and `bool` uses one byte per element. `i32` saturates to the `int32` range, and `bool` stores values as `0` or `1`. When vector lengths differ, division by zero occurs, or a square root/log input is outside the mathematical domain, Hajimu reports a runtime diagnostic that names the operation and the failing element where possible.
+
+```hajimu
+var x = vector([1, 2, 3, 4])
+print(vector_sum(x))  // 10
+print(mean(x))        // 2.5
+print(variance(x))    // 1.25
+print(quantile(x, 0.75)) // 3.25
+print(median(x))      // 2.5
+print(dot(x, x))      // 30
+print(covariance(x, vector([2, 4, 6, 8]))) // 2.5
+print(correlation(x, vector([2, 4, 6, 8]))) // 1
+print(histogram(x, 2)["counts"]) // [2, 2]
+print(to_string(vector_mul(x, 2))) // [2, 4, 6, 8]
+x[0] = 10
+print(x[0])           // 10
+print(json_encode(x)) // [10,2,3,4]
+print(to_array(x)[0]) // 10
+
+var xi = astype(vector([1.9, 2.1]), "i32")
+print(dtype(xi))       // i32
+print(xi[0])           // 1
+print(nbytes(xi))      // 8
+print(storage_bytes(xi)) // 8
+
+var y = range_vector(0, 5)
+print(to_string(y))   // [0, 1, 2, 3, 4]
+print(norm(vector([3, 4]))) // 5
+print(minmax_scale(vector([10, 20, 30]))) // [0, 0.5, 1]
+```
+
+### Numeric Matrices
+
+Numeric matrices store two-dimensional numeric data in row-major contiguous memory. They are the base for research data, feature matrices, and linear algebra.
+
+| Function | Description |
+|---|---|
+| `matrix(array)` | Create a matrix from a 2D array or array of numeric vectors |
+| `dtype(matrix)` | Return the matrix dtype |
+| `astype(matrix, dtype)` | Return a matrix converted to the requested dtype |
+| `nbytes(matrix)` | Return logical byte size based on dtype |
+| `storage_bytes(matrix)` | Return the current internal storage byte size |
+| `shape(matrix)` | Return `[rows, cols]` |
+| `matrix_get(matrix, row, col)` | Get an element |
+| `matrix_set(matrix, row, col, value)` | Set an element |
+| `matrix_row(matrix, row)` | Get a row as a numeric vector |
+| `matrix_column(matrix, col)` | Get a column as a numeric vector |
+| `transpose(matrix)` | Transpose. Internally this uses a shared-buffer view with swapped strides |
+| `matmul(left, right)` | Matrix multiplication |
+| `matrix_add(left, right)` | Element-wise addition for same-shaped matrices |
+| `matrix_sub(left, right)` | Element-wise subtraction for same-shaped matrices |
+| `matrix_scale(matrix, number)` | Multiply every matrix element by a scalar |
+| `matrix_hadamard(left, right)` | Hadamard product for same-shaped matrices |
+| `identity(size)` | Create an identity matrix |
+| `determinant(matrix)` | Determinant of a square matrix |
+| `inverse(matrix)` | Inverse of a square matrix |
+| `solve_linear(coefficients, rhs)` / `solve(coefficients, rhs)` | Solve `Ax = b`, where `rhs` is a numeric vector or matrix |
+| `linear_regression(features, target [, fitIntercept])` | Fit a least-squares linear regression model dictionary |
+| `predict_linear(model, features)` | Predict one vector or a matrix with a `linear_regression` model |
+| `kmeans(matrix, k [, iterations])` | k-means clustering; returns `centers` and `labels` |
+| `knn_predict(trainFeatures, trainLabels, input, k)` | k-nearest neighbors prediction for one vector or a matrix of rows |
+| `logistic_regression(features, labels [, learningRate] [, iterations])` | Binary logistic regression model |
+| `predict_logistic(model, features)` | Logistic regression probability prediction |
+| `predict_logistic_class(model, features [, threshold])` | Convert logistic probabilities to 0/1 labels; default threshold is `0.5` |
+| `is_matrix(value)` | Check whether a value is a numeric matrix |
+| `to_array(matrix)` | Convert a numeric matrix to a normal 2D array |
+| `read_csv(path [, hasHeader])` | Read a general-purpose CSV file. By default, the first row is treated as a header and rows are returned as dictionaries. Pass `false` to get arrays of cells instead |
+| `csv_column(rows, nameOrIndex)` | Extract one column from `read_csv` rows. Use a column name for dictionary rows, or an integer index for array rows |
+| `read_json_lines(path [, maxLines])` | Read JSON Lines into an array, parsing one JSON value per non-empty line. Default limit: 100000 lines |
+| `read_csv_numeric(path [, hasHeader] [, missingMode])` | Read a numeric-only CSV file as a matrix. `missingMode` is `"error"`, `"nan"`, or `"zero"` |
+| `read_tsv_numeric(path [, hasHeader] [, missingMode])` | Read a numeric-only TSV file as a matrix |
+| `describe(matrix)` | Return per-column summary dictionaries |
+
+Japanese aliases: `行列`, `データ型`, `型変換`, `論理バイト数`, `保存バイト数`, `形状`, `行列取得`, `行列設定`, `行取得`, `列取得`, `転置`, `行列積`, `行列加算`, `行列減算`, `行列スケール`, `行列要素積`, `単位行列`, `行列式`, `逆行列`, `線形方程式を解く`, `線形回帰`, `線形予測`, `k平均法`, `k近傍予測`, `ロジスティック回帰`, `ロジスティック予測`, `ロジスティック分類`, `CSV読込`, `CSV列`, `JSON行読込`, `JSONL読込`, `CSV数値読込`, `TSV数値読込`, `行列か`, `配列化`
+
+Matrix shape mismatches, out-of-range matrix indices, inconsistent CSV column counts, and non-numeric CSV cells now produce diagnostics with matrix dimensions or CSV row/column numbers.
+
+```hajimu
+var a = matrix([[1, 2, 3], [4, 5, 6]])
+var b = matrix([[1, 2], [3, 4], [5, 6]])
+var c = matmul(a, b)
+
+print(shape(c))          // [2, 2]
+print(matrix_get(c, 0, 0)) // 22
+print(matrix_column(c, 0)) // [22, 49]
+print(determinant(matrix([[1, 2], [3, 4]]))) // -2
+print(inverse(matrix([[4, 7], [2, 6]])))
+print(solve_linear(matrix([[2, 1], [1, 3]]), vector([1, 2])))
+
+var model = linear_regression(matrix([[0], [1], [2], [3]]), vector([1, 3, 5, 7]))
+print(model["weights"])          // [2]
+print(model["intercept"])        // 1
+print(predict_linear(model, vector([4]))) // 9
+
+matrix_set(c, 0, 0, 999)
+print(c[0][0])           // 999
+print(json_encode(c))    // [[999,28],[49,64]]
+
+var data = read_csv_numeric("data.csv", true) // skip the first row as a header
+print(mean(matrix_column(data, 0)))
+print(describe(data)[0]["mean"])
+
+var rows = read_csv("people.csv")
+print(rows[0]["name"])
+print(csv_column(rows, "score"))
+
+var split_result = train_test_split(data, 0.2)
+print(shape(split_result["train"]))
+print(shape(split_result["test"]))
+
+var shuffled_split = train_test_split(data, 0.2, 123) // reproducible seed
+```
+
 ### Type Conversion
 
 | Function | Description |
 |---|---|
 | `数値化(val)` | Convert to number |
 | `文字列化(val)` | Convert to string |
+| `配列化(val)` / `to_array(val)` | Convert numeric vector/matrix to normal arrays |
 
 ### Math Functions
 
@@ -791,6 +965,8 @@ All return a boolean.
 | `文字列か(val)` | Is string? |
 | `真偽か(val)` | Is boolean? |
 | `配列か(val)` | Is array? |
+| `数値ベクトルか(val)` / `is_vector(val)` | Is numeric vector? |
+| `行列か(val)` / `is_matrix(val)` | Is numeric matrix? |
 | `辞書か(val)` | Is dictionary? |
 | `関数か(val)` | Is function? |
 | `無か(val)` | Is null? |
@@ -945,7 +1121,7 @@ Runs a shell command and returns stdout as a string.
 |---|---|---|
 | `システム名` | OS name | `"macOS"` / `"Linux"` / `"Windows"` |
 | `アーキテクチャ` | CPU architecture | `"arm64"` / `"x86-64"` |
-| `はじむバージョン` | Interpreter version | `"1.4.0"` |
+| `はじむバージョン` | Interpreter version | `"1.5.0"` |
 | `システム["OS"]` | Same as `システム名` | |
 | `システム["区切り文字"]` | Path separator | `/` (Windows: `\`) |
 | `システム["改行"]` | Newline | `\n` (Windows: `\r\n`) |
@@ -964,10 +1140,22 @@ Runs a shell command and returns stdout as a string.
 
 ### `JSON解析(str)` — Deserialize
 
+Invalid JSON, missing closing delimiters, and trailing extra characters return `null`.
+
 ```
 変数 結果 = JSON解析("{\"name\":\"Taro\",\"age\":25}")
 表示(結果["name"])  // Taro
 表示(結果["age"])   // 25
+```
+
+### `read_json_lines(path [, maxLines])`
+
+Reads JSON Lines by parsing each non-empty line as one JSON value and returning an array.
+The default limit is `100000` lines. Invalid lines produce an error with the source line number.
+
+```hajimu
+var rows = read_json_lines("events.jsonl")
+print(rows[0]["type"])
 ```
 
 ---
@@ -1909,5 +2097,5 @@ Hello, World!
 
 ## Version
 
-- Version: 1.4.0
+- Version: 1.5.0
 - Author: Reo Shiozawa

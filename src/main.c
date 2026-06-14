@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <locale.h>
+#include <time.h>
 
 /* Windows: コンソール UTF-8 設定を main() 决と履行するための最小ヘッダー。
  * windows.h 内の winnt.h が TokenType を enum 値として定義しており lexer.h の
@@ -34,12 +35,16 @@
 // バージョン情報
 // =============================================================================
 
-#define VERSION "1.4.0"
+#define VERSION "1.5.0"
 #define AUTHOR "Reo Shiozawa"
 
 // =============================================================================
 // ファイル読み込み
 // =============================================================================
+
+static double profile_now_ms(void) {
+    return ((double)clock() * 1000.0) / (double)CLOCKS_PER_SEC;
+}
 
 static char *read_file(const char *path) {
     FILE *file = fopen(path, "rb");
@@ -96,22 +101,33 @@ static char *read_program_source(const char *path) {
 // ファイル実行
 // =============================================================================
 
-static int run_file(const char *path, bool debug_mode, int script_argc, char **script_argv) {
+static int run_file(const char *path, bool debug_mode, bool profile_mode, bool profile_ast_mode, int script_argc, char **script_argv) {
+    double total_start_ms = profile_now_ms();
+    double read_start_ms = total_start_ms;
     char *source = read_program_source(path);
     if (source == NULL) {
         return 1;
     }
+    double read_end_ms = profile_now_ms();
     
     // パース
+    double parse_start_ms = profile_now_ms();
     Parser parser;
     parser_init(&parser, source, path);
     
     ASTNode *program = parse_program(&parser);
+    double parse_end_ms = profile_now_ms();
     
     if (parser_had_error(&parser)) {
         parser_free(&parser);
         node_free(program);
         free(source);
+        if (profile_mode) {
+            fprintf(stderr, "プロファイル: 読込 %.3f ms, パース %.3f ms, 実行 0.000 ms, 合計 %.3f ms\n",
+                    read_end_ms - read_start_ms,
+                    parse_end_ms - parse_start_ms,
+                    profile_now_ms() - total_start_ms);
+        }
         return 1;
     }
     
@@ -144,17 +160,34 @@ static int run_file(const char *path, bool debug_mode, int script_argc, char **s
         printf("=== デバッグモード ===\n");
         printf("Enter: 次のステップ / 'v': 変数表示 / 'c': 継続実行\n\n");
     }
+    if (profile_ast_mode) {
+        evaluator_set_ast_profile_enabled(eval, true);
+    }
     
+    double eval_start_ms = profile_now_ms();
     Value result = evaluator_run(eval, program);
+    double eval_end_ms = profile_now_ms();
     (void)result;  // 結果は使用しない
     
     int exit_code = evaluator_had_error(eval) ? 1 : 0;
+
+    if (profile_ast_mode) {
+        evaluator_print_ast_profile(eval, 20);
+    }
     
     // クリーンアップ
     evaluator_free(eval);
     parser_free(&parser);
     node_free(program);
     free(source);
+
+    if (profile_mode) {
+        fprintf(stderr, "プロファイル: 読込 %.3f ms, パース %.3f ms, 実行 %.3f ms, 合計 %.3f ms\n",
+                read_end_ms - read_start_ms,
+                parse_end_ms - parse_start_ms,
+                eval_end_ms - eval_start_ms,
+                profile_now_ms() - total_start_ms);
+    }
     
     return exit_code;
 }
@@ -432,6 +465,8 @@ static void print_usage(const char *program_name) {
     printf("  -h, --help     このヘルプを表示\n");
     printf("  -v, --version  バージョン情報を表示\n");
     printf("  -d, --debug    デバッグモードで実行\n");
+    printf("  -p, --profile  読み込み・パース・実行時間を表示\n");
+    printf("      --profile-ast  ASTノード単位の評価時間を表示\n");
     printf("  -t, --tokens   トークンを表示\n");
     printf("  -a, --ast      ASTを表示\n");
     printf("\n");
@@ -736,6 +771,8 @@ int main(int argc, char *argv[]) {
     bool show_help = false;
     bool show_ver = false;
     bool debug_mode = false;
+    bool profile_mode = false;
+    bool profile_ast_mode = false;
     bool show_tok = false;
     bool show_tree = false;
     const char *filename = NULL;
@@ -749,6 +786,10 @@ int main(int argc, char *argv[]) {
             show_ver = true;
         } else if (strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--debug") == 0) {
             debug_mode = true;
+        } else if (strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--profile") == 0) {
+            profile_mode = true;
+        } else if (strcmp(argv[i], "--profile-ast") == 0) {
+            profile_ast_mode = true;
         } else if (strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--tokens") == 0) {
             show_tok = true;
         } else if (strcmp(argv[i], "-a") == 0 || strcmp(argv[i], "--ast") == 0) {
@@ -810,7 +851,7 @@ int main(int argc, char *argv[]) {
             script_argc = argc - filename_index - 1;
             script_argv = &argv[filename_index + 1];
         }
-        return run_file(filename, debug_mode, script_argc, script_argv);
+        return run_file(filename, debug_mode, profile_mode, profile_ast_mode, script_argc, script_argv);
     }
     
     // REPLモード

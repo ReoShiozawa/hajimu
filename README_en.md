@@ -88,9 +88,10 @@ Hajimu is young, but it is already more than a sketch.
 | Runtime | C AST interpreter |
 | Source extensions | `.jp`, `.haj`, `.hajimu` |
 | Japanese syntax | Primary language surface |
-| English aliases | Practical v1.4.0 subset implemented |
+| English aliases | Practical v1.5.0 subset implemented |
 | Types | Dynamic values with optional type annotations in syntax |
 | Text | UTF-8 aware string helpers |
+| Research compute | Initial numeric vector/matrix API with dtype/astype, statistics, metrics, missing-value helpers, train/test splitting, linear algebra, linear/logistic regression, k-means, and optional BLAS builds |
 | Functions | Closures, lambdas, higher-order helpers, generators |
 | Data structures | Arrays, dictionaries, enums |
 | OOP | Classes, constructors, `self`, inheritance, static methods |
@@ -131,10 +132,10 @@ brew install hajimu
 Download the latest installer from
 [GitHub Releases](https://github.com/ReoShiozawa/hajimu/releases).
 
-For v1.4.0, the main installer asset is:
+For v1.5.0, the main installer asset is:
 
 ```text
-hajimu_setup-1.4.0.exe
+hajimu_setup-1.5.0.exe
 ```
 
 Portable Windows usage is also supported. Keep these files in the same folder:
@@ -344,6 +345,8 @@ make release           # optimized local build
 make windows           # build win/dist/hajimu.exe
 make windows-installer # build win/dist/hajimu_setup.exe
 make wasm              # build WebAssembly artifacts
+./nihongo --profile tests/english_numeric_vector.jp # show read/parse/evaluate timings
+./nihongo --profile-ast tests/english_numeric_vector.jp # show AST-node timings
 ```
 
 Release smoke tests usually include:
@@ -373,6 +376,7 @@ English:
 - [Roadmap](docs/ROADMAP_en.md)
 - [English Syntax Roadmap](docs/ENGLISH_SYNTAX_ROADMAP.md)
 - [English Alias Policy](docs/ENGLISH_ALIAS_POLICY.md)
+- [Performance And Research Compute Design](docs/PERFORMANCE_AND_COMPUTE_DESIGN.md)
 - [Plugin Development Guide](docs/PLUGIN_DEVELOPMENT.md)
 - [Changelog](CHANGELOG.md)
 

@@ -131,18 +131,28 @@
 // =============================================================================
 
 typedef enum {
-    VALUE_NULL      = 0,
-    VALUE_NUMBER    = 1,
-    VALUE_BOOL      = 2,
-    VALUE_STRING    = 3,
-    VALUE_ARRAY     = 4,
-    VALUE_DICT      = 5,
-    VALUE_FUNCTION  = 6,
-    VALUE_BUILTIN   = 7,
-    VALUE_CLASS     = 8,
-    VALUE_INSTANCE  = 9,
-    VALUE_GENERATOR = 10,
+    VALUE_NULL          = 0,
+    VALUE_NUMBER        = 1,
+    VALUE_BOOL          = 2,
+    VALUE_STRING        = 3,
+    VALUE_ARRAY         = 4,
+    VALUE_NUMERIC_ARRAY = 5,
+    VALUE_MATRIX        = 6,
+    VALUE_DICT          = 7,
+    VALUE_FUNCTION      = 8,
+    VALUE_BUILTIN       = 9,
+    VALUE_CLASS         = 10,
+    VALUE_INSTANCE      = 11,
+    VALUE_GENERATOR     = 12,
 } ValueType;
+
+typedef enum {
+    NUMERIC_DTYPE_F64  = 0,
+    NUMERIC_DTYPE_F32  = 1,
+    NUMERIC_DTYPE_I64  = 2,
+    NUMERIC_DTYPE_I32  = 3,
+    NUMERIC_DTYPE_BOOL = 4,
+} NumericDType;
 
 // 前方宣言
 struct ASTNode;
@@ -155,6 +165,7 @@ typedef Value (*BuiltinFn)(int argc, Value *argv);
 struct Value {
     ValueType type;
     bool is_const;
+    bool is_integer;
     int ref_count;
     
     union {
@@ -163,7 +174,8 @@ struct Value {
         
         struct {
             char *data;
-            int length;
+            int byte_length;
+            int char_length;
             int capacity;
         } string;
         
@@ -172,12 +184,33 @@ struct Value {
             int length;
             int capacity;
         } array;
+
+        struct {
+            NumericDType dtype;
+            void *data;
+            int length;
+            int capacity;
+        } numeric_array;
+
+        struct {
+            NumericDType dtype;
+            void *data;
+            int rows;
+            int cols;
+            int row_stride;
+            int col_stride;
+            int offset;
+            int *ref_count;
+        } matrix;
         
         struct {
             char **keys;
             Value *values;
             int length;
             int capacity;
+            int *hash_indices;
+            int hash_capacity;
+            bool hash_valid;
         } dict;
         
         struct {
@@ -221,6 +254,7 @@ static inline Value hajimu_null(void) {
     Value v;
     v.type = VALUE_NULL;
     v.is_const = false;
+    v.is_integer = false;
     v.ref_count = 0;
     return v;
 }
@@ -230,6 +264,7 @@ static inline Value hajimu_number(double n) {
     Value v;
     v.type = VALUE_NUMBER;
     v.is_const = false;
+    v.is_integer = false;
     v.ref_count = 0;
     v.number = n;
     return v;
@@ -240,6 +275,7 @@ static inline Value hajimu_bool(bool b) {
     Value v;
     v.type = VALUE_BOOL;
     v.is_const = false;
+    v.is_integer = false;
     v.ref_count = 0;
     v.boolean = b;
     return v;
@@ -250,15 +286,18 @@ static inline Value hajimu_string(const char *s) {
     Value v;
     v.type = VALUE_STRING;
     v.is_const = false;
+    v.is_integer = false;
     v.ref_count = 0;
     if (s == NULL) {
         v.string.data = strdup("");
-        v.string.length = 0;
+        v.string.byte_length = 0;
+        v.string.char_length = 0;
     } else {
         v.string.data = strdup(s);
-        v.string.length = (int)strlen(s);
+        v.string.byte_length = (int)strlen(s);
+        v.string.char_length = v.string.byte_length;
     }
-    v.string.capacity = v.string.length + 1;
+    v.string.capacity = v.string.byte_length + 1;
     return v;
 }
 
@@ -267,10 +306,129 @@ static inline Value hajimu_array(void) {
     Value v;
     v.type = VALUE_ARRAY;
     v.is_const = false;
+    v.is_integer = false;
     v.ref_count = 0;
     v.array.length = 0;
     v.array.capacity = 4;
     v.array.elements = (Value *)calloc(4, sizeof(Value));
+    return v;
+}
+
+/** 数値ベクトルかどうか */
+static inline bool hajimu_is_numeric_array(Value *v) {
+    return v != NULL && v->type == VALUE_NUMERIC_ARRAY;
+}
+
+/** 数値行列かどうか */
+static inline bool hajimu_is_matrix(Value *v) {
+    return v != NULL && v->type == VALUE_MATRIX;
+}
+
+/** 数値ベクトルの f64 データポインタ（借用。保持したい場合はコピーすること） */
+static inline double *hajimu_numeric_f64_data(Value *v) {
+    return hajimu_is_numeric_array(v) && v->numeric_array.dtype == NUMERIC_DTYPE_F64
+        ? (double *)v->numeric_array.data
+        : NULL;
+}
+
+/** 数値ベクトルの raw データポインタ（dtype を確認してから扱うこと） */
+static inline void *hajimu_numeric_raw_data(Value *v) {
+    return hajimu_is_numeric_array(v) ? v->numeric_array.data : NULL;
+}
+
+/** 数値ベクトルの dtype */
+static inline NumericDType hajimu_numeric_dtype(Value *v) {
+    return hajimu_is_numeric_array(v) ? v->numeric_array.dtype : NUMERIC_DTYPE_F64;
+}
+
+/** 数値ベクトルの長さ */
+static inline int hajimu_numeric_length(Value *v) {
+    return hajimu_is_numeric_array(v) ? v->numeric_array.length : 0;
+}
+
+/** 数値行列の f64 データポインタ（row-major、借用） */
+static inline double *hajimu_matrix_f64_data(Value *v) {
+    return hajimu_is_matrix(v) && v->matrix.dtype == NUMERIC_DTYPE_F64
+        ? (double *)v->matrix.data
+        : NULL;
+}
+
+/** 数値行列の raw データポインタ（dtype を確認してから扱うこと） */
+static inline void *hajimu_matrix_raw_data(Value *v) {
+    return hajimu_is_matrix(v) ? v->matrix.data : NULL;
+}
+
+/** 数値行列の dtype */
+static inline NumericDType hajimu_matrix_dtype(Value *v) {
+    return hajimu_is_matrix(v) ? v->matrix.dtype : NUMERIC_DTYPE_F64;
+}
+
+/** 数値行列の行数・列数 */
+static inline int hajimu_matrix_rows(Value *v) {
+    return hajimu_is_matrix(v) ? v->matrix.rows : 0;
+}
+
+static inline int hajimu_matrix_cols(Value *v) {
+    return hajimu_is_matrix(v) ? v->matrix.cols : 0;
+}
+
+static inline int hajimu_matrix_row_stride(Value *v) {
+    return hajimu_is_matrix(v) ? v->matrix.row_stride : 0;
+}
+
+static inline int hajimu_matrix_col_stride(Value *v) {
+    return hajimu_is_matrix(v) ? v->matrix.col_stride : 0;
+}
+
+static inline int hajimu_matrix_offset(Value *v) {
+    return hajimu_is_matrix(v) ? v->matrix.offset : 0;
+}
+
+/** raw double 配列から数値ベクトルを作成（コピー） */
+static inline Value hajimu_numeric_from_f64_copy(const double *data, int length) {
+    Value v;
+    v.type = VALUE_NUMERIC_ARRAY;
+    v.is_const = false;
+    v.is_integer = false;
+    v.ref_count = 0;
+    v.numeric_array.dtype = NUMERIC_DTYPE_F64;
+    v.numeric_array.length = length > 0 ? length : 0;
+    v.numeric_array.capacity = v.numeric_array.length > 0 ? v.numeric_array.length : 1;
+    v.numeric_array.data = calloc((size_t)v.numeric_array.capacity, sizeof(double));
+    if (data != NULL && length > 0 && v.numeric_array.data != NULL) {
+        memcpy(v.numeric_array.data, data, sizeof(double) * (size_t)length);
+    }
+    return v;
+}
+
+/** raw double 配列から数値行列を作成（row-major、コピー） */
+static inline Value hajimu_matrix_from_f64_copy(const double *data, int rows, int cols) {
+    Value v;
+    v.type = VALUE_MATRIX;
+    v.is_const = false;
+    v.is_integer = false;
+    v.ref_count = 0;
+    v.matrix.dtype = NUMERIC_DTYPE_F64;
+    v.matrix.rows = rows > 0 ? rows : 0;
+    v.matrix.cols = cols > 0 ? cols : 0;
+    v.matrix.row_stride = v.matrix.cols;
+    v.matrix.col_stride = 1;
+    v.matrix.offset = 0;
+    v.matrix.ref_count = (int *)malloc(sizeof(int));
+    if (v.matrix.ref_count != NULL) {
+        *v.matrix.ref_count = 1;
+    }
+    size_t count = (size_t)v.matrix.rows * (size_t)v.matrix.cols;
+    v.matrix.data = count > 0 ? calloc(count, sizeof(double)) : NULL;
+    if ((count > 0 && v.matrix.data == NULL) || v.matrix.ref_count == NULL) {
+        free(v.matrix.data);
+        free(v.matrix.ref_count);
+        v.matrix.data = NULL;
+        v.matrix.ref_count = NULL;
+    }
+    if (data != NULL && count > 0 && v.matrix.data != NULL) {
+        memcpy(v.matrix.data, data, sizeof(double) * count);
+    }
     return v;
 }
 

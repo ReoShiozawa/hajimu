@@ -1,0 +1,58 @@
+関数 確認(名前, 実際, 期待値):
+    もし 実際 == 期待値 なら
+        表示("✓ " + 名前)
+    それ以外
+        表示("✗ " + 名前 + ": " + 文字列化(実際) + " != " + 文字列化(期待値))
+        終了(1)
+    終わり
+終わり
+
+変数 path = "/tmp/hajimu_numeric_csv_test.csv"
+書き込む(path, "1,2,3\n4,5,6\n")
+
+変数 data = CSV数値読込(path)
+確認("CSV shape rows", 形状(data)[0], 2)
+確認("CSV shape cols", 形状(data)[1], 3)
+確認("CSV value", 行列取得(data, 1, 2), 6)
+確認("CSV column mean", 平均(列取得(data, 1)), 3.5)
+確認("CSV describe", 要約(data)[1]["mean"], 3.5)
+
+変数 header_path = "/tmp/hajimu_numeric_csv_header_test.csv"
+書き込む(header_path, "x,y\n10,20\n30,40\n")
+変数 header_data = CSV数値読込(header_path, 真)
+確認("CSV header rows", 形状(header_data)[0], 2)
+確認("CSV header value", 行列取得(header_data, 1, 1), 40)
+
+変数 tsv_path = "/tmp/hajimu_numeric_tsv_test.tsv"
+書き込む(tsv_path, "x\ty\n7\t8\n9\t10\n")
+変数 tsv_data = TSV数値読込(tsv_path, 真)
+確認("TSV rows", 形状(tsv_data)[0], 2)
+確認("TSV value", 行列取得(tsv_data, 1, 1), 10)
+
+変数 missing_path = "/tmp/hajimu_numeric_csv_missing_test.csv"
+書き込む(missing_path, "1,NA\n3,4\n")
+変数 missing_data = CSV数値読込(missing_path, 偽, "nan")
+確認("CSV missing NaN", NaNか(行列取得(missing_data, 0, 1)), 真)
+確認("CSV fill missing", 行列取得(欠損補完(missing_data, 0), 0, 1), 0)
+確認("CSV drop missing", 形状(欠損削除(missing_data))[0], 1)
+
+変数 empty_path = "/tmp/hajimu_numeric_csv_empty_cell_test.csv"
+書き込む(empty_path, "1,,3\n4,5,\n")
+変数 empty_nan = CSV数値読込(empty_path, 偽, "nan")
+確認("CSV empty middle NaN", NaNか(行列取得(empty_nan, 0, 1)), 真)
+確認("CSV empty trailing NaN", NaNか(行列取得(empty_nan, 1, 2)), 真)
+変数 empty_zero = CSV数値読込(empty_path, 偽, "zero")
+確認("CSV empty middle zero", 行列取得(empty_zero, 0, 1), 0)
+確認("CSV empty trailing zero", 行列取得(empty_zero, 1, 2), 0)
+
+変数 text_path = "/tmp/hajimu_text_csv_test.csv"
+書き込む(text_path, "name,score,note\nA,10,\"x,y\"\nB,20,\"quote \"\"ok\"\"\"\n")
+変数 rows = CSV読込(text_path)
+確認("CSV text rows", 長さ(rows), 2)
+確認("CSV text dict", rows[0]["name"], "A")
+確認("CSV text quoted comma", rows[0]["note"], "x,y")
+確認("CSV text escaped quote", rows[1]["note"], "quote \"ok\"")
+確認("CSV text column", CSV列(rows, "score")[1], "20")
+変数 raw_rows = CSV読込(text_path, 偽)
+確認("CSV raw keeps header", raw_rows[0][0], "name")
+確認("CSV raw row", CSV列(raw_rows, 0)[1], "A")

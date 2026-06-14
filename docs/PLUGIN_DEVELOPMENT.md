@@ -212,6 +212,8 @@ Helpers and types provided by `hajimu_plugin.h`.
 | `hajimu_number(double n)` | Return a number | `return hajimu_number(3.14);` |
 | `hajimu_bool(bool b)` | Return a boolean | `return hajimu_bool(true);` |
 | `hajimu_string(const char *s)` | Return a string (copied) | `return hajimu_string("hello");` |
+| `hajimu_numeric_from_f64_copy(data, length)` | Return a numeric vector copied from `double *` | `return hajimu_numeric_from_f64_copy(xs, n);` |
+| `hajimu_matrix_from_f64_copy(data, rows, cols)` | Return a row-major numeric matrix copied from `double *` | `return hajimu_matrix_from_f64_copy(xs, r, c);` |
 
 ### Reading Values
 
@@ -228,6 +230,24 @@ static Value process(int argc, Value *argv) {
     // Array elements
     for (int i = 0; i < argv[0].array.length; i++) {
         Value elem = argv[0].array.elements[i];
+    }
+
+    // Numeric vector / matrix buffers are borrowed. Copy them if a plugin keeps them.
+    // hajimu_*_f64_data returns NULL unless dtype is NUMERIC_DTYPE_F64.
+    if (hajimu_is_numeric_array(&argv[0])) {
+        double *xs = hajimu_numeric_f64_data(&argv[0]);
+        void *raw = hajimu_numeric_raw_data(&argv[0]);
+        NumericDType dtype = hajimu_numeric_dtype(&argv[0]);
+        int n = hajimu_numeric_length(&argv[0]);
+        (void)xs; (void)raw; (void)dtype; (void)n;
+    }
+    if (hajimu_is_matrix(&argv[0])) {
+        double *data = hajimu_matrix_f64_data(&argv[0]);
+        void *raw = hajimu_matrix_raw_data(&argv[0]);
+        NumericDType dtype = hajimu_matrix_dtype(&argv[0]);
+        int rows = hajimu_matrix_rows(&argv[0]);
+        int cols = hajimu_matrix_cols(&argv[0]);
+        (void)data; (void)raw; (void)dtype; (void)rows; (void)cols;
     }
 
     // Dictionary value

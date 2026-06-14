@@ -1,0 +1,5 @@
+// 数値ベクトル合計の基準ベンチ
+変数 xs = range_vector(0, 50000)
+変数 total = vector_sum(xs)
+
+表示("vector_sum = " + to_string(total))

@@ -89,6 +89,21 @@ Last updated: February 7, 2026
 
 ## 🔮 Future Vision
 
+### Performance And Research Compute Foundation
+
+To make Hajimu useful for research, numerical computing, and machine-learning-oriented workflows, the language needs both faster standard operations and a dedicated numeric data model.
+
+See [Performance And Research Compute Design](PERFORMANCE_AND_COMPUTE_DESIGN.md) for the full design.
+
+| Phase | Status | Description |
+|---|---|---|
+| Benchmark foundation | Initial implementation done | `benchmarks/` and `make bench` for continuous speed tracking |
+| `vector` foundation | Initial implementation done | `VALUE_NUMERIC_ARRAY`, vector operations, statistics, and metrics |
+| `matrix` foundation | Initial implementation done | `VALUE_MATRIX`, matrix operations, and linear algebra |
+| Data processing | Initial implementation done | Numeric CSV loading, column extraction, descriptive statistics, missing helpers |
+| Research packages | Initial standard functions done | stats, linalg, linear/logistic regression, and k-means |
+| Optional native acceleration | Partially implemented | Plugin numeric-buffer helpers; BLAS remains future work |
+
 ### Cross-Platform Package Distribution (implemented in v1.3.0)
 
 | Approach | Status | Description |

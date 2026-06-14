@@ -136,6 +136,10 @@ bool hjpb_encode(const char *out_path, const HjpbMeta *meta,
                  const char *source, size_t source_len) {
     if (out_path == NULL || source == NULL) return false;
     if (source_len == 0) source_len = strlen(source);
+    if (source_len > UINT32_MAX) {
+        fprintf(stderr, "エラー: ソースコードが大きすぎます: %s\n", out_path);
+        return false;
+    }
 
     /* メタデータ JSON を組み立てる */
     HjpbMeta safe_meta = {0};
@@ -164,8 +168,10 @@ bool hjpb_encode(const char *out_path, const HjpbMeta *meta,
         /* スタックバッファに snprintf で組み立てると日本語・特殊文字のエスケープが
          * 複雑になるため、メモリ上の FILE* を使って write_json_string を流用する。 */
         FILE *mf = NULL;
+#ifndef _WIN32
         char *mbuf = NULL;
         size_t msz = 0;
+#endif
 #ifdef _WIN32
         /* Windows: open_memstream 非対応のため tmpfile を使う */
         mf = tmpfile();
@@ -213,7 +219,13 @@ bool hjpb_encode(const char *out_path, const HjpbMeta *meta,
         }
     }
 
-    uint32_t meta_len = (uint32_t)strlen(json_buf);
+    size_t json_len = strlen(json_buf);
+    if (json_len > UINT32_MAX) {
+        fprintf(stderr, "エラー: メタデータが大きすぎます: %s\n", out_path);
+        return false;
+    }
+
+    uint32_t meta_len = (uint32_t)json_len;
     uint32_t src_len  = (uint32_t)source_len;
 
     /* .hjp ファイルを書き出す */
@@ -259,6 +271,11 @@ bool hjpb_decode(const char *path, HjpbMeta *meta_out,
     fseek(f, 0, SEEK_END);
     long file_size = ftell(f);
     rewind(f);
+    if (file_size < 0) {
+        fprintf(stderr, "エラー: ファイルサイズを取得できません: %s\n", path);
+        fclose(f);
+        return false;
+    }
 
     if (file_size < (long)HJPB_HEADER_MIN) {
         fprintf(stderr, "エラー: HJPB ファイルが小さすぎます: %s\n", path);
@@ -302,6 +319,12 @@ bool hjpb_decode(const char *path, HjpbMeta *meta_out,
         fclose(f);
         return false;
     }
+    uint64_t meta_end = (uint64_t)HJPB_HEADER_MIN + (uint64_t)meta_len;
+    if (meta_end + 4u > (uint64_t)file_size) {
+        fprintf(stderr, "エラー: HJPB メタデータ長がファイルサイズと一致しません: %s\n", path);
+        fclose(f);
+        return false;
+    }
 
     /* メタデータ JSON を読む */
     char *json_buf = NULL;
@@ -338,6 +361,12 @@ bool hjpb_decode(const char *path, HjpbMeta *meta_out,
 
     if (src_len > 64 * 1024 * 1024) { /* 64 MB 超は異常 */
         fprintf(stderr, "エラー: ソースコードが大きすぎます: %s\n", path);
+        fclose(f);
+        return false;
+    }
+    uint64_t src_end = meta_end + 4u + (uint64_t)src_len;
+    if (src_end > (uint64_t)file_size) {
+        fprintf(stderr, "エラー: HJPB ソース長がファイルサイズと一致しません: %s\n", path);
         fclose(f);
         return false;
     }

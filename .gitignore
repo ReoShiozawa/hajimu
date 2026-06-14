@@ -1,8 +1,14 @@
 # Build outputs
+build/
 build/*.o
 nihongo
 nihongo_asan
 nihongo_asan.dSYM/
+dist/
+win/build/
+win/curl-win64/
+win/dist/hajimu-*.exe
+win/dist/hajimu_setup-*.exe
 
 # OS files
 .DS_Store
@@ -10,6 +16,7 @@ nihongo_asan.dSYM/
 # Test outputs
 test_output.txt
 test_append.txt
+tests/lib_math.hjp
 
 # Editor
 .vscode/

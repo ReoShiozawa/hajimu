@@ -38,6 +38,7 @@ typedef struct {
     const char *input;
     int pos;
     int length;
+    bool error;
 } JsonParser;
 
 static void json_skip_whitespace(JsonParser *p) {
@@ -80,6 +81,10 @@ static Value json_parse_string(JsonParser *p) {
     int capacity = JSON_STRING_INITIAL_CAPACITY;
     int length = 0;
     char *buffer = malloc(capacity);
+    if (buffer == NULL) {
+        p->error = true;
+        return value_null();
+    }
     
     while (p->pos < p->length) {
         char c = json_advance(p);
@@ -107,7 +112,12 @@ static Value json_parse_string(JsonParser *p) {
                 case 'u': {
                     // Unicode escape: \uXXXX
                     char hex[5] = {0};
-                    for (int i = 0; i < 4 && p->pos < p->length; i++) {
+                    for (int i = 0; i < 4; i++) {
+                        if (p->pos >= p->length || !isxdigit((unsigned char)p->input[p->pos])) {
+                            free(buffer);
+                            p->error = true;
+                            return value_null();
+                        }
                         hex[i] = json_advance(p);
                     }
                     unsigned int codepoint = (unsigned int)strtol(hex, NULL, 16);
@@ -128,8 +138,15 @@ static Value json_parse_string(JsonParser *p) {
                     }
                     continue;
                 }
-                default: break;
+                default:
+                    free(buffer);
+                    p->error = true;
+                    return value_null();
             }
+        } else if ((unsigned char)c < 0x20) {
+            free(buffer);
+            p->error = true;
+            return value_null();
         }
         
         if (length + 1 >= capacity) {
@@ -139,6 +156,7 @@ static Value json_parse_string(JsonParser *p) {
     }
     
     free(buffer);
+    p->error = true;
     return value_null();
 }
 
@@ -146,22 +164,41 @@ static Value json_parse_number(JsonParser *p) {
     int start = p->pos;
     
     if (p->pos < p->length && p->input[p->pos] == '-') p->pos++;
-    
+
+    int digit_start = p->pos;
     while (p->pos < p->length && isdigit((unsigned char)p->input[p->pos])) p->pos++;
+    if (p->pos == digit_start) {
+        p->error = true;
+        return value_null();
+    }
     
     if (p->pos < p->length && p->input[p->pos] == '.') {
         p->pos++;
+        int frac_start = p->pos;
         while (p->pos < p->length && isdigit((unsigned char)p->input[p->pos])) p->pos++;
+        if (p->pos == frac_start) {
+            p->error = true;
+            return value_null();
+        }
     }
     
     // 指数部
     if (p->pos < p->length && (p->input[p->pos] == 'e' || p->input[p->pos] == 'E')) {
         p->pos++;
         if (p->pos < p->length && (p->input[p->pos] == '+' || p->input[p->pos] == '-')) p->pos++;
+        int exp_start = p->pos;
         while (p->pos < p->length && isdigit((unsigned char)p->input[p->pos])) p->pos++;
+        if (p->pos == exp_start) {
+            p->error = true;
+            return value_null();
+        }
     }
     
     char *numstr = strndup(p->input + start, p->pos - start);
+    if (numstr == NULL) {
+        p->error = true;
+        return value_null();
+    }
     double value = strtod(numstr, NULL);
     free(numstr);
     
@@ -182,6 +219,10 @@ static Value json_parse_array(JsonParser *p) {
     while (1) {
         json_skip_whitespace(p);
         Value elem = json_parse_value(p);
+        if (p->error) {
+            value_free(&array);
+            return value_null();
+        }
         array_push(&array, elem);
         value_free(&elem);
         
@@ -194,7 +235,11 @@ static Value json_parse_array(JsonParser *p) {
     }
     
     json_skip_whitespace(p);
-    json_match(p, ']');
+    if (!json_match(p, ']')) {
+        value_free(&array);
+        p->error = true;
+        return value_null();
+    }
     
     return array;
 }
@@ -217,20 +262,33 @@ static Value json_parse_object(JsonParser *p) {
         Value key = json_parse_string(p);
         if (key.type != VALUE_STRING) {
             value_free(&key);
-            break;
+            value_free(&dict);
+            p->error = true;
+            return value_null();
         }
-        
+
         json_skip_whitespace(p);
-        json_match(p, ':');
+        if (!json_match(p, ':')) {
+            value_free(&key);
+            value_free(&dict);
+            p->error = true;
+            return value_null();
+        }
         json_skip_whitespace(p);
-        
+
         // 値
         Value val = json_parse_value(p);
+        if (p->error) {
+            value_free(&key);
+            value_free(&val);
+            value_free(&dict);
+            return value_null();
+        }
         dict_set(&dict, key.string.data, val);
-        
+
         value_free(&key);
         value_free(&val);
-        
+
         json_skip_whitespace(p);
         if (json_peek(p) == ',') {
             json_advance(p);
@@ -240,7 +298,11 @@ static Value json_parse_object(JsonParser *p) {
     }
     
     json_skip_whitespace(p);
-    json_match(p, '}');
+    if (!json_match(p, '}')) {
+        value_free(&dict);
+        p->error = true;
+        return value_null();
+    }
     
     return dict;
 }
@@ -278,6 +340,7 @@ static Value json_parse_value(JsonParser *p) {
         return json_parse_number(p);
     }
     
+    p->error = true;
     return value_null();
 }
 
@@ -381,6 +444,47 @@ static void json_encode_value(StringBuffer *sb, Value v) {
             }
             sb_append_char(sb, ']');
             break;
+
+        case VALUE_NUMERIC_ARRAY:
+            sb_append_char(sb, '[');
+            for (int i = 0; i < v.numeric_array.length; i++) {
+                if (i > 0) sb_append_char(sb, ',');
+                char buf[64];
+                double intpart;
+                double n = numeric_array_get(&v, i);
+                if (modf(n, &intpart) == 0.0 &&
+                    n >= -999999999 && n <= 999999999) {
+                    snprintf(buf, sizeof(buf), "%.0f", n);
+                } else {
+                    snprintf(buf, sizeof(buf), "%g", n);
+                }
+                sb_append_str(sb, buf);
+            }
+            sb_append_char(sb, ']');
+            break;
+
+        case VALUE_MATRIX:
+            sb_append_char(sb, '[');
+            for (int r = 0; r < v.matrix.rows; r++) {
+                if (r > 0) sb_append_char(sb, ',');
+                sb_append_char(sb, '[');
+                for (int c = 0; c < v.matrix.cols; c++) {
+                    if (c > 0) sb_append_char(sb, ',');
+                    char buf[64];
+                    double intpart;
+                    double n = matrix_get(&v, r, c);
+                    if (modf(n, &intpart) == 0.0 &&
+                        n >= -999999999 && n <= 999999999) {
+                        snprintf(buf, sizeof(buf), "%.0f", n);
+                    } else {
+                        snprintf(buf, sizeof(buf), "%g", n);
+                    }
+                    sb_append_str(sb, buf);
+                }
+                sb_append_char(sb, ']');
+            }
+            sb_append_char(sb, ']');
+            break;
             
         case VALUE_DICT:
             sb_append_char(sb, '{');
@@ -412,12 +516,33 @@ Value json_encode(Value v) {
     return result;
 }
 
-Value json_decode(const char *json, int length) {
+bool json_decode_checked(const char *json, int length, Value *out) {
     JsonParser parser;
     parser.input = json;
     parser.pos = 0;
     parser.length = length;
-    return json_parse_value(&parser);
+    parser.error = false;
+    Value result = json_parse_value(&parser);
+    json_skip_whitespace(&parser);
+    if (parser.error || parser.pos != parser.length) {
+        value_free(&result);
+        if (out != NULL) *out = value_null();
+        return false;
+    }
+    if (out != NULL) {
+        *out = result;
+    } else {
+        value_free(&result);
+    }
+    return true;
+}
+
+Value json_decode(const char *json, int length) {
+    Value result = value_null();
+    if (!json_decode_checked(json, length, &result)) {
+        return value_null();
+    }
+    return result;
 }
 
 // =============================================================================
@@ -442,6 +567,7 @@ Value builtin_json_decode(int argc, Value *argv) {
 typedef struct {
     char *data;
     size_t size;
+    bool allocation_failed;
 } CurlBuffer;
 
 static size_t http_write_cb(void *contents, size_t size, size_t nmemb, void *userp) {
@@ -449,9 +575,15 @@ static size_t http_write_cb(void *contents, size_t size, size_t nmemb, void *use
     size_t realsize = size * nmemb;
     CurlBuffer *buf = (CurlBuffer *)userp;
 
-    if (realsize > SIZE_MAX - buf->size - 1) return 0;
+    if (realsize > SIZE_MAX - buf->size - 1) {
+        buf->allocation_failed = true;
+        return 0;
+    }
     char *ptr = realloc(buf->data, buf->size + realsize + 1);
-    if (ptr == NULL) return 0;
+    if (ptr == NULL) {
+        buf->allocation_failed = true;
+        return 0;
+    }
     
     buf->data = ptr;
     memcpy(&(buf->data[buf->size]), contents, realsize);
@@ -499,6 +631,31 @@ static size_t curl_header_callback(char *buffer, size_t size, size_t nitems, voi
     return realsize;
 }
 
+static bool http_should_retry_connect(CURLcode code) {
+    return code == CURLE_COULDNT_CONNECT ||
+           code == CURLE_COULDNT_RESOLVE_HOST ||
+           code == CURLE_OPERATION_TIMEDOUT;
+}
+
+static bool http_is_loopback_url(const char *url) {
+    if (url == NULL) return false;
+    return strstr(url, "://127.0.0.1") != NULL ||
+           strstr(url, "://localhost") != NULL ||
+           strstr(url, "://[::1]") != NULL;
+}
+
+static void reset_curl_response_buffers(CurlBuffer *body, Value *headers) {
+    if (body != NULL) {
+        body->size = 0;
+        body->allocation_failed = false;
+        if (body->data != NULL) body->data[0] = '\0';
+    }
+    if (headers != NULL) {
+        value_free(headers);
+        *headers = value_dict();
+    }
+}
+
 // =============================================================================
 // HTTP リクエスト共通処理
 // =============================================================================
@@ -534,7 +691,7 @@ static Value http_request(const char *method, const char *url,
         return result;
     }
     
-    CurlBuffer response_body = {NULL, 0};
+    CurlBuffer response_body = {NULL, 0, false};
     response_body.data = malloc(1);
     if (response_body.data == NULL) {
         curl_easy_cleanup(curl);
@@ -621,14 +778,30 @@ static Value http_request(const char *method, const char *url,
     // User-Agent
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "nihongo-lang/1.0");
     
-    // リクエスト実行
-    CURLcode res = curl_easy_perform(curl);
+    // リクエスト実行。非同期で立ち上げたローカルサーバー直後の接続競合は短く再試行する。
+    CURLcode res = CURLE_OK;
+    int attempts = http_is_loopback_url(url) ? 20 : 1;
+    for (int attempt = 0; attempt < attempts; attempt++) {
+        reset_curl_response_buffers(&response_body, &resp_headers);
+        res = curl_easy_perform(curl);
+        if (res == CURLE_OK || response_body.allocation_failed || !http_should_retry_connect(res)) {
+            break;
+        }
+#ifdef _WIN32
+        usleep(50000);
+#else
+        usleep(50000);
+#endif
+    }
     
     // 結果を辞書に格納
     Value result = value_dict();
     
     if (res != CURLE_OK) {
-        Value err = value_string(curl_easy_strerror(res));
+        const char *err_text = response_body.allocation_failed
+            ? "HTTPレスポンス用メモリの再確保に失敗しました"
+            : curl_easy_strerror(res);
+        Value err = value_string(err_text);
         dict_set(&result, "エラー", err);
         Value status = value_number(0);
         dict_set(&result, "状態", status);
@@ -868,8 +1041,8 @@ static void parse_http_request(const char *raw, int raw_len, HttpRequest *req) {
     const char *body_start = NULL;
     {
         const char *s = p;
-        while (s < end - 1) {
-            if (s[0] == '\r' && s[1] == '\n' && s + 2 < end && s[2] == '\r' && s[3] == '\n') {
+        while (s + 1 < end) {
+            if (s + 3 < end && s[0] == '\r' && s[1] == '\n' && s[2] == '\r' && s[3] == '\n') {
                 body_start = s + 4;
                 break;
             }
@@ -905,6 +1078,7 @@ static void parse_http_request(const char *raw, int raw_len, HttpRequest *req) {
         
         // ヘッダー辞書に追加
         char *key = strndup(key_start, key_len);
+        if (key == NULL) break;
         // 小文字に変換
         for (int j = 0; j < key_len; j++) {
             key[j] = (char)tolower((unsigned char)key[j]);
@@ -923,7 +1097,7 @@ static void parse_http_request(const char *raw, int raw_len, HttpRequest *req) {
         if (req->body_length > (int)sizeof(req->body) - 1) {
             req->body_length = (int)sizeof(req->body) - 1;
         }
-        memcpy(req->body, p, req->body_length);
+        memcpy(req->body, body_start, req->body_length);
         req->body[req->body_length] = '\0';
     }
 }
@@ -941,10 +1115,15 @@ static void send_http_response(int client_fd, int status_code, const char *statu
         "Access-Control-Allow-Headers: Content-Type, Authorization\r\n"
         "\r\n",
         status_code, status_text, content_type, body_len);
-    
-    write(client_fd, header, header_len);
+
+    if (header_len < 0) return;
+    if (header_len >= (int)sizeof(header)) {
+        header_len = (int)sizeof(header) - 1;
+    }
+
+    write(client_fd, header, (size_t)header_len);
     if (body && body_len > 0) {
-        write(client_fd, body, body_len);
+        write(client_fd, body, (size_t)body_len);
     }
 }
 

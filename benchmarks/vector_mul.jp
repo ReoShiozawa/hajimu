@@ -1,0 +1,5 @@
+// 数値ベクトルの要素ごと乗算ベンチ
+変数 xs = range_vector(0, 50000)
+変数 ys = vector_mul(xs, 2)
+
+表示("vector_mul sum = " + to_string(vector_sum(ys)))

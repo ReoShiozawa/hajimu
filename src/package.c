@@ -12,7 +12,9 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <errno.h>
-#include <curl/curl.h>
+#ifndef HAJIMU_WASM
+#  include <curl/curl.h>
+#endif
 
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -498,6 +500,11 @@ static void normalize_github_url(const char *input, char *url, int max_len) {
 static bool download_to_file(const char *url, const char *dest_path) {
     if (url == NULL || dest_path == NULL) return false;
 
+#ifdef HAJIMU_WASM
+    (void)url;
+    (void)dest_path;
+    return false;
+#else
     CURL *curl = curl_easy_init();
     if (curl == NULL) return false;
 
@@ -529,6 +536,7 @@ static bool download_to_file(const char *url, const char *dest_path) {
         return false;
     }
     return true;
+#endif
 }
 
 /**

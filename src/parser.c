@@ -1226,8 +1226,22 @@ static ASTNode *enum_definition(Parser *parser) {
         if (check(parser, TOKEN_END)) break;
 
         if (count >= capacity) {
-            ARRAY_GROW(keys, count, capacity, char *, free(keys); free(values); return NULL);
-            ARRAY_GROW(values, count, capacity, ASTNode *, free(keys); free(values); return NULL);
+            int new_capacity = capacity > 0 ? capacity * 2 : 8;
+            char **new_keys = realloc(keys, sizeof(char *) * (size_t)new_capacity);
+            if (new_keys == NULL) {
+                free(keys);
+                free(values);
+                return NULL;
+            }
+            ASTNode **new_values = realloc(values, sizeof(ASTNode *) * (size_t)new_capacity);
+            if (new_values == NULL) {
+                free(new_keys);
+                free(values);
+                return NULL;
+            }
+            keys = new_keys;
+            values = new_values;
+            capacity = new_capacity;
         }
 
         // メンバー名
@@ -1942,8 +1956,17 @@ static ASTNode *primary(Parser *parser) {
         if (!check(parser, TOKEN_RBRACE)) {
             do {
                 if (count >= capacity) {
-                    ARRAY_GROW(keys, count, capacity, char *, abort());
-                    ARRAY_GROW(values, count, capacity, ASTNode *, abort());
+                    int new_capacity = capacity > 0 ? capacity * 2 : 8;
+                    char **new_keys = realloc(keys, sizeof(char *) * (size_t)new_capacity);
+                    if (new_keys == NULL) abort();
+                    ASTNode **new_values = realloc(values, sizeof(ASTNode *) * (size_t)new_capacity);
+                    if (new_values == NULL) {
+                        free(new_keys);
+                        abort();
+                    }
+                    keys = new_keys;
+                    values = new_values;
+                    capacity = new_capacity;
                 }
 
                 // キー（文字列または識別子）

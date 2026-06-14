@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdint.h>
+#include <limits.h>
 
 #define VALUE_INITIAL_CAPACITY 8
 
@@ -52,6 +54,121 @@ static void generator_state_release(GeneratorState **state_ref) {
         free(state);
     }
     *state_ref = NULL;
+}
+
+const char *numeric_dtype_name(NumericDType dtype) {
+    switch (dtype) {
+        case NUMERIC_DTYPE_F64: return "f64";
+        case NUMERIC_DTYPE_F32: return "f32";
+        case NUMERIC_DTYPE_I64: return "i64";
+        case NUMERIC_DTYPE_I32: return "i32";
+        case NUMERIC_DTYPE_BOOL: return "bool";
+        default: return "f64";
+    }
+}
+
+bool numeric_dtype_from_name(const char *name, NumericDType *out_dtype) {
+    if (name == NULL || out_dtype == NULL) return false;
+    if (strcmp(name, "f64") == 0 || strcmp(name, "double") == 0 || strcmp(name, "float64") == 0) {
+        *out_dtype = NUMERIC_DTYPE_F64;
+        return true;
+    }
+    if (strcmp(name, "f32") == 0 || strcmp(name, "float") == 0 || strcmp(name, "float32") == 0) {
+        *out_dtype = NUMERIC_DTYPE_F32;
+        return true;
+    }
+    if (strcmp(name, "i64") == 0 || strcmp(name, "int64") == 0 || strcmp(name, "整数64") == 0) {
+        *out_dtype = NUMERIC_DTYPE_I64;
+        return true;
+    }
+    if (strcmp(name, "i32") == 0 || strcmp(name, "int32") == 0 || strcmp(name, "整数32") == 0) {
+        *out_dtype = NUMERIC_DTYPE_I32;
+        return true;
+    }
+    if (strcmp(name, "bool") == 0 || strcmp(name, "boolean") == 0 || strcmp(name, "真偽値") == 0) {
+        *out_dtype = NUMERIC_DTYPE_BOOL;
+        return true;
+    }
+    return false;
+}
+
+int numeric_dtype_size(NumericDType dtype) {
+    switch (dtype) {
+        case NUMERIC_DTYPE_F64: return 8;
+        case NUMERIC_DTYPE_F32: return 4;
+        case NUMERIC_DTYPE_I64: return 8;
+        case NUMERIC_DTYPE_I32: return 4;
+        case NUMERIC_DTYPE_BOOL: return 1;
+        default: return 8;
+    }
+}
+
+static double numeric_cast_for_dtype(double value, NumericDType dtype) {
+    switch (dtype) {
+        case NUMERIC_DTYPE_F32:
+            return (double)(float)value;
+        case NUMERIC_DTYPE_I64:
+            if (isnan(value)) return 0.0;
+            return (double)(int64_t)value;
+        case NUMERIC_DTYPE_I32:
+            if (isnan(value)) return 0.0;
+            if (value > (double)INT32_MAX) return (double)INT32_MAX;
+            if (value < (double)INT32_MIN) return (double)INT32_MIN;
+            return (double)(int32_t)value;
+        case NUMERIC_DTYPE_BOOL:
+            return value != 0.0 && !isnan(value) ? 1.0 : 0.0;
+        case NUMERIC_DTYPE_F64:
+        default:
+            return value;
+    }
+}
+
+static size_t numeric_buffer_bytes(int capacity, NumericDType dtype) {
+    if (capacity <= 0) return 0;
+    return (size_t)capacity * (size_t)numeric_dtype_size(dtype);
+}
+
+static double numeric_read_at(const void *data, NumericDType dtype, int index) {
+    if (data == NULL || index < 0) return 0.0;
+    switch (dtype) {
+        case NUMERIC_DTYPE_F64:
+            return ((const double *)data)[index];
+        case NUMERIC_DTYPE_F32:
+            return (double)((const float *)data)[index];
+        case NUMERIC_DTYPE_I64:
+            return (double)((const int64_t *)data)[index];
+        case NUMERIC_DTYPE_I32:
+            return (double)((const int32_t *)data)[index];
+        case NUMERIC_DTYPE_BOOL:
+            return ((const uint8_t *)data)[index] ? 1.0 : 0.0;
+        default:
+            return ((const double *)data)[index];
+    }
+}
+
+static void numeric_write_at(void *data, NumericDType dtype, int index, double value) {
+    if (data == NULL || index < 0) return;
+    double casted = numeric_cast_for_dtype(value, dtype);
+    switch (dtype) {
+        case NUMERIC_DTYPE_F64:
+            ((double *)data)[index] = casted;
+            break;
+        case NUMERIC_DTYPE_F32:
+            ((float *)data)[index] = (float)casted;
+            break;
+        case NUMERIC_DTYPE_I64:
+            ((int64_t *)data)[index] = (int64_t)casted;
+            break;
+        case NUMERIC_DTYPE_I32:
+            ((int32_t *)data)[index] = (int32_t)casted;
+            break;
+        case NUMERIC_DTYPE_BOOL:
+            ((uint8_t *)data)[index] = casted != 0.0 ? 1u : 0u;
+            break;
+        default:
+            ((double *)data)[index] = casted;
+            break;
+    }
 }
 
 Value value_null(void) {
@@ -125,6 +242,99 @@ Value value_array_with_capacity(int capacity) {
     v.array.capacity = capacity > 0 ? capacity : VALUE_INITIAL_CAPACITY;
     v.array.elements = malloc(sizeof(Value) * v.array.capacity);
     
+    return v;
+}
+
+Value value_numeric_array(void) {
+    return value_numeric_array_with_capacity(VALUE_INITIAL_CAPACITY);
+}
+
+Value value_numeric_array_with_capacity(int capacity) {
+    return value_numeric_array_with_dtype(capacity, NUMERIC_DTYPE_F64);
+}
+
+Value value_numeric_array_with_dtype(int capacity, NumericDType dtype) {
+    Value v;
+    v.type = VALUE_NUMERIC_ARRAY;
+    v.is_const = false;
+    v.is_integer = false;
+    v.ref_count = 1;
+
+    v.numeric_array.dtype = dtype;
+    v.numeric_array.length = 0;
+    v.numeric_array.capacity = capacity > 0 ? capacity : VALUE_INITIAL_CAPACITY;
+    v.numeric_array.data = malloc(numeric_buffer_bytes(v.numeric_array.capacity, dtype));
+
+    return v;
+}
+
+Value value_numeric_array_from_data(const double *data, int length) {
+    return value_numeric_array_from_data_with_dtype(data, length, NUMERIC_DTYPE_F64);
+}
+
+Value value_numeric_array_from_data_with_dtype(const double *data, int length, NumericDType dtype) {
+    if (length < 0) return value_null();
+
+    Value v = value_numeric_array_with_dtype(length > 0 ? length : VALUE_INITIAL_CAPACITY, dtype);
+    if (v.numeric_array.data == NULL) return value_null();
+
+    v.numeric_array.length = length;
+    if (data != NULL && length > 0) {
+        for (int i = 0; i < length; i++) {
+            numeric_write_at(v.numeric_array.data, dtype, i, data[i]);
+        }
+    }
+
+    return v;
+}
+
+Value value_matrix(int rows, int cols) {
+    return value_matrix_with_dtype(rows, cols, NUMERIC_DTYPE_F64);
+}
+
+Value value_matrix_with_dtype(int rows, int cols, NumericDType dtype) {
+    if (rows < 0 || cols < 0) return value_null();
+
+    Value v;
+    v.type = VALUE_MATRIX;
+    v.is_const = false;
+    v.is_integer = false;
+    v.ref_count = 1;
+    v.matrix.dtype = dtype;
+    v.matrix.rows = rows;
+    v.matrix.cols = cols;
+    v.matrix.row_stride = cols;
+    v.matrix.col_stride = 1;
+    v.matrix.offset = 0;
+    v.matrix.ref_count = malloc(sizeof(int));
+    if (v.matrix.ref_count == NULL) return value_null();
+    *v.matrix.ref_count = 1;
+
+    size_t count = (size_t)rows * (size_t)cols;
+    v.matrix.data = count > 0 ? calloc(count, (size_t)numeric_dtype_size(dtype)) : NULL;
+    if (count > 0 && v.matrix.data == NULL) {
+        free(v.matrix.ref_count);
+        return value_null();
+    }
+
+    return v;
+}
+
+Value value_matrix_from_data(const double *data, int rows, int cols) {
+    return value_matrix_from_data_with_dtype(data, rows, cols, NUMERIC_DTYPE_F64);
+}
+
+Value value_matrix_from_data_with_dtype(const double *data, int rows, int cols, NumericDType dtype) {
+    Value v = value_matrix_with_dtype(rows, cols, dtype);
+    if (v.type != VALUE_MATRIX) return v;
+
+    size_t count = (size_t)rows * (size_t)cols;
+    if (data != NULL && count > 0) {
+        for (size_t i = 0; i < count; i++) {
+            numeric_write_at(v.matrix.data, dtype, (int)i, data[i]);
+        }
+    }
+
     return v;
 }
 
@@ -251,6 +461,92 @@ Value *instance_get_field(Value *instance, const char *name) {
     return NULL;
 }
 
+// 辞書は keys/values の挿入順配列を正とし、検索だけをハッシュ索引で高速化します。
+// hash_indices には values/keys の添字 + 1 を格納し、0 を空スロットとして扱います。
+#define DICT_HASH_MIN_LENGTH 8
+
+static uint64_t dict_hash_key(const char *key) {
+    uint64_t hash = 1469598103934665603ULL; // FNV-1a 64-bit offset basis
+    const unsigned char *p = (const unsigned char *)key;
+    while (*p != '\0') {
+        hash ^= (uint64_t)*p++;
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+static int dict_hash_capacity_for(int length) {
+    if (length < DICT_HASH_MIN_LENGTH) return 0;
+    if (length > INT_MAX / 2) return 0;
+
+    int capacity = 16;
+    int target = length * 2;
+    while (capacity < target) {
+        if (capacity > INT_MAX / 2) return 0;
+        capacity *= 2;
+    }
+    return capacity;
+}
+
+static void dict_discard_hash_index(Value *dict) {
+    if (dict == NULL || dict->type != VALUE_DICT) return;
+    free(dict->dict.hash_indices);
+    dict->dict.hash_indices = NULL;
+    dict->dict.hash_capacity = 0;
+    dict->dict.hash_valid = false;
+}
+
+static void dict_hash_insert_slot(Value *dict, int value_index) {
+    if (dict == NULL || dict->type != VALUE_DICT || !dict->dict.hash_valid ||
+        dict->dict.hash_indices == NULL || dict->dict.hash_capacity <= 0 ||
+        value_index < 0 || value_index >= dict->dict.length) {
+        return;
+    }
+
+    uint64_t hash = dict_hash_key(dict->dict.keys[value_index]);
+    int mask = dict->dict.hash_capacity - 1;
+    int slot = (int)(hash & (uint64_t)mask);
+    for (int probes = 0; probes < dict->dict.hash_capacity; probes++) {
+        if (dict->dict.hash_indices[slot] == 0) {
+            dict->dict.hash_indices[slot] = value_index + 1;
+            return;
+        }
+        slot = (slot + 1) & mask;
+    }
+
+    dict->dict.hash_valid = false;
+}
+
+static bool dict_rebuild_hash_index(Value *dict) {
+    if (dict == NULL || dict->type != VALUE_DICT) return false;
+
+    int hash_capacity = dict_hash_capacity_for(dict->dict.length);
+    if (hash_capacity <= 0) {
+        dict_discard_hash_index(dict);
+        return false;
+    }
+
+    int *indices = calloc((size_t)hash_capacity, sizeof(int));
+    if (indices == NULL) {
+        dict_discard_hash_index(dict);
+        return false;
+    }
+
+    free(dict->dict.hash_indices);
+    dict->dict.hash_indices = indices;
+    dict->dict.hash_capacity = hash_capacity;
+    dict->dict.hash_valid = true;
+
+    for (int i = 0; i < dict->dict.length; i++) {
+        dict_hash_insert_slot(dict, i);
+        if (!dict->dict.hash_valid) {
+            dict_discard_hash_index(dict);
+            return false;
+        }
+    }
+    return true;
+}
+
 Value value_dict(void) {
     return value_dict_with_capacity(VALUE_INITIAL_CAPACITY);
 }
@@ -266,6 +562,16 @@ Value value_dict_with_capacity(int capacity) {
     v.dict.capacity = capacity > 0 ? capacity : VALUE_INITIAL_CAPACITY;
     v.dict.keys = malloc(sizeof(char *) * v.dict.capacity);
     v.dict.values = malloc(sizeof(Value) * v.dict.capacity);
+    v.dict.hash_indices = NULL;
+    v.dict.hash_capacity = 0;
+    v.dict.hash_valid = false;
+    if (v.dict.keys == NULL || v.dict.values == NULL) {
+        free(v.dict.keys);
+        free(v.dict.values);
+        v.dict.keys = NULL;
+        v.dict.values = NULL;
+        v.dict.capacity = 0;
+    }
     
     return v;
 }
@@ -291,10 +597,52 @@ Value value_copy(Value v) {
             }
             copy.ref_count = 1;
             break;
+
+        case VALUE_NUMERIC_ARRAY:
+            copy.numeric_array.data = malloc(numeric_buffer_bytes(v.numeric_array.capacity, v.numeric_array.dtype));
+            if (copy.numeric_array.data == NULL) return value_null();
+            if (v.numeric_array.length > 0) {
+                memcpy(copy.numeric_array.data, v.numeric_array.data,
+                       numeric_buffer_bytes(v.numeric_array.length, v.numeric_array.dtype));
+            }
+            copy.ref_count = 1;
+            break;
+
+        case VALUE_MATRIX: {
+            size_t count = (size_t)v.matrix.rows * (size_t)v.matrix.cols;
+            copy.matrix.data = count > 0 ? malloc(count * (size_t)numeric_dtype_size(v.matrix.dtype)) : NULL;
+            if (count > 0 && copy.matrix.data == NULL) return value_null();
+            copy.matrix.row_stride = v.matrix.cols;
+            copy.matrix.col_stride = 1;
+            copy.matrix.offset = 0;
+            copy.matrix.ref_count = malloc(sizeof(int));
+            if (copy.matrix.ref_count == NULL) {
+                free(copy.matrix.data);
+                return value_null();
+            }
+            *copy.matrix.ref_count = 1;
+            for (int r = 0; r < v.matrix.rows; r++) {
+                for (int c = 0; c < v.matrix.cols; c++) {
+                    numeric_write_at(copy.matrix.data, copy.matrix.dtype,
+                                     r * copy.matrix.row_stride + c * copy.matrix.col_stride,
+                                     matrix_get(&v, r, c));
+                }
+            }
+            copy.ref_count = 1;
+            break;
+        }
             
         case VALUE_DICT:
             copy.dict.keys = malloc(sizeof(char *) * v.dict.capacity);
             copy.dict.values = malloc(sizeof(Value) * v.dict.capacity);
+            copy.dict.hash_indices = NULL;
+            copy.dict.hash_capacity = 0;
+            copy.dict.hash_valid = false;
+            if (copy.dict.keys == NULL || copy.dict.values == NULL) {
+                free(copy.dict.keys);
+                free(copy.dict.values);
+                return value_null();
+            }
             for (int i = 0; i < v.dict.length; i++) {
                 copy.dict.keys[i] = strdup(v.dict.keys[i]);
                 if (copy.dict.keys[i] == NULL) {
@@ -308,6 +656,7 @@ Value value_copy(Value v) {
                 }
                 copy.dict.values[i] = value_copy(v.dict.values[i]);
             }
+            (void)dict_rebuild_hash_index(&copy);
             copy.ref_count = 1;
             break;
             
@@ -391,6 +740,32 @@ void value_free(Value *v) {
                 v->array.elements = NULL;
             }
             break;
+
+        case VALUE_NUMERIC_ARRAY:
+            free(v->numeric_array.data);
+            v->numeric_array.data = NULL;
+            v->numeric_array.length = 0;
+            v->numeric_array.capacity = 0;
+            break;
+
+        case VALUE_MATRIX:
+            if (v->matrix.ref_count != NULL) {
+                (*v->matrix.ref_count)--;
+                if (*v->matrix.ref_count <= 0) {
+                    free(v->matrix.data);
+                    free(v->matrix.ref_count);
+                }
+            } else {
+                free(v->matrix.data);
+            }
+            v->matrix.data = NULL;
+            v->matrix.rows = 0;
+            v->matrix.cols = 0;
+            v->matrix.row_stride = 0;
+            v->matrix.col_stride = 0;
+            v->matrix.offset = 0;
+            v->matrix.ref_count = NULL;
+            break;
             
         case VALUE_DICT:
             if (v->dict.keys != NULL) {
@@ -403,6 +778,10 @@ void value_free(Value *v) {
                 v->dict.keys = NULL;
                 v->dict.values = NULL;
             }
+            free(v->dict.hash_indices);
+            v->dict.hash_indices = NULL;
+            v->dict.hash_capacity = 0;
+            v->dict.hash_valid = false;
             break;
         
         case VALUE_CLASS:
@@ -460,6 +839,8 @@ void value_retain(Value *v) {
     switch (v->type) {
         case VALUE_STRING:
         case VALUE_ARRAY:
+        case VALUE_NUMERIC_ARRAY:
+        case VALUE_MATRIX:
         case VALUE_DICT:
         case VALUE_FUNCTION:
         case VALUE_INSTANCE:
@@ -478,6 +859,8 @@ void value_release(Value *v) {
     switch (v->type) {
         case VALUE_STRING:
         case VALUE_ARRAY:
+        case VALUE_NUMERIC_ARRAY:
+        case VALUE_MATRIX:
         case VALUE_DICT:
         case VALUE_FUNCTION:
         case VALUE_INSTANCE:
@@ -557,11 +940,94 @@ int array_length(Value *array) {
 }
 
 // =============================================================================
+// 数値ベクトル操作
+// =============================================================================
+
+void numeric_array_push(Value *array, double element) {
+    if (array == NULL || array->type != VALUE_NUMERIC_ARRAY) return;
+
+    if (array->numeric_array.length >= array->numeric_array.capacity) {
+        int old_capacity = array->numeric_array.capacity;
+        int new_capacity = old_capacity > 0 ? old_capacity * 2 : VALUE_INITIAL_CAPACITY;
+        void *new_data = realloc(array->numeric_array.data,
+                                 numeric_buffer_bytes(new_capacity, array->numeric_array.dtype));
+        if (new_data == NULL) abort();
+        array->numeric_array.data = new_data;
+        array->numeric_array.capacity = new_capacity;
+    }
+
+    numeric_write_at(array->numeric_array.data, array->numeric_array.dtype,
+                     array->numeric_array.length++, element);
+}
+
+double numeric_array_get(Value *array, int index) {
+    if (array == NULL || array->type != VALUE_NUMERIC_ARRAY) return 0.0;
+    if (index < 0 || index >= array->numeric_array.length) return 0.0;
+    return numeric_read_at(array->numeric_array.data, array->numeric_array.dtype, index);
+}
+
+bool numeric_array_set(Value *array, int index, double element) {
+    if (array == NULL || array->type != VALUE_NUMERIC_ARRAY) return false;
+    if (index < 0 || index >= array->numeric_array.length) return false;
+    numeric_write_at(array->numeric_array.data, array->numeric_array.dtype, index, element);
+    return true;
+}
+
+void *numeric_array_raw_data(Value *array) {
+    if (array == NULL || array->type != VALUE_NUMERIC_ARRAY) return NULL;
+    return array->numeric_array.data;
+}
+
+int numeric_array_length(Value *array) {
+    if (array == NULL || array->type != VALUE_NUMERIC_ARRAY) return 0;
+    return array->numeric_array.length;
+}
+
+// =============================================================================
+// 数値行列操作
+// =============================================================================
+
+double matrix_get(Value *matrix, int row, int col) {
+    if (matrix == NULL || matrix->type != VALUE_MATRIX) return 0.0;
+    if (row < 0 || row >= matrix->matrix.rows || col < 0 || col >= matrix->matrix.cols) {
+        return 0.0;
+    }
+    int index = matrix->matrix.offset +
+                row * matrix->matrix.row_stride +
+                col * matrix->matrix.col_stride;
+    return numeric_read_at(matrix->matrix.data, matrix->matrix.dtype, index);
+}
+
+bool matrix_set(Value *matrix, int row, int col, double element) {
+    if (matrix == NULL || matrix->type != VALUE_MATRIX) return false;
+    if (row < 0 || row >= matrix->matrix.rows || col < 0 || col >= matrix->matrix.cols) {
+        return false;
+    }
+    int index = matrix->matrix.offset +
+                row * matrix->matrix.row_stride +
+                col * matrix->matrix.col_stride;
+    numeric_write_at(matrix->matrix.data, matrix->matrix.dtype, index, element);
+    return true;
+}
+
+void *matrix_raw_data(Value *matrix) {
+    if (matrix == NULL || matrix->type != VALUE_MATRIX) return NULL;
+    return matrix->matrix.data;
+}
+
+bool matrix_is_contiguous(Value *matrix) {
+    if (matrix == NULL || matrix->type != VALUE_MATRIX) return false;
+    return matrix->matrix.offset == 0 &&
+           matrix->matrix.row_stride == matrix->matrix.cols &&
+           matrix->matrix.col_stride == 1;
+}
+
+// =============================================================================
 // 辞書操作
 // =============================================================================
 
 // 辞書内でキーのインデックスを検索
-static int dict_find_key(Value *dict, const char *key) {
+static int dict_find_key_linear(Value *dict, const char *key) {
     for (int i = 0; i < dict->dict.length; i++) {
         if (strcmp(dict->dict.keys[i], key) == 0) {
             return i;
@@ -570,10 +1036,43 @@ static int dict_find_key(Value *dict, const char *key) {
     return -1;
 }
 
+static int dict_find_key(Value *dict, const char *key) {
+    if (dict == NULL || dict->type != VALUE_DICT || key == NULL) return -1;
+
+    if (dict->dict.length < DICT_HASH_MIN_LENGTH) {
+        return dict_find_key_linear(dict, key);
+    }
+
+    if (!dict->dict.hash_valid || dict->dict.hash_indices == NULL) {
+        (void)dict_rebuild_hash_index(dict);
+    }
+
+    if (!dict->dict.hash_valid || dict->dict.hash_indices == NULL || dict->dict.hash_capacity <= 0) {
+        return dict_find_key_linear(dict, key);
+    }
+
+    uint64_t hash = dict_hash_key(key);
+    int mask = dict->dict.hash_capacity - 1;
+    int slot = (int)(hash & (uint64_t)mask);
+    for (int probes = 0; probes < dict->dict.hash_capacity; probes++) {
+        int stored = dict->dict.hash_indices[slot];
+        if (stored == 0) {
+            return -1;
+        }
+
+        int index = stored - 1;
+        if (index >= 0 && index < dict->dict.length && strcmp(dict->dict.keys[index], key) == 0) {
+            return index;
+        }
+        slot = (slot + 1) & mask;
+    }
+
+    return dict_find_key_linear(dict, key);
+}
+
 bool dict_set(Value *dict, const char *key, Value value) {
     if (dict == NULL || dict->type != VALUE_DICT || key == NULL) return false;
     
-    // 既存のキーを検索
     int idx = dict_find_key(dict, key);
     
     if (idx >= 0) {
@@ -585,8 +1084,19 @@ bool dict_set(Value *dict, const char *key, Value value) {
     
     // 容量が足りなければ拡張
     if (dict->dict.length >= dict->dict.capacity) {
-        ARRAY_GROW(dict->dict.keys, dict->dict.length, dict->dict.capacity, char *, abort());
-        ARRAY_GROW(dict->dict.values, dict->dict.length, dict->dict.capacity, Value, abort());
+        int new_capacity = dict->dict.capacity > 0 ? dict->dict.capacity * 2 : VALUE_INITIAL_CAPACITY;
+        char **new_keys = realloc(dict->dict.keys, sizeof(char *) * (size_t)new_capacity);
+        if (new_keys == NULL) {
+            abort();
+        }
+        Value *new_values = realloc(dict->dict.values, sizeof(Value) * (size_t)new_capacity);
+        if (new_values == NULL) {
+            dict->dict.keys = new_keys;
+            abort();
+        }
+        dict->dict.keys = new_keys;
+        dict->dict.values = new_values;
+        dict->dict.capacity = new_capacity;
     }
     
     // 新しいキーを追加
@@ -596,6 +1106,16 @@ bool dict_set(Value *dict, const char *key, Value value) {
     }
     dict->dict.values[dict->dict.length] = value_copy(value);
     dict->dict.length++;
+
+    if (dict->dict.hash_valid) {
+        if ((int64_t)dict->dict.length * 4 >= (int64_t)dict->dict.hash_capacity * 3) {
+            (void)dict_rebuild_hash_index(dict);
+        } else {
+            dict_hash_insert_slot(dict, dict->dict.length - 1);
+        }
+    } else if (dict->dict.length >= DICT_HASH_MIN_LENGTH) {
+        (void)dict_rebuild_hash_index(dict);
+    }
     
     return true;
 }
@@ -629,6 +1149,12 @@ bool dict_delete(Value *dict, const char *key) {
         dict->dict.values[idx] = dict->dict.values[dict->dict.length - 1];
     }
     dict->dict.length--;
+
+    if (dict->dict.length < DICT_HASH_MIN_LENGTH) {
+        dict_discard_hash_index(dict);
+    } else if (dict->dict.hash_valid) {
+        (void)dict_rebuild_hash_index(dict);
+    }
     
     return true;
 }
@@ -757,6 +1283,10 @@ bool value_is_truthy(Value v) {
             return v.string.byte_length > 0;
         case VALUE_ARRAY:
             return v.array.length > 0;
+        case VALUE_NUMERIC_ARRAY:
+            return v.numeric_array.length > 0;
+        case VALUE_MATRIX:
+            return v.matrix.rows > 0 && v.matrix.cols > 0;
         case VALUE_DICT:
             return v.dict.length > 0;
         case VALUE_FUNCTION:
@@ -776,6 +1306,8 @@ const char *value_type_name(ValueType type) {
         case VALUE_BOOL:     return "真偽";
         case VALUE_STRING:   return "文字列";
         case VALUE_ARRAY:    return "配列";
+        case VALUE_NUMERIC_ARRAY: return "数値ベクトル";
+        case VALUE_MATRIX:   return "数値行列";
         case VALUE_DICT:     return "辞書";
         case VALUE_FUNCTION: return "関数";
         case VALUE_BUILTIN:  return "組み込み関数";
@@ -857,6 +1389,106 @@ char *value_to_string(Value v) {
                 free(elem_str);
             }
             
+            buffer[length++] = ']';
+            buffer[length] = '\0';
+            break;
+        }
+
+        case VALUE_NUMERIC_ARRAY: {
+            size_t capacity = 64;
+            size_t length = 0;
+            buffer = malloc(capacity);
+            buffer[length++] = '[';
+
+            int preview = v.numeric_array.length < 12 ? v.numeric_array.length : 12;
+            for (int i = 0; i < preview; i++) {
+                if (i > 0) {
+                    if (length + 2 >= capacity) {
+                        ARRAY_GROW(buffer, length + 2, capacity, char, abort());
+                    }
+                    buffer[length++] = ',';
+                    buffer[length++] = ' ';
+                }
+
+                char elem[64];
+                snprintf(elem, sizeof(elem), "%g", numeric_read_at(v.numeric_array.data, v.numeric_array.dtype, i));
+                size_t elem_len = strlen(elem);
+                while (length + elem_len + 16 >= capacity) {
+                    ARRAY_GROW(buffer, length + elem_len + 16, capacity, char, abort());
+                }
+                memcpy(buffer + length, elem, elem_len);
+                length += elem_len;
+            }
+
+            if (v.numeric_array.length > preview) {
+                const char *suffix = ", ...";
+                size_t suffix_len = strlen(suffix);
+                while (length + suffix_len + 2 >= capacity) {
+                    ARRAY_GROW(buffer, length + suffix_len + 2, capacity, char, abort());
+                }
+                memcpy(buffer + length, suffix, suffix_len);
+                length += suffix_len;
+            }
+
+            buffer[length++] = ']';
+            buffer[length] = '\0';
+            break;
+        }
+
+        case VALUE_MATRIX: {
+            size_t capacity = 96;
+            size_t length = 0;
+            buffer = malloc(capacity);
+            buffer[length++] = '[';
+
+            int preview_rows = v.matrix.rows < 6 ? v.matrix.rows : 6;
+            for (int r = 0; r < preview_rows; r++) {
+                if (r > 0) {
+                    while (length + 2 >= capacity) ARRAY_GROW(buffer, length + 2, capacity, char, abort());
+                    buffer[length++] = ',';
+                    buffer[length++] = ' ';
+                }
+                while (length + 1 >= capacity) ARRAY_GROW(buffer, length + 1, capacity, char, abort());
+                buffer[length++] = '[';
+
+                int preview_cols = v.matrix.cols < 8 ? v.matrix.cols : 8;
+                for (int c = 0; c < preview_cols; c++) {
+                    if (c > 0) {
+                        while (length + 2 >= capacity) ARRAY_GROW(buffer, length + 2, capacity, char, abort());
+                        buffer[length++] = ',';
+                        buffer[length++] = ' ';
+                    }
+                    char elem[64];
+                    snprintf(elem, sizeof(elem), "%g", matrix_get(&v, r, c));
+                    size_t elem_len = strlen(elem);
+                    while (length + elem_len + 16 >= capacity) {
+                        ARRAY_GROW(buffer, length + elem_len + 16, capacity, char, abort());
+                    }
+                    memcpy(buffer + length, elem, elem_len);
+                    length += elem_len;
+                }
+
+                if (v.matrix.cols > preview_cols) {
+                    const char *suffix = ", ...";
+                    size_t suffix_len = strlen(suffix);
+                    while (length + suffix_len + 1 >= capacity) ARRAY_GROW(buffer, length + suffix_len + 1, capacity, char, abort());
+                    memcpy(buffer + length, suffix, suffix_len);
+                    length += suffix_len;
+                }
+
+                while (length + 1 >= capacity) ARRAY_GROW(buffer, length + 1, capacity, char, abort());
+                buffer[length++] = ']';
+            }
+
+            if (v.matrix.rows > preview_rows) {
+                const char *suffix = ", ...";
+                size_t suffix_len = strlen(suffix);
+                while (length + suffix_len + 1 >= capacity) ARRAY_GROW(buffer, length + suffix_len + 1, capacity, char, abort());
+                memcpy(buffer + length, suffix, suffix_len);
+                length += suffix_len;
+            }
+
+            while (length + 1 >= capacity) ARRAY_GROW(buffer, length + 1, capacity, char, abort());
             buffer[length++] = ']';
             buffer[length] = '\0';
             break;
@@ -985,6 +1617,20 @@ bool value_equals(Value a, Value b) {
             for (int i = 0; i < a.array.length; i++) {
                 if (!value_equals(a.array.elements[i], b.array.elements[i])) {
                     return false;
+                }
+            }
+            return true;
+        case VALUE_NUMERIC_ARRAY:
+            if (a.numeric_array.length != b.numeric_array.length) return false;
+            for (int i = 0; i < a.numeric_array.length; i++) {
+                if (numeric_array_get(&a, i) != numeric_array_get(&b, i)) return false;
+            }
+            return true;
+        case VALUE_MATRIX:
+            if (a.matrix.rows != b.matrix.rows || a.matrix.cols != b.matrix.cols) return false;
+            for (int r = 0; r < a.matrix.rows; r++) {
+                for (int c = 0; c < a.matrix.cols; c++) {
+                    if (matrix_get(&a, r, c) != matrix_get(&b, r, c)) return false;
                 }
             }
             return true;

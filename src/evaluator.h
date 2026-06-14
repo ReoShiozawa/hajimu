@@ -33,6 +33,16 @@ typedef struct {
     bool occupied;
 } ImportedPathEntry;
 
+typedef struct {
+    const ASTNode *node;
+    NodeType type;
+    int line;
+    int column;
+    long count;
+    double total_ms;
+    double max_ms;
+} AstProfileEntry;
+
 // =============================================================================
 // 評価器構造体
 // =============================================================================
@@ -78,6 +88,12 @@ typedef struct {
         int line;
     } call_stack[128];
     int call_stack_depth;
+
+    // AST評価プロファイル
+    bool ast_profile_enabled;
+    AstProfileEntry *ast_profile_entries;
+    int ast_profile_count;
+    int ast_profile_capacity;
     
     // インポートされたモジュール
     ImportedModule *imported_modules;
@@ -202,6 +218,16 @@ void evaluator_clear_error(Evaluator *eval);
  * @param enabled 有効/無効
  */
 void evaluator_set_debug_mode(Evaluator *eval, bool enabled);
+
+/**
+ * ASTノード単位の評価プロファイルを有効/無効にする
+ */
+void evaluator_set_ast_profile_enabled(Evaluator *eval, bool enabled);
+
+/**
+ * ASTノード単位の評価プロファイルを出力する
+ */
+void evaluator_print_ast_profile(Evaluator *eval, int limit);
 
 /**
  * 実行時エラーを報告

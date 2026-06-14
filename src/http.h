@@ -23,6 +23,11 @@ Value json_encode(Value v);
  */
 Value json_decode(const char *json, int length);
 
+/**
+ * JSON文字列をValueに変換し、構文エラーをboolで返す。
+ */
+bool json_decode_checked(const char *json, int length, Value *out);
+
 // =============================================================================
 // 組み込み関数（JSON）
 // =============================================================================

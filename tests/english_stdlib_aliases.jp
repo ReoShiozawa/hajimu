@@ -53,6 +53,10 @@ var dict = {"name": "Hajimu", "year": 2026}
 check("keys", contains(keys(dict), "name"), true)
 check("values", contains(values(dict), "Hajimu"), true)
 check("has", has(dict, "year"), true)
+var large_dict = {"k0": 0, "k1": 1, "k2": 2, "k3": 3, "k4": 4, "k5": 5, "k6": 6, "k7": 7, "k8": 8, "k9": 9}
+check("large dict hash get", large_dict["k9"], 9)
+check("large dict hash has", has(large_dict, "k8"), true)
+check("large dict hash missing", has(large_dict, "missing"), false)
 
 check("split", to_string(split("a,b,c", ",")), "[a, b, c]")
 check("join", join(["a", "b"], "-"), "a-b")
@@ -64,6 +68,7 @@ check("trim", trim("  hi  "), "hi")
 var encoded = json_encode({"name": "Hajimu"})
 var decoded = json_decode(encoded)
 check("json roundtrip", decoded["name"], "Hajimu")
+check("json invalid returns null", is_null(json_decode("[1,]")), true)
 
 check("base64", base64_decode(base64_encode("hajimu")), "hajimu")
 check("path_join", path_join("docs", "REFERENCE.md"), "docs/REFERENCE.md")

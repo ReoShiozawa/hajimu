@@ -1,0 +1,6 @@
+// 数値ベクトル内積の基準ベンチ
+変数 a = range_vector(0, 50000)
+変数 b = ones(50000)
+変数 result = dot(a, b)
+
+表示("vector_dot = " + to_string(result))

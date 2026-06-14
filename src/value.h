@@ -34,11 +34,21 @@ typedef struct GeneratorState {
 // =============================================================================
 
 typedef enum {
+    NUMERIC_DTYPE_F64,  // 64-bit floating point（内部標準）
+    NUMERIC_DTYPE_F32,  // 32-bit floating point 相当へ丸める
+    NUMERIC_DTYPE_I64,  // 64-bit integer 相当へ切り捨てる
+    NUMERIC_DTYPE_I32,  // 32-bit integer 相当へ切り詰める
+    NUMERIC_DTYPE_BOOL, // 0/1 の真偽値相当
+} NumericDType;
+
+typedef enum {
     VALUE_NULL,         // null値
     VALUE_NUMBER,       // 数値（double）
     VALUE_BOOL,         // 真偽値
     VALUE_STRING,       // 文字列
     VALUE_ARRAY,        // 配列
+    VALUE_NUMERIC_ARRAY,// 数値ベクトル（dtype 別の連続配列）
+    VALUE_MATRIX,       // 数値行列（dtype 別の行優先連続配列）
     VALUE_DICT,         // 辞書（ハッシュマップ）
     VALUE_FUNCTION,     // ユーザー定義関数
     VALUE_BUILTIN,      // 組み込み関数
@@ -83,6 +93,26 @@ struct Value {
             int length;
             int capacity;
         } array;
+
+        // 数値ベクトル
+        struct {
+            NumericDType dtype;
+            void *data;
+            int length;
+            int capacity;
+        } numeric_array;
+
+        // 数値行列
+        struct {
+            NumericDType dtype;
+            void *data;
+            int rows;
+            int cols;
+            int row_stride;
+            int col_stride;
+            int offset;
+            int *ref_count;
+        } matrix;
         
         // 辞書（ハッシュマップ）
         struct {
@@ -90,6 +120,9 @@ struct Value {
             Value *values;
             int length;
             int capacity;
+            int *hash_indices;
+            int hash_capacity;
+            bool hash_valid;
         } dict;
         
         // ユーザー定義関数
@@ -167,6 +200,51 @@ Value value_array(void);
  * 配列を作成（初期容量指定）
  */
 Value value_array_with_capacity(int capacity);
+
+/**
+ * 空の数値ベクトルを作成
+ */
+Value value_numeric_array(void);
+
+/**
+ * 数値ベクトルを作成（初期容量指定）
+ */
+Value value_numeric_array_with_capacity(int capacity);
+
+/**
+ * 数値ベクトルを作成（dtype 指定）
+ */
+Value value_numeric_array_with_dtype(int capacity, NumericDType dtype);
+
+/**
+ * 数値ベクトルを raw double 配列から作成
+ */
+Value value_numeric_array_from_data(const double *data, int length);
+
+/**
+ * 数値ベクトルを raw double 配列から作成（dtype 指定）
+ */
+Value value_numeric_array_from_data_with_dtype(const double *data, int length, NumericDType dtype);
+
+/**
+ * 数値行列を作成（行数・列数指定）
+ */
+Value value_matrix(int rows, int cols);
+
+/**
+ * 数値行列を作成（dtype 指定）
+ */
+Value value_matrix_with_dtype(int rows, int cols, NumericDType dtype);
+
+/**
+ * 数値行列を raw double 配列から作成
+ */
+Value value_matrix_from_data(const double *data, int rows, int cols);
+
+/**
+ * 数値行列を raw double 配列から作成（dtype 指定）
+ */
+Value value_matrix_from_data_with_dtype(const double *data, int rows, int cols, NumericDType dtype);
 
 /**
  * ユーザー定義関数を作成
@@ -284,6 +362,59 @@ Value array_pop(Value *array);
 int array_length(Value *array);
 
 // =============================================================================
+// 数値ベクトル操作
+// =============================================================================
+
+/**
+ * 数値ベクトルに要素を追加
+ */
+void numeric_array_push(Value *array, double element);
+
+/**
+ * 数値ベクトルから要素を取得
+ */
+double numeric_array_get(Value *array, int index);
+
+/**
+ * 数値ベクトルの要素を設定
+ */
+bool numeric_array_set(Value *array, int index, double element);
+
+/**
+ * 数値ベクトルの raw buffer を取得
+ */
+void *numeric_array_raw_data(Value *array);
+
+/**
+ * 数値ベクトルの長さを取得
+ */
+int numeric_array_length(Value *array);
+
+// =============================================================================
+// 数値行列操作
+// =============================================================================
+
+/**
+ * 数値行列の要素を取得
+ */
+double matrix_get(Value *matrix, int row, int col);
+
+/**
+ * 数値行列の要素を設定
+ */
+bool matrix_set(Value *matrix, int row, int col, double element);
+
+/**
+ * 数値行列の raw buffer を取得
+ */
+void *matrix_raw_data(Value *matrix);
+
+/**
+ * 数値行列が row-major contiguous か判定
+ */
+bool matrix_is_contiguous(Value *matrix);
+
+// =============================================================================
 // 辞書操作
 // =============================================================================
 
@@ -360,6 +491,21 @@ const char *value_type_name(ValueType type);
  * VALUE_NUMBER は is_integer に応じて「整数」/「数値」を返す。
  */
 const char *value_runtime_type_name(Value v);
+
+/**
+ * 数値 dtype 名を取得
+ */
+const char *numeric_dtype_name(NumericDType dtype);
+
+/**
+ * dtype の論理要素サイズを取得
+ */
+int numeric_dtype_size(NumericDType dtype);
+
+/**
+ * dtype 名を解釈する
+ */
+bool numeric_dtype_from_name(const char *name, NumericDType *out_dtype);
 
 /**
  * 値を文字列に変換

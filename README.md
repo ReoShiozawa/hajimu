@@ -79,7 +79,7 @@ brew install hajimu
 
 ### Windows
 
-[GitHub Releases](https://github.com/ReoShiozawa/hajimu/releases) から `hajimu_setup-1.4.0.exe` をダウンロードして実行してください。インストーラーは `hajimu.exe` と必要な DLL を配置し、PATH に追加します。
+[GitHub Releases](https://github.com/ReoShiozawa/hajimu/releases) から `hajimu_setup-1.5.0.exe` をダウンロードして実行してください。インストーラーは `hajimu.exe` と必要な DLL を配置し、PATH に追加します。
 
 ポータブルに使う場合は、`hajimu-windows-x64.exe`、`libcurl-x64.dll`、`libwinpthread-1.dll` を同じフォルダーに置いてください。
 
@@ -185,6 +185,7 @@ print(to_string(await_task(task, 2)))  // 42
 - [English Reference](docs/REFERENCE_en.md)
 - [英語構文対応ロードマップ](docs/ENGLISH_SYNTAX_ROADMAP.md)
 - [英語 alias 命名・衝突方針](docs/ENGLISH_ALIAS_POLICY.md)
+- [高速標準処理・研究計算基盤 設計書](docs/PERFORMANCE_AND_COMPUTE_DESIGN.md)
 - [プラグイン開発ガイド](docs/外部パッケージ開発ガイド.md)
 - [Plugin Development Guide](docs/PLUGIN_DEVELOPMENT.md)
 - [ロードマップ](docs/ROADMAP.md)
@@ -203,6 +204,7 @@ print(to_string(await_task(task, 2)))  // 42
 | 実行方式 | C 実装の AST インタープリタ |
 | 型システム | 動的型 |
 | 文字列 | UTF-8 対応 |
+| 研究計算 | 数値ベクトル、数値行列、dtype/astype、統計、評価指標、欠損処理、訓練/テスト分割、線形代数、線形/ロジスティック回帰、k-means、任意 BLAS ビルドの初期 API |
 | オブジェクト指向 | class / constructor / self / 継承 |
 | 関数型要素 | ラムダ、高階関数、リスト内包表記 |
 | 制御構文 | if / while / for / foreach / switch / match |
@@ -230,6 +232,8 @@ make release            # 最適化ビルド
 make windows            # win/dist/hajimu.exe を生成
 make windows-installer  # win/dist/hajimu_setup.exe を生成
 make wasm               # jp-edu 連携用 WebAssembly を生成
+./nihongo --profile tests/numeric_vector.jp  # 読込・パース・実行時間を表示
+./nihongo --profile-ast tests/numeric_vector.jp  # ASTノード単位の評価時間を表示
 ```
 
 リリース時の主な検証:

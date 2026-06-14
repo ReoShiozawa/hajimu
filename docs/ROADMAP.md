@@ -91,6 +91,21 @@
 
 ## 🔮 将来構想
 
+### 高速標準処理・研究計算基盤
+
+はじむを研究・数値計算・機械学習の入口として使えるようにするため、標準処理の高速化と typed numeric buffer を段階的に導入します。
+
+詳しい設計は [高速標準処理・研究計算基盤 設計書](PERFORMANCE_AND_COMPUTE_DESIGN.md) を参照してください。
+
+| フェーズ | 状態 | 内容 |
+|---|---|---|
+| benchmark 基盤 | 初期実装済み | `benchmarks/` と `make bench` で速度を継続計測 |
+| `vector` 基盤 | 初期実装済み | `VALUE_NUMERIC_ARRAY` と `vector` / `mean` / `dot` / 評価指標 |
+| `matrix` 基盤 | 初期実装済み | `VALUE_MATRIX` と `matrix` / `shape` / `matmul` / `transpose` / 線形代数 |
+| データ処理 | 初期実装済み | CSV numeric 読み込み、列抽出、要約統計、欠損補助 |
+| 研究パッケージ | 標準関数として初期実装済み | stats / linalg / linear・logistic regression / k-means |
+| optional native acceleration | 一部実装済み | plugin numeric buffer helper、BLAS は今後 |
+
 ### クロスプラットフォームパッケージ配布 (v1.3.0 実装済み)
 
 | 方式 | 状態 | 説明 |

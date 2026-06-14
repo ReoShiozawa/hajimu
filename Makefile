@@ -10,6 +10,14 @@ ifeq ($(UNAME_S),Linux)
     LDFLAGS += -ldl
 endif
 
+ifeq ($(UNAME_S),Darwin)
+    BLAS_CFLAGS = -DHAJIMU_USE_ACCELERATE -DACCELERATE_NEW_LAPACK
+    BLAS_LDFLAGS = -framework Accelerate
+else
+    BLAS_CFLAGS = -DHAJIMU_USE_CBLAS
+    BLAS_LDFLAGS = -lopenblas
+endif
+
 # ディレクトリ
 SRC_DIR = src
 BUILD_DIR = build
@@ -103,10 +111,16 @@ fibonacci: $(TARGET)
 # テスト
 test: $(TARGET)
 	@echo "テスト実行中..."
-	@for file in tests/*.jp; do \
+	@status=0; \
+	for file in tests/*.jp; do \
+		if [ "$$file" = "tests/webhook_test.jp" ]; then \
+			echo "スキップ: $$file (手動HTTPサーバーテスト)"; \
+			continue; \
+		fi; \
 		echo "テスト: $$file"; \
-		./$(TARGET) $$file; \
-	done
+		./$(TARGET) $$file || status=$$?; \
+	done; \
+	exit $$status
 
 # デュアルモード統合テスト（バイトコード含む）
 test-dual: $(TARGET)
@@ -125,6 +139,14 @@ test-dual: $(TARGET)
 	@echo ""
 	@echo "=== 全テスト完了 ==="
 
+# ベンチマーク
+bench: $(TARGET)
+	@echo "ベンチマーク実行中..."
+	@for file in benchmarks/*.jp; do \
+		echo "ベンチ: $$file"; \
+		/usr/bin/time -p ./$(TARGET) $$file; \
+	done
+
 # クリーンアップ
 clean:
 	rm -rf $(BUILD_DIR) $(TARGET)
@@ -138,6 +160,11 @@ debug: clean all
 release: CFLAGS += -O3 -DNDEBUG
 release: clean all
 
+# BLAS/Accelerate を使った行列積高速化ビルド
+linalg-blas: CFLAGS += $(BLAS_CFLAGS)
+linalg-blas: LDFLAGS += $(BLAS_LDFLAGS)
+linalg-blas: clean all
+
 # 再ビルド
 rebuild: clean all
 
@@ -148,9 +175,11 @@ help:
 	@echo "  run               - REPL起動"
 	@echo "  hello             - Hello Worldサンプル実行"
 	@echo "  test              - テスト実行"
+	@echo "  bench             - benchmarks/*.jp を /usr/bin/time 付きで実行"
 	@echo "  clean             - クリーンアップ"
 	@echo "  debug             - デバッグビルド"
 	@echo "  release           - リリースビルド"
+	@echo "  linalg-blas       - BLAS/Accelerate 連携で matmul を高速化してビルド"
 	@echo "  windows           - Windows向けクロスコンパイル (hajimu.exe)"
 	@echo "  windows-installer - Windows インストーラー .exe を生成 (NSIS必要)"
 	@echo "  install           - /usr/local/bin/hajimu にインストール (sudo)"
@@ -263,5 +292,5 @@ uninstall:
 	rm -rf $(INCLUDE_DIR)
 	@echo "アンインストール完了"
 
-.PHONY: all run hello factorial fibonacci test clean debug release rebuild help \
+.PHONY: all run hello factorial fibonacci test test-dual bench clean debug release linalg-blas rebuild help \
         install uninstall windows windows-installer clean-windows wasm clean-wasm

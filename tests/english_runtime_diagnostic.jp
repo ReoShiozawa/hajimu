@@ -1,0 +1,21 @@
+function check(name, actual, expected):
+    if actual == expected then
+        print("✓ " + name)
+    else:
+        print("✗ " + name + ": " + to_string(actual) + " != " + to_string(expected))
+        exit_program(1)
+    end
+end
+
+var caught = false
+
+try:
+    var x = 1 / 0
+catch diag:
+    caught = true
+    check("runtime diagnostic kind", diag["kind"], "runtime")
+    check("runtime diagnostic line positive", diag["line"] > 0, true)
+    check("runtime diagnostic column positive", diag["column"] > 0, true)
+end
+
+check("runtime diagnostic caught", caught, true)

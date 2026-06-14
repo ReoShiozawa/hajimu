@@ -1,0 +1,58 @@
+function check(name, actual, expected):
+    if actual == expected then
+        print("✓ " + name)
+    else:
+        print("✗ " + name + ": " + to_string(actual) + " != " + to_string(expected))
+        exit_program(1)
+    end
+end
+
+var path = "/tmp/hajimu_english_numeric_csv_test.csv"
+write_file(path, "1,2,3\n4,5,6\n")
+
+var data = read_csv_numeric(path)
+check("csv rows", shape(data)[0], 2)
+check("csv cols", shape(data)[1], 3)
+check("csv value", matrix_get(data, 1, 2), 6)
+check("csv column mean", mean(matrix_column(data, 1)), 3.5)
+check("csv describe", describe(data)[1]["mean"], 3.5)
+
+var header_path = "/tmp/hajimu_english_numeric_csv_header_test.csv"
+write_file(header_path, "x,y\n10,20\n30,40\n")
+var header_data = read_csv_numeric(header_path, true)
+check("csv header rows", shape(header_data)[0], 2)
+check("csv header value", matrix_get(header_data, 1, 1), 40)
+
+var tsv_path = "/tmp/hajimu_english_numeric_tsv_test.tsv"
+write_file(tsv_path, "x\ty\n7\t8\n9\t10\n")
+var tsv_data = read_tsv_numeric(tsv_path, true)
+check("tsv rows", shape(tsv_data)[0], 2)
+check("tsv value", matrix_get(tsv_data, 1, 1), 10)
+
+var missing_path = "/tmp/hajimu_english_numeric_csv_missing_test.csv"
+write_file(missing_path, "1,NA\n3,4\n")
+var missing_data = read_csv_numeric(missing_path, false, "nan")
+check("csv missing nan", is_nan(matrix_get(missing_data, 0, 1)), true)
+check("csv fill missing", matrix_get(fill_missing(missing_data, 0), 0, 1), 0)
+check("csv drop missing", shape(drop_missing(missing_data))[0], 1)
+
+var empty_path = "/tmp/hajimu_english_numeric_csv_empty_cell_test.csv"
+write_file(empty_path, "1,,3\n4,5,\n")
+var empty_nan = read_csv_numeric(empty_path, false, "nan")
+check("csv empty middle nan", is_nan(matrix_get(empty_nan, 0, 1)), true)
+check("csv empty trailing nan", is_nan(matrix_get(empty_nan, 1, 2)), true)
+var empty_zero = read_csv_numeric(empty_path, false, "zero")
+check("csv empty middle zero", matrix_get(empty_zero, 0, 1), 0)
+check("csv empty trailing zero", matrix_get(empty_zero, 1, 2), 0)
+
+var text_path = "/tmp/hajimu_english_text_csv_test.csv"
+write_file(text_path, "name,score,note\nA,10,\"x,y\"\nB,20,\"quote \"\"ok\"\"\"\n")
+var rows = read_csv(text_path)
+check("csv text rows", length(rows), 2)
+check("csv text dict", rows[0]["name"], "A")
+check("csv text quoted comma", rows[0]["note"], "x,y")
+check("csv text escaped quote", rows[1]["note"], "quote \"ok\"")
+check("csv text column", csv_column(rows, "score")[1], "20")
+var raw_rows = read_csv(text_path, false)
+check("csv raw keeps header", raw_rows[0][0], "name")
+check("csv raw row", csv_column(raw_rows, 0)[1], "A")

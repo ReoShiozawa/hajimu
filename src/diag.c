@@ -392,6 +392,27 @@ static void diag_build_advice(
         *example = "試行:\\n    処理()\\n捕獲 エラー:\\n    表示(エラー)\\n終わり";
         return;
     }
+    if (contains(message, "ベクトル長が一致") || contains(message, "行列サイズが合いません")) {
+        *cause = "数値ベクトルや行列の形が、演算に必要な条件と合っていません。";
+        *fix = "`shape(値)` や `len(値)` で大きさを確認し、足し算なら同じ長さ、行列積なら左の列数と右の行数をそろえてください。";
+        *example = "matmul(matrix([[1, 2]]), matrix([[3], [4]]))";
+        return;
+    }
+    if (contains(message, "CSV") && contains(message, "列数が一致")) {
+        *cause = "CSVの途中の行だけ列数が違うため、1つの数値行列として読み込めません。";
+        *fix = "該当行のカンマ数、空のセル、ヘッダー指定の有無を確認してください。";
+        return;
+    }
+    if (contains(message, "CSV") && contains(message, "数値として読めません")) {
+        *cause = "数値専用CSV読み込みに、文字列や空でない非数値セルが含まれています。";
+        *fix = "数値に変換できないセルを修正するか、文字列を含むCSVとして別の読み込み方法を使ってください。";
+        return;
+    }
+    if (contains(message, "定義域") || contains(message, "0除算")) {
+        *cause = "数学関数に渡した値が、その計算で扱えない範囲に入っています。";
+        *fix = "割る値が0でないか、平方根や対数に負数や0が入っていないか確認してください。";
+        return;
+    }
 
     switch (kind) {
         case DIAG_SYNTAX:

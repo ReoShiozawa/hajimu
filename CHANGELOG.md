@@ -4,6 +4,40 @@
 
 ## [未リリース]
 
+## [v1.5.0] - 2026-06-13
+
+### ⚡ 高速標準処理・研究計算基盤
+
+- `vector` / `matrix` / typed numeric buffer を標準実装に追加し、`f64` / `f32` / `i64` / `i32` / `bool` の dtype 変換・保存サイズ確認に対応
+- 統計・機械学習向けに `mean` / `variance` / `std` / `quantile` / `median` / `covariance` / `correlation` / `histogram`、MSE / MAE / R2 / accuracy / precision / recall / F1 / confusion matrix を追加
+- 線形代数 API として `matrix` / `shape` / `transpose` / `matmul` / `identity` / `determinant` / `inverse` / `solve_linear` を追加
+- `linear_regression` / `predict_linear` / `logistic_regression` / `predict_logistic` / `predict_logistic_class` / `kmeans` / `knn_predict` を追加
+- `make bench` と `benchmarks/` を追加し、`--profile` / `--profile-ast` で全体時間と AST ノード単位の評価時間を確認できるよう改善
+- macOS Accelerate / CBLAS を使う optional BLAS ビルド `make linalg-blas` を追加
+
+### 📊 データ読み込み
+
+- `read_csv_numeric` / `CSV数値読込` と `read_tsv_numeric` / `TSV数値読込` を追加し、欠損値モード `"error"` / `"nan"` / `"zero"` に対応
+- 数値 CSV / TSV の空セルを欠損値として扱えるよう改善
+- 汎用 `read_csv` / `CSV読込` と `csv_column` / `CSV列` を追加し、ヘッダー付き辞書行・ヘッダーなし配列行に対応
+- `read_json_lines` / `JSON行読込` / `JSONL読込` を追加し、JSON Lines ファイルを行ごとに読み込めるようにした
+
+### 🛡️ HTTP / JSON / 安定性
+
+- 非同期で起動したローカル HTTP サーバー直後の接続競合を避けるため、loopback URL への接続失敗時に短時間リトライするよう改善
+- HTTP サーバーのリクエストボディコピー元、ヘッダー終端検出、レスポンスヘッダー書き出し長を修正し、境界外読み出しを防止
+- HTTP レスポンスバッファ再確保失敗を検出し、エラー辞書として返すよう改善
+- JSON パーサーを厳格化し、閉じ括弧不足、末尾の余分な文字、`[1,]` などを不正 JSON として扱うよう改善
+- `.hjp` 読み込み時のメタデータ長・ソース長の整合性チェックを強化
+- 9件以上の辞書リテラルで AST の paired array が拡張されないメモリ破壊を修正
+- `try` / `試行` 内の実行時エラーを、`message` / `line` / `column` / `file` / `kind` を持つ診断辞書として捕獲できる初期実装を追加
+
+### 📚 ドキュメント・テスト
+
+- `docs/PERFORMANCE_AND_COMPUTE_DESIGN.md` を追加し、研究計算・高速化・BLAS・データ処理・セキュリティ方針を整理
+- 日本語/英語リファレンス、README、ロードマップ、プラグイン開発ガイドに v1.5.0 の機能を反映
+- 数値ベクトル、数値行列、CSV / TSV、JSON Lines、structured diagnostic、英語 alias の回帰テストを追加
+
 ## [v1.4.0] - 2026-06-07
 
 ### 🌐 英語構文 alias

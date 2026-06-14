@@ -4,6 +4,7 @@
 
 Security fixes are handled for the latest released version of Hajimu.
 At the time of writing, that is the latest tag published on GitHub Releases.
+Current release line: v1.5.x.
 
 ## Reporting A Vulnerability
 

@@ -1,0 +1,21 @@
+関数 確認(名前, 実際, 期待):
+    もし 実際 == 期待 なら
+        表示("✓ " + 名前)
+    それ以外
+        表示("✗ " + 名前 + ": " + 文字列化(実際) + " != " + 文字列化(期待))
+        終了(1)
+    終わり
+終わり
+
+変数 捕まえた = 偽
+
+試行:
+    変数 x = 1 / 0
+捕獲 診断:
+    捕まえた = 真
+    確認("runtime diagnostic kind", 診断["種類"], "runtime")
+    確認("runtime diagnostic line positive", 診断["行"] > 0, 真)
+    確認("runtime diagnostic column positive", 診断["列"] > 0, 真)
+終わり
+
+確認("runtime diagnostic caught", 捕まえた, 真)
