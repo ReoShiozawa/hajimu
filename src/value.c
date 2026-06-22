@@ -218,12 +218,15 @@ Value value_string_n(const char *s, int length) {
     v.string.char_length = utf8_count_chars(s, length);
     v.string.capacity = length + 1;
     v.string.data = malloc(v.string.capacity);
-    
+    if (v.string.data == NULL) {
+        return value_null();
+    }
+
     if (s != NULL) {
         memcpy(v.string.data, s, length);
     }
     v.string.data[length] = '\0';
-    
+
     return v;
 }
 
@@ -586,12 +589,14 @@ Value value_copy(Value v) {
     switch (v.type) {
         case VALUE_STRING:
             copy.string.data = malloc(v.string.capacity);
+            if (copy.string.data == NULL) return value_null();
             memcpy(copy.string.data, v.string.data, v.string.byte_length + 1);
             copy.ref_count = 1;
             break;
-            
+
         case VALUE_ARRAY:
             copy.array.elements = malloc(sizeof(Value) * v.array.capacity);
+            if (copy.array.elements == NULL) return value_null();
             for (int i = 0; i < v.array.length; i++) {
                 copy.array.elements[i] = value_copy(v.array.elements[i]);
             }
@@ -676,15 +681,24 @@ Value value_copy(Value v) {
             }
             if (v.class_value.parent != NULL) {
                 copy.class_value.parent = malloc(sizeof(Value));
+                if (copy.class_value.parent == NULL) {
+                    free(copy.class_value.name);
+                    return value_null();
+                }
                 *copy.class_value.parent = value_copy(*v.class_value.parent);
             }
             copy.ref_count = 1;
             break;
-        
+
         case VALUE_INSTANCE:
             // インスタンスはディープコピー
             copy.instance.field_names = malloc(sizeof(char *) * v.instance.field_capacity);
             copy.instance.fields = malloc(sizeof(Value) * v.instance.field_capacity);
+            if (copy.instance.field_names == NULL || copy.instance.fields == NULL) {
+                free(copy.instance.field_names);
+                free(copy.instance.fields);
+                return value_null();
+            }
             for (int i = 0; i < v.instance.field_count; i++) {
                 copy.instance.field_names[i] = strdup(v.instance.field_names[i]);
                 if (copy.instance.field_names[i] == NULL) {
@@ -700,6 +714,15 @@ Value value_copy(Value v) {
             }
             if (v.instance.class_ref != NULL) {
                 copy.instance.class_ref = malloc(sizeof(Value));
+                if (copy.instance.class_ref == NULL) {
+                    for (int i = 0; i < v.instance.field_count; i++) {
+                        free(copy.instance.field_names[i]);
+                        value_free(&copy.instance.fields[i]);
+                    }
+                    free(copy.instance.field_names);
+                    free(copy.instance.fields);
+                    return value_null();
+                }
                 *copy.instance.class_ref = value_copy(*v.instance.class_ref);
             }
             copy.ref_count = 1;
@@ -1668,9 +1691,23 @@ int value_compare(Value a, Value b) {
     if (a.type == VALUE_STRING && b.type == VALUE_STRING) {
         return strcmp(a.string.data, b.string.data);
     }
-    
-    // 比較不可能
-    return 0;
+
+    // 型が異なる場合は型番号順で安定した順序を与える
+    if (a.type != b.type) {
+        return (a.type < b.type) ? -1 : 1;
+    }
+
+    // 同一型の追加対応
+    switch (a.type) {
+        case VALUE_BOOL:
+            // 偽(false) < 真(true)
+            return (int)a.boolean - (int)b.boolean;
+        case VALUE_NULL:
+            return 0;
+        default:
+            // 配列・辞書・関数・インスタンス等は順序未定義（等価扱い）
+            return 0;
+    }
 }
 
 // =============================================================================
