@@ -2871,8 +2871,13 @@ static Value evaluate_for(Evaluator *eval, ASTNode *node) {
             return value_null();
         }
         step = step_val.number;
+        if (step == 0) {
+            runtime_error(eval, node->location.line, node->location.column,
+                         "ステップ値は0にできません（無限ループになります）");
+            return value_null();
+        }
     }
-    
+
     // ループ変数を現在のスコープに定義（コピーを作成）
     env_define(eval->current, node->for_stmt.var_name, value_copy(start), false);
     
@@ -2923,6 +2928,12 @@ static void import_path_set_grow(Evaluator *eval) {
         : old_capacity * 2;
     eval->imported_path_entries = calloc((size_t)eval->imported_path_entry_capacity,
                                          sizeof(ImportedPathEntry));
+    if (eval->imported_path_entries == NULL) {
+        // 確保失敗時は旧テーブルを維持してリハッシュを中止
+        eval->imported_path_entries = old_entries;
+        eval->imported_path_entry_capacity = old_capacity;
+        return;
+    }
     eval->imported_path_entry_count = 0;
 
     for (int i = 0; i < old_capacity; i++) {
@@ -4571,15 +4582,25 @@ static Value builtin_string_repeat(int argc, Value *argv) {
     
     int count = (int)argv[1].number;
     if (count <= 0) return value_string("");
-    
+
     const char *str = argv[0].string.data;
     size_t str_len = strlen(str);
-    size_t total = str_len * count;
-    
+
+    // str_len * count の整数オーバーフローを防止（特に WASM など 32bit size_t 環境）
+    if (str_len != 0 && (size_t)count > (SIZE_MAX - 1) / str_len) {
+        builtin_runtime_error("繰り返し: 結果の文字列が大きすぎます");
+        return value_null();
+    }
+    size_t total = str_len * (size_t)count;
+
     char *buffer = malloc(total + 1);
+    if (buffer == NULL) {
+        builtin_runtime_error("繰り返し: メモリ確保に失敗しました");
+        return value_null();
+    }
     buffer[0] = '\0';
     for (int i = 0; i < count; i++) {
-        memcpy(buffer + i * str_len, str, str_len);
+        memcpy(buffer + (size_t)i * str_len, str, str_len);
     }
     buffer[total] = '\0';
     
@@ -4965,6 +4986,7 @@ static Value builtin_dir_create(int argc, Value *argv) {
     
     // mkdir -p 相当（簡易版）
     char *path = strdup(argv[0].string.data);
+    if (path == NULL) return value_bool(false);
     char *p = path;
     
     while (*p) {
@@ -8005,8 +8027,9 @@ static Value builtin_split(int argc, Value *argv) {
     
     Value result = value_array();
     char *str = strdup(argv[0].string.data);
+    if (str == NULL) return result;
     char *delim = argv[1].string.data;
-    
+
     char *token = strtok(str, delim);
     while (token != NULL) {
         Value s = value_string(token);
@@ -8131,6 +8154,7 @@ static Value builtin_upper(int argc, Value *argv) {
     if (argv[0].type != VALUE_STRING) return value_string("");
     
     char *buffer = strdup(argv[0].string.data);
+    if (buffer == NULL) return value_string("");
     for (char *p = buffer; *p; p++) {
         if (*p >= 'a' && *p <= 'z') *p -= 32;
     }
@@ -8145,6 +8169,7 @@ static Value builtin_lower(int argc, Value *argv) {
     if (argv[0].type != VALUE_STRING) return value_string("");
     
     char *buffer = strdup(argv[0].string.data);
+    if (buffer == NULL) return value_string("");
     for (char *p = buffer; *p; p++) {
         if (*p >= 'A' && *p <= 'Z') *p += 32;
     }
@@ -9203,16 +9228,25 @@ static Value builtin_type_alias(int argc, Value *argv) {
     // 既存のエイリアスを更新
     for (int i = 0; i < g_type_alias_count; i++) {
         if (strcmp(g_type_aliases[i].alias, argv[0].string.data) == 0) {
+            char *new_original = strdup(argv[1].string.data);
+            if (new_original == NULL) return value_bool(false);
             free(g_type_aliases[i].original);
-            g_type_aliases[i].original = strdup(argv[1].string.data);
+            g_type_aliases[i].original = new_original;
             return value_bool(true);
         }
     }
-    
+
     // 新規登録
     if (g_type_alias_count < MAX_TYPE_ALIASES) {
-        g_type_aliases[g_type_alias_count].alias = strdup(argv[0].string.data);
-        g_type_aliases[g_type_alias_count].original = strdup(argv[1].string.data);
+        char *alias = strdup(argv[0].string.data);
+        char *original = strdup(argv[1].string.data);
+        if (alias == NULL || original == NULL) {
+            free(alias);
+            free(original);
+            return value_bool(false);
+        }
+        g_type_aliases[g_type_alias_count].alias = alias;
+        g_type_aliases[g_type_alias_count].original = original;
         g_type_alias_count++;
     }
     return value_bool(true);

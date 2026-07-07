@@ -359,6 +359,10 @@ static void sb_init(StringBuffer *sb) {
     sb->capacity = 128;
     sb->length = 0;
     sb->data = malloc(sb->capacity);
+    if (sb->data == NULL) {
+        sb->capacity = 0;
+        return;
+    }
     sb->data[0] = '\0';
 }
 
