@@ -36,6 +36,7 @@ SOURCES = $(SRC_DIR)/main.c \
           $(SRC_DIR)/tooling.c \
           $(SRC_DIR)/debug_protocol.c \
           $(SRC_DIR)/http.c \
+          $(SRC_DIR)/json.c \
           $(SRC_DIR)/async.c \
           $(SRC_DIR)/sha256.c \
           $(SRC_DIR)/package.c \
@@ -54,6 +55,7 @@ WASM_SOURCES = $(SRC_DIR)/wasm_api.c \
           $(SRC_DIR)/tooling.c \
           $(SRC_DIR)/debug_protocol.c \
           $(SRC_DIR)/http_wasm.c \
+          $(SRC_DIR)/json.c \
           $(SRC_DIR)/async.c \
           $(SRC_DIR)/sha256.c \
           $(SRC_DIR)/package.c \
@@ -93,6 +95,7 @@ $(BUILD_DIR)/gc.o: $(SRC_DIR)/gc.c $(SRC_DIR)/gc.h $(SRC_DIR)/environment.h $(SR
 $(BUILD_DIR)/evaluator.o: $(SRC_DIR)/evaluator.c $(SRC_DIR)/evaluator.h $(SRC_DIR)/ast.h $(SRC_DIR)/environment.h $(SRC_DIR)/http.h $(SRC_DIR)/async.h
 $(BUILD_DIR)/diag.o: $(SRC_DIR)/diag.c $(SRC_DIR)/diag.h $(SRC_DIR)/lexer.h
 $(BUILD_DIR)/http.o: $(SRC_DIR)/http.c $(SRC_DIR)/http.h $(SRC_DIR)/value.h
+$(BUILD_DIR)/json.o: $(SRC_DIR)/json.c $(SRC_DIR)/http.h $(SRC_DIR)/value.h $(SRC_DIR)/array_grow.h
 $(BUILD_DIR)/async.o: $(SRC_DIR)/async.c $(SRC_DIR)/async.h $(SRC_DIR)/evaluator.h $(SRC_DIR)/value.h
 $(BUILD_DIR)/sha256.o: $(SRC_DIR)/sha256.c $(SRC_DIR)/sha256.h
 $(BUILD_DIR)/package.o: $(SRC_DIR)/package.c $(SRC_DIR)/package.h $(SRC_DIR)/sha256.h
@@ -163,13 +166,23 @@ test-package: $(TARGET) test-sha256
 test-tooling: $(TARGET)
 	node tests/tooling.test.cjs
 
-test-conformance: $(TARGET)
+test-conformance: $(TARGET) test-json
 	node tests/conformance/equivalence.test.cjs
 
-test-abi: $(TARGET)
+.PHONY: test-json
+test-json: $(TARGET)
+	node tests/json.test.cjs
+
+test-abi: $(TARGET) test-registry
 	node tests/plugin_abi.test.cjs
 
-.PHONY: test-utf8 fuzz-smoke
+.PHONY: test-utf8 fuzz-smoke test-registry test-distribution
+
+test-distribution:
+	node tests/distribution.test.cjs
+
+test-registry: $(TARGET)
+	node tests/registry_signature.test.cjs
 
 test: test-utf8
 
@@ -188,7 +201,7 @@ embed: $(BUILD_DIR)
 	$(CC) $(CFLAGS) -fPIC -shared $(filter-out $(SRC_DIR)/main.c,$(SOURCES)) $(SRC_DIR)/embed.c -o $(BUILD_DIR)/libhajimu$(if $(filter Darwin,$(UNAME_S)),.dylib,.so) $(LDFLAGS)
 
 test-embed: embed
-	$(CC) -Iinclude tests/test_embed.c -L$(BUILD_DIR) -lhajimu -Wl,-rpath,$(CURDIR)/$(BUILD_DIR) -o $(BUILD_DIR)/test-embed
+	$(CC) -Iinclude tests/test_embed.c -L$(BUILD_DIR) -lhajimu -lpthread -Wl,-rpath,$(CURDIR)/$(BUILD_DIR) -o $(BUILD_DIR)/test-embed
 	$(BUILD_DIR)/test-embed
 
 # ベンチマーク
@@ -267,14 +280,15 @@ $(WIN_BUILD):
 $(WIN_DIST):
 	mkdir -p $(WIN_DIST)
 
-$(WIN_TARGET): $(WIN_OBJECTS)
+$(WIN_TARGET): $(WIN_OBJECTS) | $(WIN_DIST)
 	$(WIN_CC) $(WIN_OBJECTS) -o $@ $(WIN_LDFLAGS) -static-libgcc -static-libstdc++
 	@echo "リンク完了: $@"
 
-$(WIN_BUILD)/%.o: $(SRC_DIR)/%.c
+$(WIN_BUILD)/%.o: $(SRC_DIR)/%.c win/setup_curl.sh $(wildcard src/*.h include/*.h) | $(WIN_BUILD) win/curl-win64
 	$(WIN_CC) $(WIN_CFLAGS) -c $< -o $@
 
 # curl for Windows を自動取得
+.PHONY: win/curl-win64
 win/curl-win64:
 	@echo "curl for Windows をダウンロード中..."
 	bash win/setup_curl.sh

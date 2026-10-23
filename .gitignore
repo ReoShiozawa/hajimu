@@ -7,6 +7,9 @@ nihongo_asan.dSYM/
 dist/
 win/build/
 win/curl-win64/
+win/.curl-setup.*/
+win/.curl-backup.*/
+win/dist/licenses/
 win/dist/hajimu-*.exe
 win/dist/hajimu_setup-*.exe
 

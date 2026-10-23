@@ -18,7 +18,15 @@ concurrency:
 jobs:
   # ── macOS ネイティブビルド ─────────────────────────────────
   build-macos:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            suffix: macos-arm64
+          - os: macos-15-intel
+            suffix: macos-x64
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
       id-token: write
@@ -44,30 +52,32 @@ jobs:
 
       - name: バイナリをリネーム
         run: |
-          cp nihongo nihongo-macos
-          shasum -a 256 nihongo-macos > nihongo-macos.sha256
+          cp nihongo nihongo-${{ matrix.suffix }}
+          shasum -a 256 nihongo-${{ matrix.suffix }} > nihongo-${{ matrix.suffix }}.sha256
+          if [ '${{ matrix.suffix }}' = macos-arm64 ]; then
+            cp nihongo nihongo-macos
+            shasum -a 256 nihongo-macos > nihongo-macos.sha256
+          fi
 
       - name: CI アーティファクト保存
         uses: actions/upload-artifact@v4
         with:
-          name: nihongo-macos
+          name: nihongo-${{ matrix.suffix }}
           path: |
-            nihongo-macos
-            nihongo-macos.sha256
+            nihongo-macos*
       - name: Sign build provenance and SBOM
         if: github.event_name != 'pull_request'
         uses: ./.github/actions/release-integrity
         with:
-          subject-path: nihongo-macos
-          artifact-name: sbom-build-macos
+          subject-path: nihongo-macos*
+          artifact-name: sbom-build-${{ matrix.suffix }}
 
       - name: Releases にアップロード
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            nihongo-macos
-            nihongo-macos.sha256
+            nihongo-macos*
 
   # ── Linux ネイティブビルド ────────────────────────────────
   build-linux:
@@ -138,7 +148,9 @@ jobs:
             gcc-mingw-w64-x86-64 \
             nsis \
             curl \
-            xz-utils
+            xz-utils \
+            unzip \
+            zip
 
       - name: curl for Windows のセットアップ
         run: bash win/setup_curl.sh
@@ -156,8 +168,10 @@ jobs:
 
       - name: チェックサム生成
         run: |
+          (cd win/dist && zip -q -r hajimu-windows-x64.zip hajimu.exe *.dll licenses)
           sha256sum win/dist/hajimu.exe > win/dist/hajimu.exe.sha256
           sha256sum win/dist/hajimu_setup.exe > win/dist/hajimu_setup.exe.sha256
+          sha256sum win/dist/hajimu-windows-x64.zip > win/dist/hajimu-windows-x64.zip.sha256
 
       - name: CI アーティファクト保存
         uses: actions/upload-artifact@v4
@@ -168,11 +182,15 @@ jobs:
             win/dist/hajimu.exe
             win/dist/hajimu_setup.exe.sha256
             win/dist/hajimu.exe.sha256
+            win/dist/hajimu-windows-x64.zip
+            win/dist/hajimu-windows-x64.zip.sha256
       - name: Sign build provenance and SBOM
         if: github.event_name != 'pull_request'
         uses: ./.github/actions/release-integrity
         with:
-          subject-path: win/dist/*.exe
+          subject-path: |
+            win/dist/*.exe
+            win/dist/*.zip
           artifact-name: sbom-build-windows-installer
 
       - name: Releases にアップロード
@@ -184,3 +202,33 @@ jobs:
             win/dist/hajimu.exe
             win/dist/hajimu_setup.exe.sha256
             win/dist/hajimu.exe.sha256
+            win/dist/hajimu-windows-x64.zip
+            win/dist/hajimu-windows-x64.zip.sha256
+
+  install-manifests:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-macos, build-linux, build-windows-installer]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+      - name: 実成果物からインストール定義を生成
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/generate-install-manifests.cjs "${RELEASE_TAG#v}" release-artifacts install-manifests
+      - uses: ./.github/actions/release-integrity
+        with:
+          subject-path: install-manifests/*
+          artifact-name: sbom-install-manifests
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: install-manifests/*

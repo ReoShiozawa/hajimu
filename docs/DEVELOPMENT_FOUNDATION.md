@@ -22,7 +22,7 @@ VS Code拡張は`hajimu.languageServer.enabled`を既定で有効にし、旧独
 
 descriptorのない旧プラグインは既定で拒否します。移行時のみ、信頼しているプラグインに限って`HAJIMU_ALLOW_LEGACY_ABI=1`を指定できます。この指定は互換性の証明にはなりません。公式パッケージは同時に再ビルドしてください。
 
-埋め込みホストは`include/hajimu_embed.h`の文字列ベースAPIを使用できます。`make embed`で共有ライブラリを構築し、`hajimu_embed_analyze`／`hajimu_embed_run`が返すJSONを`hajimu_embed_free`で解放します。実行はプロセス内で直列化され、同時実行要求はNULLを返します。実行するソースはホストと同じ権限を持ち、サンドボックスではありません。
+埋め込みホストは`include/hajimu_embed.h`の文字列ベースAPIを使用できます。`make embed`で共有ライブラリを構築し、`hajimu_embed_analyze`／`hajimu_embed_run`が返すJSONを`hajimu_embed_free`で解放します。解析と実行はプロセス内で共通の排他制御を使い、別の呼び出しが使用中ならNULLを返します。実行するソースはホストと同じ権限を持ち、サンドボックスではありません。
 
 ## 署名と由来証明
 
@@ -37,8 +37,14 @@ gh attestation verify ./artifact -R ReoShiozawa/hajimu
 gh attestation verify ./artifact -R ReoShiozawa/hajimu --predicate-type https://spdx.dev/Document/v2.3
 ```
 
-GitHub来歴証明はOSのコード署名とは別です。Developer ID、notarization、Authenticodeに必要な証明書はこの環境にありません。これらのOS署名済み成果物はまだ発行していません。Windows ARM64配布とパッケージマネージャー公式カタログへの登録も運用上の残項目です。`scripts/generate-install-manifests.cjs`は実ビルドのSHA-256からHomebrew/Scoop/Winget用ファイルを生成し、架空のハッシュを埋めません。
+GitHub来歴証明はOSのコード署名とは別です。Developer ID、notarization、Authenticodeに必要な証明書はこの環境にありません。これらのOS署名済み成果物はまだ発行していません。Windows ARM64配布とパッケージマネージャー公式カタログへの登録も運用上の残項目です。macOSはx64/ARM64を別名で配布し、互換用の`nihongo-macos`はARM64です。Windowsにはインストーラーと、DLL・ライセンスを含むポータブルZIPを生成します。
+
+`scripts/generate-install-manifests.cjs`は実ビルドのSHA-256からHomebrew/Scoop/Winget用ファイルを生成し、架空のハッシュを埋めません。タグの配布CIは全OSビルドの成功後に定義を生成・署名してリリースへ添付します。Scoopは管理者権限を要求するインストーラーではなくポータブルZIPを使用します。公式カタログでの受理や実インストール試験は、この生成処理とは別の受け入れ項目です。
+
+Windows用curlの取得は8.23.0_5の公式ZIPとSHA-256を固定し、HTTPS限定・タイムアウト付きで行います。ハッシュ検証前に展開しません。旧ローカル環境は削除せず`win/.curl-backup.*`へ退避します。`HAJIMU_CURL_ARCHIVE`で指定するオフライン配布物も同じ固定ハッシュで検証します。
 
 ## 試験
+
+JSONの解析・生成は`src/json.c`をネイティブ版とWASM版で共有します。深くネストした入力や値によるスタック枯渇を防ぐため、配列・辞書のネストは64段までです。上限を超える解析は失敗し、生成は`無`を返します。`make test-json`で通常入力・不正入力・深さ上限を検査し、`HAJIMU_WASM_JS=/path/to/hajimu_wasm.js node tests/json.test.cjs`で実際のWASMとネイティブの結果を照合します。HTTP通信のWASM側ブラウザ連携制限は、このJSON共有とは別です。
 
 `make test`、`make test-package`、`make test-conformance`、`make test-tooling`、`make test-abi`、`make test-utf8`、`make test-embed`を使用します。Linux CIではASan/UBSanとlibFuzzer、macOS/Linuxのx64/ARM64で開発基盤試験を実行します。ファズテストで見つかった途切れたUTF-8の境界外読み取りを修正し、不正な開始バイト・継続バイト・過長表現・サロゲート・Unicode範囲外も回帰試験します。失敗時のファズ入力はCIアーティファクトに保存します。ローカルでのコンパイル成功、ホスティング側CI成功、Windows実機起動は区別して記録します。

@@ -28,6 +28,8 @@ for candidate in \
 done
 
 mkdir -p "$DIST_DIR"
+mkdir -p "$DIST_DIR/licenses"
+cp -R "$CURL_DIR/licenses/." "$DIST_DIR/licenses/"
 
 copy_dll() {
     local name="$1"

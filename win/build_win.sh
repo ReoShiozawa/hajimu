@@ -73,6 +73,7 @@ SOURCES=(
     src/debug_protocol.c
     src/sha256.c
     src/http.c
+    src/json.c
     src/async.c
     src/bytecode.c
     src/package.c

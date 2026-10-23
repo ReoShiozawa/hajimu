@@ -15,9 +15,9 @@ function artifact(name) {
   if(!file) throw new Error(`missing artifact ${name}`);
   return {url:`https://github.com/ReoShiozawa/hajimu/releases/download/v${version}/${name}`,sha256:crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')};
 }
-const installer=artifact('hajimu_setup.exe'),macArm=artifact('nihongo-macos-arm64'),macX64=artifact('nihongo-macos-x64'),linux=artifact('nihongo-linux-x64');
+const installer=artifact('hajimu_setup.exe'),portable=artifact('hajimu-windows-x64.zip'),macArm=artifact('nihongo-macos-arm64'),macX64=artifact('nihongo-macos-x64'),linux=artifact('nihongo-linux-x64');
 fs.mkdirSync(output,{recursive:true});
-fs.writeFileSync(path.join(output,'hajimu.json'),JSON.stringify({version,description:'Hajimu programming language',homepage:'https://hajimu.jp',license:'MIT',architecture:{'64bit':{url:installer.url,hash:installer.sha256}},installer:{script:'Start-Process -Wait -FilePath "$dir\\hajimu_setup.exe" -ArgumentList "/S", "/D=$dir\\app"'},bin:'app\\hajimu.exe'},null,2)+'\n');
+fs.writeFileSync(path.join(output,'hajimu.json'),JSON.stringify({version,description:'Hajimu programming language',homepage:'https://hajimu.jp',license:'MIT',architecture:{'64bit':{url:portable.url,hash:portable.sha256}},bin:'hajimu.exe'},null,2)+'\n');
 const winget={PackageIdentifier:'HajimuProject.Hajimu',PackageVersion:version,InstallerType:'nullsoft',Installers:[{Architecture:'x64',InstallerUrl:installer.url,InstallerSha256:installer.sha256.toUpperCase()}],ManifestType:'installer',ManifestVersion:'1.6.0'};
 fs.writeFileSync(path.join(output,'HajimuProject.Hajimu.installer.yaml'),JSON.stringify(winget,null,2)+'\n');
 fs.writeFileSync(path.join(output,'HajimuProject.Hajimu.yaml'),JSON.stringify({PackageIdentifier:'HajimuProject.Hajimu',PackageVersion:version,DefaultLocale:'en-US',ManifestType:'version',ManifestVersion:'1.6.0'},null,2)+'\n');

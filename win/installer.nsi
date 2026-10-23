@@ -70,6 +70,10 @@ Section "はじむ言語 (必須)" SecMain
     File /nonfatal "win\dist\libcurl-x64.dll"
     File /nonfatal "win\dist\libwinpthread-1.dll"
 
+    SetOutPath "$INSTDIR\licenses"
+    File /r "win\dist\licenses\*"
+    SetOutPath "$INSTDIR"
+
 
     ; ── レジストリ: インストールパスを保存 ──────────────────
     WriteRegStr ${REG_ROOT} "${REG_APP_PATH}" "InstallDir" "$INSTDIR"
@@ -117,6 +121,7 @@ Section "Uninstall"
     Delete "$INSTDIR\libcurl-x64.dll"
     Delete "$INSTDIR\libwinpthread-1.dll"
     Delete "$INSTDIR\${UNINSTALLER}"
+    RMDir /r "$INSTDIR\licenses"
     RMDir  "$INSTDIR"
 
     ; ── スタートメニューの削除 ───────────────────────────────

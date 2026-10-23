@@ -8,18 +8,21 @@
 #include <stdlib.h>
 #include <string.h>
 
+// 解析と実行はGCなどのプロセス共通状態を共有するため、同じ排他で守る。
+static atomic_flag runtime_busy=ATOMIC_FLAG_INIT;
+
 unsigned int hajimu_embed_abi_version(void) { return HAJIMU_EMBED_ABI_VERSION; }
 char *hajimu_embed_analyze(const char *source, const char *filename) {
-    if (!source) return NULL;
+    if (!source || atomic_flag_test_and_set(&runtime_busy)) return NULL;
     Value analysis=hajimu_analyze_source(source, filename ? filename : "<embed>");
     Value json=json_encode(analysis);
     char *result=json.type==VALUE_STRING ? strdup(json.string.data) : NULL;
     value_free(&json); value_free(&analysis);
+    atomic_flag_clear(&runtime_busy);
     return result;
 }
 void hajimu_embed_free(char *result) { free(result); }
 
-static atomic_flag runtime_busy=ATOMIC_FLAG_INIT;
 static void capture_runtime(DiagKind kind,int line,int column,int end,const char *message,void *context) {
     (void)end;
     Value item=value_dict();

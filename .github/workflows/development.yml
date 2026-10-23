@@ -21,7 +21,7 @@ jobs:
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
       - run: make -j4
-      - run: make test-conformance test-tooling test-abi test-utf8 embed
+      - run: make test-conformance test-tooling test-abi test-utf8 test-embed test-distribution
       - run: bash tests/test_package_manager.sh
       - run: openssl dgst -sha256 -verify registry/public-key.pem -signature registry/index.json.sig registry/index.json
   sanitizer:
@@ -45,3 +45,15 @@ jobs:
             timeout-*
             oom-*
           if-no-files-found: ignore
+  wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: sudo apt-get update && sudo apt-get install -y emscripten libcurl4-openssl-dev
+      - run: make -j4
+      - run: make wasm WASM_OUT_DIR=build/wasm
+      - run: HAJIMU_WASM_JS="$PWD/build/wasm/hajimu_wasm.js" node tests/json.test.cjs
