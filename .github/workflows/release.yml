@@ -1,14 +1,28 @@
 name: Release
 
-# [暫定措置] CI 自動ビルドを無効化 — ローカルビルド + gh release 方式に移行
-# 元のトリガー: push(main + tags), pull_request(main), workflow_dispatch
 on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   # ── macOS ネイティブビルド ─────────────────────────────────
   build-macos:
     runs-on: macos-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
@@ -21,24 +35,47 @@ jobs:
       - name: ビルド
         run: make
 
+      - name: テスト
+        run: |-
+          make test
+          make test-package
+
+          make test-tooling test-conformance test-abi
+
       - name: バイナリをリネーム
-        run: cp nihongo nihongo-macos
+        run: |
+          cp nihongo nihongo-macos
+          shasum -a 256 nihongo-macos > nihongo-macos.sha256
 
       - name: CI アーティファクト保存
         uses: actions/upload-artifact@v4
         with:
           name: nihongo-macos
-          path: nihongo-macos
+          path: |
+            nihongo-macos
+            nihongo-macos.sha256
+      - name: Sign build provenance and SBOM
+        if: github.event_name != 'pull_request'
+        uses: ./.github/actions/release-integrity
+        with:
+          subject-path: nihongo-macos
+          artifact-name: sbom-build-macos
 
       - name: Releases にアップロード
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: nihongo-macos
+          files: |
+            nihongo-macos
+            nihongo-macos.sha256
 
   # ── Linux ネイティブビルド ────────────────────────────────
   build-linux:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
@@ -50,24 +87,47 @@ jobs:
       - name: ビルド
         run: make
 
+      - name: テスト
+        run: |-
+          make test
+          make test-package
+
+          make test-tooling test-conformance test-abi
+
       - name: バイナリをリネーム
-        run: cp nihongo nihongo-linux-x64
+        run: |
+          cp nihongo nihongo-linux-x64
+          sha256sum nihongo-linux-x64 > nihongo-linux-x64.sha256
 
       - name: CI アーティファクト保存
         uses: actions/upload-artifact@v4
         with:
           name: nihongo-linux-x64
-          path: nihongo-linux-x64
+          path: |
+            nihongo-linux-x64
+            nihongo-linux-x64.sha256
+      - name: Sign build provenance and SBOM
+        if: github.event_name != 'pull_request'
+        uses: ./.github/actions/release-integrity
+        with:
+          subject-path: nihongo-linux-x64
+          artifact-name: sbom-build-linux
 
       - name: Releases にアップロード
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: nihongo-linux-x64
+          files: |
+            nihongo-linux-x64
+            nihongo-linux-x64.sha256
 
   # ── Windows インストーラー (mingw-w64 クロスコンパイル + NSIS) ─
   build-windows-installer:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
@@ -94,6 +154,11 @@ jobs:
           makensis -NOCD win/installer.nsi
           ls -lh win/dist/hajimu_setup.exe
 
+      - name: チェックサム生成
+        run: |
+          sha256sum win/dist/hajimu.exe > win/dist/hajimu.exe.sha256
+          sha256sum win/dist/hajimu_setup.exe > win/dist/hajimu_setup.exe.sha256
+
       - name: CI アーティファクト保存
         uses: actions/upload-artifact@v4
         with:
@@ -101,6 +166,14 @@ jobs:
           path: |
             win/dist/hajimu_setup.exe
             win/dist/hajimu.exe
+            win/dist/hajimu_setup.exe.sha256
+            win/dist/hajimu.exe.sha256
+      - name: Sign build provenance and SBOM
+        if: github.event_name != 'pull_request'
+        uses: ./.github/actions/release-integrity
+        with:
+          subject-path: win/dist/*.exe
+          artifact-name: sbom-build-windows-installer
 
       - name: Releases にアップロード
         uses: softprops/action-gh-release@v2
@@ -109,4 +182,5 @@ jobs:
           files: |
             win/dist/hajimu_setup.exe
             win/dist/hajimu.exe
-
+            win/dist/hajimu_setup.exe.sha256
+            win/dist/hajimu.exe.sha256

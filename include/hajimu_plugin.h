@@ -495,6 +495,8 @@ typedef struct {
     Value (*call)(Value *func, int argc, Value *argv);
 } HajimuRuntime;
 
+#include "hajimu_abi.h"
+
 /** グローバルランタイムポインタ（インタプリタが自動設定） */
 static HajimuRuntime *__hajimu_runtime = NULL;
 

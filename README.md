@@ -188,6 +188,10 @@ print(to_string(await_task(task, 2)))  // 42
 - [高速標準処理・研究計算基盤 設計書](docs/PERFORMANCE_AND_COMPUTE_DESIGN.md)
 - [プラグイン開発ガイド](docs/外部パッケージ開発ガイド.md)
 - [Plugin Development Guide](docs/PLUGIN_DEVELOPMENT.md)
+- [パッケージ管理 v2](docs/PACKAGE_MANAGEMENT_V2.md)
+- [P0対応報告](docs/P0_REMEDIATION_REPORT.md)
+- [言語仕様](docs/LANGUAGE_SPECIFICATION.md)
+- [開発基盤・配布の運用](docs/DEVELOPMENT_FOUNDATION.md)
 - [ロードマップ](docs/ROADMAP.md)
 - [CHANGELOG](CHANGELOG.md)
 

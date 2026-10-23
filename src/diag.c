@@ -9,6 +9,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+
+static _Thread_local HajimuDiagnosticSink diagnostic_sink;
+static _Thread_local void *diagnostic_context;
+
+void diag_set_sink(HajimuDiagnosticSink sink, void *context) {
+    diagnostic_sink = sink;
+    diagnostic_context = context;
+}
 #ifdef _WIN32
 #  include <io.h>      /* _isatty, _fileno */
 #  define isatty _isatty
@@ -478,6 +486,10 @@ void diag_report(
     int  col_end,
     const char *message
 ) {
+    if (diagnostic_sink) {
+        diagnostic_sink(kind, line, col, col_end, message, diagnostic_context);
+        return;
+    }
     const char *label = diag_kind_label(kind);
     const char *color = (kind == DIAG_SYNTAX) ? C_RED : C_RED;
     (void)color;

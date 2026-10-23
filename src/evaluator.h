@@ -72,6 +72,8 @@ typedef struct {
     bool debug_mode;            // デバッグモード
     bool step_mode;             // ステップ実行モード
     int last_line;              // 最後に実行した行
+    void (*debug_hook)(void *context, void *evaluator, ASTNode *node);
+    void *debug_context;
     
     // エラー情報
     bool had_error;
@@ -86,6 +88,8 @@ typedef struct {
     struct {
         const char *func_name;
         int line;
+        Environment *environment;
+        const char *file;
     } call_stack[128];
     int call_stack_depth;
 
@@ -187,6 +191,7 @@ Value evaluate(Evaluator *eval, ASTNode *node);
  * @param eval 評価器
  */
 void register_builtins(Evaluator *eval);
+Value evaluator_builtin_names(void);
 
 // =============================================================================
 // エラー処理

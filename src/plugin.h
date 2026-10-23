@@ -18,6 +18,7 @@
 
 #include "value.h"
 #include <stdbool.h>
+#include "../include/hajimu_abi.h"
 
 // 前方宣言（hajimu_plugin.h で定義）
 typedef struct {

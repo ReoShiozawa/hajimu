@@ -1324,8 +1324,19 @@ void register_builtins(Evaluator *eval) {
         env_define(eval->global, "system", value_copy(sys), true);
     }
 
-    // 非同期ランタイムの初期化
+    // ブラウザ版は外側のWorkerで実行を分離する。起動時にpthreadプールを作ると、
+    // 実行終了時のWorker回収が停止するため、非同期APIを実際に使うまで初期化しない。
+#ifndef HAJIMU_WASM
     async_runtime_init();
+#endif
+}
+
+Value evaluator_builtin_names(void) {
+    Value names=value_array();
+    for(size_t i=0;i<sizeof(builtin_entries)/sizeof(builtin_entries[0]);i++) {
+        array_push(&names,value_string(builtin_entries[i].name));
+    }
+    return names;
 }
 
 // =============================================================================
@@ -1615,6 +1626,8 @@ void evaluator_set_debug_mode(Evaluator *eval, bool enabled) {
 
 // デバッグ: 行トレース
 static void debug_trace(Evaluator *eval, ASTNode *node) {
+    if (eval->debug_hook) eval->debug_hook(eval->debug_context, eval, node);
+    if (eval->had_error) return;
     if (!eval->debug_mode) return;
     if (node == NULL) return;
     
@@ -2349,6 +2362,8 @@ static Value evaluate_call(Evaluator *eval, ASTNode *node) {
             if (eval->call_stack_depth < 128) {
                 eval->call_stack[eval->call_stack_depth].func_name = func_name;
                 eval->call_stack[eval->call_stack_depth].line = node->location.line;
+                eval->call_stack[eval->call_stack_depth].environment = prev;
+                eval->call_stack[eval->call_stack_depth].file = eval->current_file;
                 eval->call_stack_depth++;
             }
             

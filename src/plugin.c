@@ -362,6 +362,29 @@ bool plugin_load(PluginManager *mgr, const char *path, HajimuPluginInfo **info_o
         return false;
     }
     
+    /* 初期化より前に公開構造体の互換性を検査する。 */
+    HajimuPluginAbiFn abi_fn = (HajimuPluginAbiFn)platform_dlsym(handle, "hajimu_plugin_abi");
+    if (abi_fn) {
+        const HajimuAbiInfo *abi = abi_fn();
+        if (!abi || abi->struct_size < sizeof(HajimuAbiInfo) ||
+            abi->abi_version != HAJIMU_ABI_VERSION || abi->value_size != sizeof(Value) ||
+            abi->plugin_info_size != sizeof(HajimuPluginInfo) ||
+            abi->runtime_size != sizeof(HajimuRuntime) ||
+            abi->string_length_offset != offsetof(Value, string.byte_length) ||
+            (abi->required_features & ~HAJIMU_ABI_FEATURE_NUMERIC_BUFFERS)) {
+            fprintf(stderr, "エラー: プラグインABIが互換ではありません。再ビルドしてください: %s\n", path);
+            platform_dlclose(handle);
+            return false;
+        }
+    } else {
+        const char *legacy = getenv("HAJIMU_ALLOW_LEGACY_ABI");
+        if (!legacy || strcmp(legacy, "1") != 0) {
+            fprintf(stderr, "エラー: ABI情報のないプラグインです。最新版ヘッダーで再ビルドしてください: %s\n", path);
+            platform_dlclose(handle);
+            return false;
+        }
+    }
+
     // 初期化関数を検索
 #ifndef _WIN32
     dlerror(); // エラーをクリア（POSIX専用）
@@ -389,11 +412,26 @@ bool plugin_load(PluginManager *mgr, const char *path, HajimuPluginInfo **info_o
         platform_dlclose(handle);
         return false;
     }
+    if (info->function_count < 0 || info->function_count > 65536 ||
+        (info->function_count && !info->functions)) {
+        platform_dlclose(handle);
+        return false;
+    }
+    for (int i=0;i<info->function_count;i++) {
+        HajimuPluginFunc *fn=&info->functions[i];
+        if (!fn->name || !fn->fn || fn->min_args<0 || (fn->max_args!=-1 && fn->max_args<fn->min_args)) {
+            platform_dlclose(handle);
+            return false;
+        }
+    }
     
     // 配列を拡張
     if (mgr->count >= mgr->capacity) {
-        mgr->capacity = mgr->capacity == 0 ? 4 : mgr->capacity * 2;
-        mgr->plugins = realloc(mgr->plugins, mgr->capacity * sizeof(LoadedPlugin));
+        int capacity = mgr->capacity == 0 ? 4 : mgr->capacity * 2;
+        LoadedPlugin *grown = realloc(mgr->plugins, capacity * sizeof(LoadedPlugin));
+        if (!grown) { platform_dlclose(handle); return false; }
+        mgr->capacity = capacity;
+        mgr->plugins = grown;
     }
     
     // プラグインを登録

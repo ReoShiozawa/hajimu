@@ -69,6 +69,9 @@ SOURCES=(
     src/gc.c
     src/evaluator.c
     src/diag.c
+    src/tooling.c
+    src/debug_protocol.c
+    src/sha256.c
     src/http.c
     src/async.c
     src/bytecode.c

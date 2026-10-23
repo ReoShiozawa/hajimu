@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$ROOT"
+
+for remote in $(git remote 2>/dev/null); do
+  url=$(git remote get-url "$remote" 2>/dev/null || true)
+  case "$url" in
+    https://*@*)
+      echo "コミットを中止しました: Git remote URLに認証情報が含まれています。" >&2
+      exit 1
+      ;;
+  esac
+done
+
+pattern='gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN ([A-Z ]+ )?PRIVATE KEY-----'
+git diff --cached --name-only --diff-filter=ACMR | while IFS= read -r path; do
+  if git show ":$path" 2>/dev/null | LC_ALL=C grep -En "$pattern" >/dev/null 2>&1; then
+    echo "コミットを中止しました: $path に秘密情報らしい文字列があります。" >&2
+    exit 1
+  fi
+done

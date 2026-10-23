@@ -1,0 +1,29 @@
+name: Release Integrity
+description: Generate an SPDX SBOM and attest build provenance and SBOM with GitHub OIDC
+inputs:
+  subject-path:
+    description: Files produced by the current build
+    required: true
+  artifact-name:
+    description: Unique SBOM artifact name
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: anchore/sbom-action@v0
+      with:
+        path: .
+        format: spdx-json
+        output-file: release-sbom.spdx.json
+        upload-artifact: false
+    - uses: actions/attest@v4
+      with:
+        subject-path: ${{ inputs.subject-path }}
+    - uses: actions/attest@v4
+      with:
+        subject-path: ${{ inputs.subject-path }}
+        sbom-path: release-sbom.spdx.json
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: release-sbom.spdx.json

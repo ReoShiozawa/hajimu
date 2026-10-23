@@ -44,6 +44,11 @@ typedef enum {
  */
 const char *diag_kind_label(DiagKind kind);
 
+typedef void (*HajimuDiagnosticSink)(DiagKind kind, int line, int column,
+                                    int end_column, const char *message, void *context);
+/* 呼出元スレッドだけに適用する。解析APIから標準エラーへ出力しないために使う。 */
+void diag_set_sink(HajimuDiagnosticSink sink, void *context);
+
 /**
  * エラーメッセージをソース位置情報付きで stderr に出力する。
  *

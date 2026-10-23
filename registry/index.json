@@ -1,0 +1,66 @@
+{
+  "$schema": "../schemas/hajimu-registry.schema.json",
+  "schema_version": 1,
+  "packages": {
+    "jp_cel": {
+      "version": "0.2.0",
+      "source": "ReoShiozawa/hajimu_cel",
+      "description": "xlsx、CSV、セル、範囲を扱う表計算パッケージ"
+    },
+    "engine_2d": {
+      "version": "1.2.0",
+      "source": "ReoShiozawa/hajimu_engine_2d",
+      "description": "2D物理・タイルマップエンジン"
+    },
+    "engine_3d": {
+      "version": "2.0.0",
+      "source": "ReoShiozawa/hajimu_engine_3d",
+      "description": "OpenGLベースの3Dエンジン"
+    },
+    "engine_audio": {
+      "version": "1.3.0",
+      "source": "ReoShiozawa/hajimu_engine_audio",
+      "description": "BGM・効果音向けオーディオエンジン"
+    },
+    "engine_core": {
+      "version": "1.1.0",
+      "source": "ReoShiozawa/hajimu_engine_core",
+      "description": "ECS、RenderGraph、VFS、入力、タスク実行基盤"
+    },
+    "engine_physics": {
+      "version": "1.0.0",
+      "source": "ReoShiozawa/hajimu_engine_physics",
+      "description": "剛体、コライダー、ジョイントを扱う物理エンジン"
+    },
+    "engine_render": {
+      "version": "1.4.0",
+      "source": "ReoShiozawa/hajimu_engine_render",
+      "description": "SDL2とOpenGLによる2D描画エンジン"
+    },
+    "engine_rpg": {
+      "version": "1.3.0",
+      "source": "ReoShiozawa/hajimu_engine_rpg",
+      "description": "バトル、データベース、会話、セーブ機能"
+    },
+    "engine_ui": {
+      "version": "1.2.0",
+      "source": "ReoShiozawa/hajimu_engine_ui",
+      "description": "ゲーム内UIシステム"
+    },
+    "hajimu_gui": {
+      "version": "14.5.0",
+      "source": "ReoShiozawa/hajimu_gui",
+      "description": "はじむ向けデスクトップGUIパッケージ"
+    },
+    "hajimu_web": {
+      "version": "5.4.1",
+      "source": "ReoShiozawa/hajimu_web",
+      "description": "HTTPサーバー、ルーティング、セッション、テンプレート"
+    },
+    "hajimu_discord": {
+      "version": "2.3.1",
+      "source": "ReoShiozawa/hajimu_discord",
+      "description": "Discord Gateway・REST APIプラグイン"
+    }
+  }
+}

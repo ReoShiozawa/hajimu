@@ -33,8 +33,11 @@ SOURCES = $(SRC_DIR)/main.c \
           $(SRC_DIR)/gc.c \
           $(SRC_DIR)/evaluator.c \
           $(SRC_DIR)/diag.c \
+          $(SRC_DIR)/tooling.c \
+          $(SRC_DIR)/debug_protocol.c \
           $(SRC_DIR)/http.c \
           $(SRC_DIR)/async.c \
+          $(SRC_DIR)/sha256.c \
           $(SRC_DIR)/package.c \
           $(SRC_DIR)/plugin.c \
           $(SRC_DIR)/bytecode.c
@@ -48,8 +51,11 @@ WASM_SOURCES = $(SRC_DIR)/wasm_api.c \
           $(SRC_DIR)/gc.c \
           $(SRC_DIR)/evaluator.c \
           $(SRC_DIR)/diag.c \
+          $(SRC_DIR)/tooling.c \
+          $(SRC_DIR)/debug_protocol.c \
           $(SRC_DIR)/http_wasm.c \
           $(SRC_DIR)/async.c \
+          $(SRC_DIR)/sha256.c \
           $(SRC_DIR)/package.c \
           $(SRC_DIR)/plugin.c \
           $(SRC_DIR)/bytecode.c
@@ -88,10 +94,15 @@ $(BUILD_DIR)/evaluator.o: $(SRC_DIR)/evaluator.c $(SRC_DIR)/evaluator.h $(SRC_DI
 $(BUILD_DIR)/diag.o: $(SRC_DIR)/diag.c $(SRC_DIR)/diag.h $(SRC_DIR)/lexer.h
 $(BUILD_DIR)/http.o: $(SRC_DIR)/http.c $(SRC_DIR)/http.h $(SRC_DIR)/value.h
 $(BUILD_DIR)/async.o: $(SRC_DIR)/async.c $(SRC_DIR)/async.h $(SRC_DIR)/evaluator.h $(SRC_DIR)/value.h
-$(BUILD_DIR)/package.o: $(SRC_DIR)/package.c $(SRC_DIR)/package.h
+$(BUILD_DIR)/sha256.o: $(SRC_DIR)/sha256.c $(SRC_DIR)/sha256.h
+$(BUILD_DIR)/package.o: $(SRC_DIR)/package.c $(SRC_DIR)/package.h $(SRC_DIR)/sha256.h
 $(BUILD_DIR)/plugin.o: $(SRC_DIR)/plugin.c $(SRC_DIR)/plugin.h $(SRC_DIR)/value.h
 $(BUILD_DIR)/bytecode.o: $(SRC_DIR)/bytecode.c $(SRC_DIR)/bytecode.h
 $(BUILD_DIR)/main.o: $(SRC_DIR)/package.h
+$(BUILD_DIR)/tooling.o: $(SRC_DIR)/tooling.h $(SRC_DIR)/diag.h $(SRC_DIR)/ast.h $(SRC_DIR)/evaluator.h
+$(BUILD_DIR)/debug_protocol.o: $(SRC_DIR)/debug_protocol.h $(SRC_DIR)/evaluator.h $(SRC_DIR)/environment.h
+$(BUILD_DIR)/package.o: $(SRC_DIR)/registry_key.h
+$(BUILD_DIR)/plugin.o: include/hajimu_abi.h
 $(BUILD_DIR)/evaluator.o: $(SRC_DIR)/package.h $(SRC_DIR)/plugin.h $(SRC_DIR)/bytecode.h
 
 # 実行
@@ -109,7 +120,10 @@ fibonacci: $(TARGET)
 	./$(TARGET) $(EXAMPLES_DIR)/fibonacci.jp
 
 # テスト
-test: $(TARGET)
+tests/lib_math.hjp: tests/lib_math.jp $(TARGET)
+	./$(TARGET) build tests/lib_math.jp tests/lib_math.hjp
+
+test: $(TARGET) tests/lib_math.hjp
 	@echo "テスト実行中..."
 	@status=0; \
 	for file in tests/*.jp; do \
@@ -138,6 +152,32 @@ test-dual: $(TARGET)
 	./$(TARGET) examples/test_plugin.jp
 	@echo ""
 	@echo "=== 全テスト完了 ==="
+
+test-sha256: $(BUILD_DIR)
+	$(CC) $(CFLAGS) -I$(SRC_DIR) tests/test_sha256.c $(SRC_DIR)/sha256.c -o $(BUILD_DIR)/test_sha256
+	$(BUILD_DIR)/test_sha256
+
+test-package: $(TARGET) test-sha256
+	HAJIMU_BIN="$(CURDIR)/$(TARGET)" sh tests/test_package_manager.sh
+
+test-tooling: $(TARGET)
+	node tests/tooling.test.cjs
+
+test-conformance: $(TARGET)
+	node tests/conformance/equivalence.test.cjs
+
+test-abi: $(TARGET)
+	node tests/plugin_abi.test.cjs
+
+fuzz-parser: $(BUILD_DIR)
+	clang -std=gnu11 -g -O1 -fsanitize=fuzzer,address,undefined -Isrc tests/fuzz_parser.c $(filter-out $(SRC_DIR)/main.c,$(SOURCES)) -o $(BUILD_DIR)/fuzz-parser $(LDFLAGS)
+
+embed: $(BUILD_DIR)
+	$(CC) $(CFLAGS) -fPIC -shared $(filter-out $(SRC_DIR)/main.c,$(SOURCES)) $(SRC_DIR)/embed.c -o $(BUILD_DIR)/libhajimu$(if $(filter Darwin,$(UNAME_S)),.dylib,.so) $(LDFLAGS)
+
+test-embed: embed
+	$(CC) -Iinclude tests/test_embed.c -L$(BUILD_DIR) -lhajimu -Wl,-rpath,$(CURDIR)/$(BUILD_DIR) -o $(BUILD_DIR)/test-embed
+	$(BUILD_DIR)/test-embed
 
 # ベンチマーク
 bench: $(TARGET)
@@ -247,8 +287,8 @@ EMCC ?= emcc
 WASM_OUT_DIR ?= ../jp-edu/public
 WASM_TARGET_JS = $(WASM_OUT_DIR)/hajimu_wasm.js
 WASM_TARGET_WASM = $(WASM_OUT_DIR)/hajimu_wasm.wasm
-WASM_CFLAGS = -Wall -Wextra -std=gnu11 -O3 -DHAJIMU_WASM=1 -pthread
-WASM_LDFLAGS = -lm -pthread \
+WASM_CFLAGS = -Wall -Wextra -std=gnu11 -O3 -DHAJIMU_WASM=1
+WASM_LDFLAGS = -lm \
 	-sMODULARIZE=1 \
 	-sEXPORT_ES6=1 \
 	-sEXPORT_NAME=createHajimuRuntimeModule \
@@ -275,6 +315,7 @@ clean-wasm:
 PREFIX      ?= /usr/local
 BIN_DIR      = $(PREFIX)/bin
 INCLUDE_DIR  = $(PREFIX)/include/hajimu
+SHARE_DIR    = $(PREFIX)/share/hajimu
 
 # インストール (sudo make install)
 install: $(TARGET)
@@ -283,14 +324,21 @@ install: $(TARGET)
 	cp $(TARGET) $(BIN_DIR)/hajimu
 	@echo "ヘッダーをインストール中 → $(INCLUDE_DIR)/"
 	@mkdir -p $(INCLUDE_DIR)
-	cp include/hajimu_plugin.h $(INCLUDE_DIR)/
+	cp include/hajimu_plugin.h include/hajimu_abi.h include/hajimu_embed.h $(INCLUDE_DIR)/
+	@echo "パッケージ仕様をインストール中 → $(SHARE_DIR)/"
+	@mkdir -p $(SHARE_DIR)/registry $(SHARE_DIR)/schemas
+	cp registry/index.json registry/index.json.sig registry/public-key.pem $(SHARE_DIR)/registry/
+	cp schemas/*.json $(SHARE_DIR)/schemas/
+	@mkdir -p $(SHARE_DIR)/tools
+	cp tools/*.cjs $(SHARE_DIR)/tools/
 	@echo "インストール完了"
 
 # アンインストール (sudo make uninstall)
 uninstall:
 	rm -f $(BIN_DIR)/hajimu
 	rm -rf $(INCLUDE_DIR)
+	rm -rf $(SHARE_DIR)
 	@echo "アンインストール完了"
 
-.PHONY: all run hello factorial fibonacci test test-dual bench clean debug release linalg-blas rebuild help \
+.PHONY: all run hello factorial fibonacci test test-dual test-sha256 test-package test-tooling test-conformance test-abi test-embed embed fuzz-parser bench clean debug release linalg-blas rebuild help \
         install uninstall windows windows-installer clean-windows wasm clean-wasm

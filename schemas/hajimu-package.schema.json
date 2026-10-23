@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hajimu.jp/schemas/hajimu-package-v2.json",
+  "title": "Hajimu package manifest",
+  "type": "object",
+  "required": ["schema_version", "name", "version", "entry", "dependencies"],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$", "maxLength": 255 },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$" },
+    "description": { "type": "string" },
+    "author": { "type": "string" },
+    "license": { "type": "string" },
+    "repository": { "type": "string" },
+    "entry": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$)).+$"
+    },
+    "build": { "type": "string" },
+    "release": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "release_sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "version": { "type": "string" },
+          "source": { "type": "string", "not": { "pattern": "^http://" } },
+          "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "system_dependencies": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  },
+  "additionalProperties": true
+}

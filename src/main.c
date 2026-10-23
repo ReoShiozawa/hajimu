@@ -30,6 +30,10 @@
 #include "evaluator.h"
 #include "package.h"
 #include "bytecode.h"
+#include "tooling.h"
+#include "debug_protocol.h"
+
+static bool debug_protocol_mode;
 
 // =============================================================================
 // バージョン情報
@@ -155,6 +159,7 @@ static int run_file(const char *path, bool debug_mode, bool profile_mode, bool p
     env_define(eval->global, "引数", args_array, true);
     
     // デバッグモードを設定
+    if (debug_protocol_mode) hajimu_debug_attach(eval);
     if (debug_mode) {
         evaluator_set_debug_mode(eval, true);
         printf("=== デバッグモード ===\n");
@@ -480,10 +485,15 @@ static void print_usage(const char *program_name) {
     printf("  %s パッケージ 削除 <パッケージ名>     パッケージを削除\n", program_name);
     printf("  %s パッケージ 一覧                    インストール済みパッケージ一覧\n", program_name);
     printf("  %s パッケージ インストール             全依存パッケージをインストール\n", program_name);
+    printf("  %s パッケージ 更新 [パッケージ名]       lockを更新して安全に入れ替え\n", program_name);
+    printf("  %s パッケージ 検索 [語句]               公式レジストリを検索\n", program_name);
+    printf("  %s パッケージ 検証 [hajimu.json]        マニフェストを検証\n", program_name);
+    printf("  %s パッケージ 監査                      lockfileと導入状態を監査\n", program_name);
     printf("\n");
     printf("デュアルモードパッケージシステム:\n");
-    printf("  スクリプトパッケージ: hajimu.json の \"\u30e1イン\": \"main.jp\" → 純粋 .jp で動作\n");
-    printf("  バイトコードパッケージ: \"\u30e1イン\": \"main.hjp\" → HJPB バイトコード (macOS/Win/Linux 共通)\n");
+    printf("  スクリプトパッケージ: hajimu.json の \"entry\": \"main.jp\" → 純粋 .jp で動作\n");
+    printf("  バイトコードパッケージ: \"entry\": \"main.hjp\" → HJPB バイトコード (macOS/Win/Linux 共通)\n");
+    printf("  ネイティブビルド: 内容を確認し、--allow-scriptsを付けた場合だけ実行\n");
     printf("\n");
     printf("ファイルを指定しない場合、REPLモードで起動します。\n");
 }
@@ -703,6 +713,14 @@ int main(int argc, char *argv[]) {
     setlocale(LC_ALL, "");
 #endif
     
+    if (argc >= 2 && strcmp(argv[1], "--analyze") == 0) {
+        return hajimu_analyze_stdin(argc >= 3 ? argv[2] : "<stdin>");
+    }
+    if (argc == 3 && strcmp(argv[1], "--debug-protocol") == 0) {
+        debug_protocol_mode = true;
+        return run_file(argv[2], false, false, false, 0, NULL);
+    }
+
     // パッケージ管理サブコマンド
     if (argc >= 2 && (strcmp(argv[1], "パッケージ") == 0 || strcmp(argv[1], "pkg") == 0)) {
         if (argc < 3) {
@@ -713,7 +731,18 @@ int main(int argc, char *argv[]) {
             printf("  削除 (remove) <名前>       パッケージを削除\n");
             printf("  一覧 (list)                インストール済み一覧\n");
             printf("  インストール (install)     全依存をインストール\n");
+            printf("  更新 (update) [名前]       lockを更新して安全に入れ替え\n");
+            printf("  検索 (search) [語句]       公式レジストリを検索\n");
+            printf("  検証 (validate) [ファイル] マニフェストを検証\n");
+            printf("  監査 (audit)               lockfileと導入状態を監査\n");
+            printf("\nビルドが必要なパッケージには --allow-scripts を明示してください。\n");
             return 1;
+        }
+
+        for (int i = 3; i < argc; i++) {
+            if (strcmp(argv[i], "--allow-scripts") == 0) {
+                package_set_allow_scripts(true);
+            }
         }
         
         const char *subcmd = argv[2];
@@ -736,10 +765,19 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(subcmd, "一覧") == 0 || strcmp(subcmd, "list") == 0) {
             return package_list();
         } else if (strcmp(subcmd, "インストール") == 0 || strcmp(subcmd, "install") == 0) {
-            if (argc >= 4) {
+            if (argc >= 4 && strcmp(argv[3], "--allow-scripts") != 0) {
                 return package_install(argv[3]);
             }
             return package_install_all();
+        } else if (strcmp(subcmd, "検索") == 0 || strcmp(subcmd, "search") == 0) {
+            return package_search(argc >= 4 ? argv[3] : "");
+        } else if (strcmp(subcmd, "更新") == 0 || strcmp(subcmd, "update") == 0) {
+            return package_update(argc >= 4 && strcmp(argv[3], "--allow-scripts") != 0
+                                      ? argv[3] : NULL);
+        } else if (strcmp(subcmd, "検証") == 0 || strcmp(subcmd, "validate") == 0) {
+            return package_validate(argc >= 4 ? argv[3] : NULL);
+        } else if (strcmp(subcmd, "監査") == 0 || strcmp(subcmd, "audit") == 0) {
+            return package_audit();
         } else {
             fprintf(stderr, "未知のパッケージコマンド: %s\n", subcmd);
             return 1;
