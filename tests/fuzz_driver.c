@@ -12,6 +12,15 @@ int main(void) {
         text[state%size]=(char)(32+(state>>16)%95);
         LLVMFuzzerTestOneInput((const uint8_t *)text,size);
     }
-    puts("1000 sanitizer parser mutations passed");
+    for (int i=0;i<10000;i++) {
+        uint8_t bytes[32];
+        size_t size=(size_t)i%sizeof(bytes);
+        for (size_t j=0;j<size;j++) {
+            state=state*1664525u+1013904223u;
+            bytes[j]=(uint8_t)(state>>16);
+        }
+        LLVMFuzzerTestOneInput(bytes,size);
+    }
+    puts("11000 sanitizer parser mutations passed");
     return 0;
 }

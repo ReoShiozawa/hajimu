@@ -79,7 +79,7 @@ $(TARGET): $(OBJECTS)
 	@echo "ビルド完了: $(TARGET)"
 
 # コンパイル
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # 依存関係
@@ -169,8 +169,20 @@ test-conformance: $(TARGET)
 test-abi: $(TARGET)
 	node tests/plugin_abi.test.cjs
 
+.PHONY: test-utf8 fuzz-smoke
+
+test: test-utf8
+
+test-utf8: $(BUILD_DIR)
+	$(CC) $(CFLAGS) -Isrc tests/test_utf8.c src/lexer.c src/diag.c -o $(BUILD_DIR)/test-utf8
+	$(BUILD_DIR)/test-utf8
+
 fuzz-parser: $(BUILD_DIR)
 	clang -std=gnu11 -g -O1 -fsanitize=fuzzer,address,undefined -Isrc tests/fuzz_parser.c $(filter-out $(SRC_DIR)/main.c,$(SOURCES)) -o $(BUILD_DIR)/fuzz-parser $(LDFLAGS)
+
+fuzz-smoke: $(BUILD_DIR)
+	clang -std=gnu11 -g -O1 -fsanitize=address,undefined -Isrc tests/fuzz_parser.c tests/fuzz_driver.c $(filter-out $(SRC_DIR)/main.c,$(SOURCES)) -o $(BUILD_DIR)/fuzz-smoke $(LDFLAGS)
+	ASAN_OPTIONS=detect_leaks=0 $(BUILD_DIR)/fuzz-smoke
 
 embed: $(BUILD_DIR)
 	$(CC) $(CFLAGS) -fPIC -shared $(filter-out $(SRC_DIR)/main.c,$(SOURCES)) $(SRC_DIR)/embed.c -o $(BUILD_DIR)/libhajimu$(if $(filter Darwin,$(UNAME_S)),.dylib,.so) $(LDFLAGS)

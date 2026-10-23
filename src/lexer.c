@@ -315,9 +315,10 @@ static const char *token_names[] = {
 int utf8_char_length(unsigned char c) {
     if (c < 0x80) return 1;       // ASCII (0xxxxxxx)
     if (c < 0xC0) return 0;       // 継続バイト（単独では無効）
+    if (c < 0xC2) return 0;       // 過長表現の開始バイト
     if (c < 0xE0) return 2;       // 2バイト (110xxxxx)
     if (c < 0xF0) return 3;       // 3バイト (1110xxxx) ← 日本語
-    if (c < 0xF8) return 4;       // 4バイト (11110xxx)
+    if (c < 0xF5) return 4;       // Unicode範囲内の4バイト (11110xxx)
     return 0;                      // 無効
 }
 
@@ -332,6 +333,14 @@ uint32_t utf8_decode(const char *s, int *len) {
     
     if (*len == 1) return c;
     
+    // NUL終端まで順に検査し、途切れた文字で終端の先を読まない。
+    for (int i = 1; i < *len; i++) {
+        if (((unsigned char)s[i] & 0xC0) != 0x80) {
+            *len = 1;
+            return 0xFFFD;
+        }
+    }
+
     uint32_t codepoint = 0;
     
     if (*len == 2) {
@@ -348,6 +357,13 @@ uint32_t utf8_decode(const char *s, int *len) {
         codepoint |= (s[3] & 0x3F);
     }
     
+    if ((*len == 3 && codepoint < 0x800) ||
+        (*len == 4 && codepoint < 0x10000) ||
+        (codepoint >= 0xD800 && codepoint <= 0xDFFF) ||
+        codepoint > 0x10FFFF) {
+        *len = 1;
+        return 0xFFFD;
+    }
     return codepoint;
 }
 
@@ -593,14 +609,14 @@ static Token scan_number(Lexer *lexer) {
     }
     
     // 整数部
-    while (isdigit(peek(lexer))) {
+    while (isdigit((unsigned char)peek(lexer))) {
         advance(lexer);
     }
     
     // 小数部
-    if (peek(lexer) == '.' && isdigit(peek_next(lexer))) {
+    if (peek(lexer) == '.' && isdigit((unsigned char)peek_next(lexer))) {
         advance(lexer);  // '.'を消費
-        while (isdigit(peek(lexer))) {
+        while (isdigit((unsigned char)peek(lexer))) {
             advance(lexer);
         }
     }
@@ -611,7 +627,7 @@ static Token scan_number(Lexer *lexer) {
         if (peek(lexer) == '+' || peek(lexer) == '-') {
             advance(lexer);
         }
-        while (isdigit(peek(lexer))) {
+        while (isdigit((unsigned char)peek(lexer))) {
             advance(lexer);
         }
     }
@@ -840,14 +856,14 @@ Token lexer_next(Lexer *lexer) {
     char c = advance(lexer);
     
     // 数字
-    if (isdigit(c)) {
+    if (isdigit((unsigned char)c)) {
         lexer->current--;  // 戻して再スキャン
         lexer->column--;
         return scan_number(lexer);
     }
     
     // 小数点から始まる数値
-    if (c == '.' && isdigit(peek(lexer))) {
+    if (c == '.' && isdigit((unsigned char)peek(lexer))) {
         lexer->current--;
         lexer->column--;
         return scan_number(lexer);

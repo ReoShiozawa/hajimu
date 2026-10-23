@@ -41,4 +41,4 @@ GitHub来歴証明はOSのコード署名とは別です。Developer ID、notari
 
 ## 試験
 
-`make test`、`make test-package`、`make test-conformance`、`make test-tooling`、`make test-abi`、`make test-embed`を使用します。Linux CIではASan/UBSanとlibFuzzer、macOS/Linuxのx64/ARM64で開発基盤試験を実行します。ローカルでのコンパイル成功、ホスティング側CI成功、Windows実機起動は区別して記録します。
+`make test`、`make test-package`、`make test-conformance`、`make test-tooling`、`make test-abi`、`make test-utf8`、`make test-embed`を使用します。Linux CIではASan/UBSanとlibFuzzer、macOS/Linuxのx64/ARM64で開発基盤試験を実行します。ファズテストで見つかった途切れたUTF-8の境界外読み取りを修正し、不正な開始バイト・継続バイト・過長表現・サロゲート・Unicode範囲外も回帰試験します。失敗時のファズ入力はCIアーティファクトに保存します。ローカルでのコンパイル成功、ホスティング側CI成功、Windows実機起動は区別して記録します。
