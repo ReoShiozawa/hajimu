@@ -26,6 +26,12 @@ function client(script, dap=false) {
   const analyzed=spawnSync(binary,['--analyze','unsafe.jp'],{input:'print("must not execute")\nvar x =\n',encoding:'utf8'});
   const result=JSON.parse(analyzed.stdout);
   assert.equal(result.valid,false); assert.ok(result.diagnostics.length); assert.equal(analyzed.stderr,'');
+  const fixture=spawnSync(binary,['--analyze','memory.haj'],{input:fs.readFileSync(path.join(root,'tests/tooling_memory.haj')),encoding:'utf8'});
+  assert.equal(fixture.status,0,fixture.stderr);
+  assert.equal(JSON.parse(fixture.stdout).valid,true);
+  const invalidImport=spawnSync(binary,['--analyze','invalid.haj'],{input:'import missing\n',encoding:'utf8'});
+  assert.equal(invalidImport.status,0,invalidImport.stderr);
+  assert.equal(JSON.parse(invalidImport.stdout).valid,false);
   const lsp=client('lsp.cjs');
   try {
     assert.equal((await lsp.request(1,'initialize',{})).result.capabilities.definitionProvider,true);

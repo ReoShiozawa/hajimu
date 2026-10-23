@@ -1,0 +1,24 @@
+import "not-executed.jp" as external
+var x = "hello"
+function echo_value(value):
+    var result = value
+    return result
+end
+enum Choice:
+    First
+    Second
+end
+for i from 0 to 1:
+    print(i)
+end
+回数 を 0 から 1 繰り返す
+    print(回数)
+終わり
+各 要素 を [1, 2] の中:
+    print(要素)
+終わり
+try:
+    print(external.member)
+catch reason:
+    print(reason)
+end

@@ -602,6 +602,7 @@ static ASTNode *function_definition(Parser *parser, bool is_generator) {
 
     ASTNode *func_node = node_function_def(name, params, param_count, return_type, has_return_type,
                             body, line, column);
+    free(name);
     func_node->function.is_generator = is_generator;
     return func_node;
 }
@@ -766,7 +767,9 @@ static ASTNode *var_declaration(Parser *parser, bool is_const) {
         consume(parser, TOKEN_NEWLINE, "改行が必要です");
     }
 
-    return node_var_decl(name, initializer, is_const, line, column);
+    ASTNode *declaration = node_var_decl(name, initializer, is_const, line, column);
+    free(name);
+    return declaration;
 }
 
 static ASTNode *if_statement(Parser *parser) {
@@ -856,7 +859,9 @@ static ASTNode *for_statement(Parser *parser) {
     // 終わり
     consume_end(parser);
 
-    return node_for(var_name, start, end, step, body, line, column);
+    ASTNode *node = node_for(var_name, start, end, step, body, line, column);
+    free(var_name);
+    return node;
 }
 
 static ASTNode *english_for_statement(Parser *parser) {
@@ -939,6 +944,7 @@ static ASTNode *import_statement(Parser *parser) {
 
     // ファイルパス（文字列）
     consume(parser, TOKEN_STRING, "取り込むファイルパスが必要です");
+    if (parser->previous.type != TOKEN_STRING) return node_null(line, column);
     char *module_path = parser->previous.value.string;
 
     // エイリアス: 「として 名前」または英語構文の「as name」
@@ -954,7 +960,10 @@ static ASTNode *import_statement(Parser *parser) {
         match(parser, TOKEN_NEWLINE);
     }
 
-    return node_import(module_path, alias, line, column);
+    ASTNode *node = node_import(module_path, alias, line, column);
+    free(module_path);
+    free(alias);
+    return node;
 }
 
 // 試行文（try-catch-finally）のパース
@@ -997,7 +1006,9 @@ static ASTNode *try_statement(Parser *parser) {
         error(parser, "試行文には '捕獲' または '最終' が必要です");
     }
 
-    return node_try(try_block, catch_var, catch_block, finally_block, line, column);
+    ASTNode *node = node_try(try_block, catch_var, catch_block, finally_block, line, column);
+    free(catch_var);
+    return node;
 }
 
 // 投げる文のパース
@@ -1271,7 +1282,9 @@ static ASTNode *enum_definition(Parser *parser) {
 
     // 辞書リテラルとして定数宣言に変換
     ASTNode *dict = node_dict(keys, values, count, line, column);
-    return node_var_decl(name, dict, true, line, column);
+    ASTNode *node = node_var_decl(name, dict, true, line, column);
+    free(name);
+    return node;
 }
 
 // 各 変数名 を 配列式 の中:
@@ -1312,6 +1325,7 @@ static ASTNode *foreach_statement(Parser *parser) {
     consume_end(parser);
 
     ASTNode *node = node_foreach(var_name, iterable, body, line, column);
+    free(var_name);
     if (value_name) {
         node->foreach_stmt.value_name = value_name;
     }
@@ -1768,6 +1782,7 @@ static ASTNode *call(Parser *parser) {
                 member_name = copy_token_string(&parser->previous);
             }
             expr = node_member(expr, member_name, line, column);
+            free(member_name);
         } else {
             break;
         }
@@ -1847,7 +1862,10 @@ static ASTNode *primary(Parser *parser) {
 
     // 識別子
     if (match(parser, TOKEN_IDENTIFIER)) {
-        return node_identifier(copy_token_string(&parser->previous), line, column);
+        char *name = copy_token_string(&parser->previous);
+        ASTNode *node = node_identifier(name, line, column);
+        free(name);
+        return node;
     }
 
     // グループ化 (...)
@@ -1915,7 +1933,9 @@ static ASTNode *primary(Parser *parser) {
 
             consume(parser, TOKEN_RBRACKET, "']' が必要です");
 
-            return node_list_comprehension(first_expr, var_name, iterable, condition, line, column);
+            ASTNode *node = node_list_comprehension(first_expr, var_name, iterable, condition, line, column);
+            free(var_name);
+            return node;
         } else {
             // 通常の配列リテラル
             int capacity = 8;

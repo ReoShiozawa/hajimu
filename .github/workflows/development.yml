@@ -6,6 +6,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: foundation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   tooling:
     strategy:
@@ -37,6 +40,9 @@ jobs:
         run: |
           printf 'var x = "hello"\nprint(x)\n' | ASAN_OPTIONS=detect_leaks=1 ./nihongo --analyze memory.haj >/dev/null
           printf 'var x =\n' | ASAN_OPTIONS=detect_leaks=1 ./nihongo --analyze invalid.haj >/dev/null
+          ASAN_OPTIONS=detect_leaks=1 ./nihongo --analyze memory.haj < tests/tooling_memory.haj > build/memory-analysis.json
+          node -e 'if (!JSON.parse(require("node:fs").readFileSync("build/memory-analysis.json", "utf8")).valid) process.exit(1)'
+          printf 'import missing\n' | ASAN_OPTIONS=detect_leaks=1 ./nihongo --analyze invalid.haj >/dev/null
       - run: make CC=clang CFLAGS='-std=gnu11 -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer' test-utf8
       - run: make fuzz-smoke
       - run: make fuzz-parser && ASAN_OPTIONS=detect_leaks=0 build/fuzz-parser -runs=1000 -max_len=512
@@ -57,7 +63,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: sudo apt-get update && sudo apt-get install -y emscripten libcurl4-openssl-dev
+      - uses: emscripten-core/setup-emsdk@667eb33f24e84e7f362c16d8d7fff0629a73e15e # v15
+        with:
+          version: 5.0.1
+          emsdk-version: 5.0.5
+          actions-cache-folder: emsdk-cache
+      - run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
       - run: make -j4
       - run: make wasm WASM_OUT_DIR=build/wasm
       - run: HAJIMU_WASM_JS="$PWD/build/wasm/hajimu_wasm.js" node tests/json.test.cjs
