@@ -26,6 +26,11 @@ static void *exercise(void *argument) {
 
 int main(void) {
     assert(hajimu_embed_abi_version()==1);
+    for (int i = 0; i < 100; i++) {
+        char *analysis=hajimu_embed_analyze("var x = 1\nprint(x)\n","repeat.haj");
+        assert(analysis && strstr(analysis,"\"valid\":true"));
+        hajimu_embed_free(analysis);
+    }
     char *result=hajimu_embed_analyze("var x =\n","test.haj");
     assert(result && strstr(result,"\"valid\":false"));hajimu_embed_free(result);
     result=hajimu_embed_run("var x = 2\nx + 3\n","test.haj");

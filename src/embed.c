@@ -10,6 +10,10 @@
 
 // 解析と実行はGCなどのプロセス共通状態を共有するため、同じ排他で守る。
 static atomic_flag runtime_busy=ATOMIC_FLAG_INIT;
+static void put(Value *object,const char *key,Value value) {
+    dict_set(object,key,value);
+    value_free(&value);
+}
 
 unsigned int hajimu_embed_abi_version(void) { return HAJIMU_EMBED_ABI_VERSION; }
 char *hajimu_embed_analyze(const char *source, const char *filename) {
@@ -26,9 +30,9 @@ void hajimu_embed_free(char *result) { free(result); }
 static void capture_runtime(DiagKind kind,int line,int column,int end,const char *message,void *context) {
     (void)end;
     Value item=value_dict();
-    dict_set(&item,"message",value_string(message));
-    dict_set(&item,"line",value_number(line)); dict_set(&item,"column",value_number(column));
-    dict_set(&item,"kind",value_number(kind)); array_push(context,item);
+    put(&item,"message",value_string(message));
+    put(&item,"line",value_number(line)); put(&item,"column",value_number(column));
+    put(&item,"kind",value_number(kind)); array_push(context,item);value_free(&item);
 }
 char *hajimu_embed_run(const char *source,const char *filename) {
     if(!source || atomic_flag_test_and_set(&runtime_busy)) return NULL;
@@ -44,9 +48,11 @@ char *hajimu_embed_run(const char *source,const char *filename) {
         Value value=evaluator_run(eval,tree);
         ok=!evaluator_had_error(eval);
         char *description=value_to_string(value);
-        dict_set(&response,"value",value_string(description ? description : ""));free(description);
+        put(&response,"value",value_string(description ? description : ""));free(description);
+        value_free(&value);
     }
-    dict_set(&response,"ok",value_bool(ok));dict_set(&response,"diagnostics",diagnostics);
+    diag_set_sink(NULL,NULL);
+    put(&response,"ok",value_bool(ok));put(&response,"diagnostics",diagnostics);
     Value json=json_encode(response);
     char *result=json.type==VALUE_STRING ? strdup(json.string.data) : NULL;
     value_free(&json);value_free(&response);

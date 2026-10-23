@@ -7,7 +7,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void put(Value *object, const char *key, Value value) { dict_set(object, key, value); }
+// コンテナー側へ複製した後、呼び出し元が渡した一時値を解放する。
+static void put(Value *object, const char *key, Value value) {
+    dict_set(object, key, value);
+    value_free(&value);
+}
+static void push(Value *array, Value value) {
+    array_push(array, value);
+    value_free(&value);
+}
 
 static void capture(DiagKind kind, int line, int column, int end, const char *message, void *context) {
     Value diagnostic = value_dict();
@@ -16,7 +24,7 @@ static void capture(DiagKind kind, int line, int column, int end, const char *me
     put(&diagnostic, "line", value_number(line));
     put(&diagnostic, "column", value_number(column));
     put(&diagnostic, "endColumn", value_number(end + 1));
-    array_push(context, diagnostic);
+    push(context, diagnostic);
 }
 
 static _Thread_local int scope_end;
@@ -48,7 +56,7 @@ static void symbol(Value *symbols, const char *name, const char *kind, ASTNode *
     put(&item, "column", value_number(node->location.column));
     put(&item, "scope", value_number(scope));
     put(&item, "scopeEnd", value_number(scope_end));
-    array_push(symbols, item);
+    push(symbols, item);
 }
 
 static void walk(ASTNode *n, Value *symbols, int scope) {
@@ -114,7 +122,7 @@ Value hajimu_analyze_source(const char *source, const char *filename) {
     do {
         token = lexer_next(&lexer);
         if (token.type != TOKEN_EOF && token.type != TOKEN_NEWLINE && token.type != TOKEN_INDENT && token.type != TOKEN_DEDENT) {
-            array_push(&lexemes, value_string_n(token.start, token.length));
+            push(&lexemes, value_string_n(token.start, token.length));
         }
         if (token.type == TOKEN_IDENTIFIER) {
             Value item = value_dict();
@@ -122,7 +130,7 @@ Value hajimu_analyze_source(const char *source, const char *filename) {
             put(&item, "line", value_number(token.line));
             put(&item, "column", value_number(token.column));
             put(&item, "member", value_bool(previous_type==TOKEN_DOT));
-            array_push(&tokens, item);
+            push(&tokens, item);
         }
         if (token.type == TOKEN_STRING) free(token.value.string);
         previous_type=token.type;

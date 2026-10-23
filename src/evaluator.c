@@ -1334,7 +1334,9 @@ void register_builtins(Evaluator *eval) {
 Value evaluator_builtin_names(void) {
     Value names=value_array();
     for(size_t i=0;i<sizeof(builtin_entries)/sizeof(builtin_entries[0]);i++) {
-        array_push(&names,value_string(builtin_entries[i].name));
+        Value name=value_string(builtin_entries[i].name);
+        array_push(&names,name);
+        value_free(&name);
     }
     return names;
 }

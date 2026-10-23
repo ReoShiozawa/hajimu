@@ -15,7 +15,8 @@ static void emit(Value event) {
 }
 static Value get(Value *v, const char *key) { return dict_get(v, key); }
 static const char *str(Value v) { return v.type == VALUE_STRING ? v.string.data : ""; }
-static void put(Value *v, const char *key, Value x) { dict_set(v, key, x); }
+static void put(Value *v, const char *key, Value x) { dict_set(v, key, x); value_free(&x); }
+static void push(Value *array, Value x) { array_push(array,x); value_free(&x); }
 static Value breakpoints;
 static int mode, target_depth;
 static bool inspecting;
@@ -63,7 +64,7 @@ static Value variables(Environment *env) {
         put(&item,"name",value_string(p->name));
         put(&item,"value",value_string(description ? description : ""));
         put(&item,"type",value_number(p->value.type));
-        array_push(&result,item); free(description);
+        push(&result,item); free(description);
     }
     return result;
 }
@@ -73,13 +74,13 @@ static void snapshot(Evaluator *eval, ASTNode *node, const char *reason) {
     Value frame=value_dict();
     put(&frame,"name",value_string(eval->call_stack_depth ? eval->call_stack[eval->call_stack_depth-1].func_name : "<main>"));
     put(&frame,"line",value_number(node->location.line)); put(&frame,"file",value_string(eval->current_file ? eval->current_file : ""));
-    array_push(&frames,frame); array_push(&scopes,variables(eval->current));
+    push(&frames,frame); push(&scopes,variables(eval->current));
     for (int i=eval->call_stack_depth-1;i>=0;i--) {
         frame=value_dict();
         put(&frame,"name",value_string(i ? eval->call_stack[i-1].func_name : "<main>"));
         put(&frame,"line",value_number(eval->call_stack[i].line));
         put(&frame,"file",value_string(eval->call_stack[i].file ? eval->call_stack[i].file : ""));
-        array_push(&frames,frame); array_push(&scopes,variables(eval->call_stack[i].environment));
+        push(&frames,frame); push(&scopes,variables(eval->call_stack[i].environment));
     }
     put(&event,"frames",frames); put(&event,"locals",scopes); put(&event,"globals",variables(eval->global)); emit(event);
 }
@@ -100,7 +101,7 @@ static bool commands(Evaluator *eval) {
             Value event=value_dict(); char *description=ok ? value_to_string(result) : NULL;
             put(&event,"event",value_string("evaluation")); put(&event,"id",value_copy(get(&command,"id")));
             put(&event,"ok",value_bool(ok)); put(&event,"value",value_string(description ? description : "式を評価できません。関数呼出しや代入は許可されません。"));
-            free(description); emit(event);
+            free(description); value_free(&result); emit(event);
         } else if (strcmp(name,"continue")==0 || strcmp(name,"step")==0 || strcmp(name,"next")==0 || strcmp(name,"out")==0) {
             mode=strcmp(name,"continue")==0 ? 0 : strcmp(name,"step")==0 ? 1 : strcmp(name,"next")==0 ? 2 : 3;
             target_depth=eval->call_stack_depth; value_free(&command); return true;
@@ -122,7 +123,9 @@ static void on_statement(void *context, void *pointer, ASTNode *node) {
         if (get(bp,"line").number!=node->location.line || strcmp(str(get(bp,"file")),eval->current_file ? eval->current_file : "")!=0) continue;
         const char *condition=str(get(bp,"condition")); bool ok=true;
         Value result=condition[0] ? inspect_expression(eval,condition,&ok) : value_bool(true);
-        if (ok && value_is_truthy(result)) { stop=true; reason="breakpoint"; break; }
+        bool matched=ok && value_is_truthy(result);
+        value_free(&result);
+        if (matched) { stop=true; reason="breakpoint"; break; }
     }
     if (stop) { snapshot(eval,node,reason); commands(eval); }
 }
